@@ -12,9 +12,9 @@ It is a desktop app (Tauri v2: Rust core + React UI) and a command-line tool bui
 
 ![Sort screen: files by target with thumbnails](docs/screenshots/sort-check.png)
 
-> **Status:** a personal project, published as-is. Linux only for now (Windows and macOS are not
-> supported yet). There are no binary releases: you build it from source. The config format and file
-> layout may still change. It works on my libraries; try it on a copy of yours first (the pilot run
+> **Status:** a personal project, published as-is. Linux is the home platform; Windows and macOS
+> builds are new and CI-tested, but less used. Releases carry unsigned bundles (see below), or you
+> build from source. The config format and file layout may still change. It works on my libraries; try it on a copy of yours first (the pilot run
 > and undo are there for exactly that).
 
 ## Contents
@@ -115,8 +115,34 @@ Copy `gallery-gui` and `gallery` somewhere on your `PATH`. `gallery install-desk
 gallery check
 ```
 
-Windows and macOS are not supported yet (the tooling and the trash/Syncthing handling are only
-tested on Linux).
+### Windows and macOS
+
+Tagged releases (`v*`) attach a draft GitHub Release with the GUI bundles (Linux AppImage/deb,
+Windows msi/nsis, macOS dmg for Apple Silicon and Intel) and the `gallery` CLI. **They are not
+code-signed**: on macOS right-click the app and choose *Open* the first time (or run
+`xattr -dr com.apple.quarantine /Applications/Gallery.app`); on Windows SmartScreen shows
+*More info → Run anyway*.
+
+The external tools are not bundled. Install them with a package manager:
+
+| | Windows | macOS (Homebrew) |
+|---|---|---|
+| ffmpeg + ffprobe (needs `libsvtav1`, `libopus`) | `winget install Gyan.FFmpeg` | `brew install ffmpeg` |
+| exiftool | `winget install OliverBetz.ExifTool` | `brew install exiftool` |
+| ImageMagick 7 (`magick`) | `winget install ImageMagick.ImageMagick` | `brew install imagemagick` |
+| avifenc (libavif) | `scoop install libavif` | `brew install libavif` |
+| optipng (PNG presets only) | `scoop install optipng` | `brew install optipng` |
+
+Tools are looked up in `GALLERY_TOOLS_DIR`, then in a `tools` folder next to the executable (drop
+the `.exe` files there for a self-contained install), then on `PATH`. `gallery check` lists what is
+missing together with the command for your system.
+
+Differences from Linux: the app-menu entry (`gallery install-desktop`) and "Launch at login" are
+Linux-only (use the system's own settings elsewhere); files go to the Recycle Bin / Trash, and
+undo restores them automatically on Windows, while on macOS you put them back from the Trash by
+hand (the OS offers no listing API). Dates are computed by Gallery itself (zone rules from the
+plan), so results do not depend on the OS time-zone handling. Syncthing's `config.xml` is found in
+`%LOCALAPPDATA%\Syncthing` or `~/Library/Application Support/Syncthing`.
 
 ## Quick start
 

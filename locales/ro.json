@@ -540,6 +540,7 @@
   "gui.internal_scan": "eroare internă la scanare: %{error}",
   "gui.internal_check": "eroare internă la verificare: %{error}",
   "gui.no_config_dir": "nu există dosar de setări al utilizatorului",
+  "desktop.linux_only": "intrarea din meniu și pornirea la autentificare există doar pe Linux; aici folosiți setările sistemului de operare",
   "current.no_files": "Planul nu are fișiere de rulat.",
   "triage.add_to_match": "Adaugă %{item} la potrivirea țintei „%{target}”",
   "triage.add_filter": "Adaugă un filtru nou la ținta „%{target}” pentru sursa %{source}: %{item}",

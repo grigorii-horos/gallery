@@ -540,6 +540,7 @@
   "gui.internal_scan": "error interno de escaneo: %{error}",
   "gui.internal_check": "error interno de comprobación: %{error}",
   "gui.no_config_dir": "sin directorio de ajustes del usuario",
+  "desktop.linux_only": "la entrada del menú y el inicio de sesión automático solo existen en Linux; en este sistema use los ajustes del sistema operativo",
   "current.no_files": "El plan no tiene archivos que ejecutar.",
   "triage.add_to_match": "Añadir %{item} a la máscara del destino «%{target}»",
   "triage.add_filter": "Añadir un filtro nuevo al destino «%{target}» para el origen %{source}: %{item}",
