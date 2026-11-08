@@ -99,7 +99,7 @@ impl Store {
 
     /// `<user data dir>/gallery/ai-examples.jsonl`.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::data_dir().map(|d| d.join("gallery").join("ai-examples.jsonl"))
+        crate::paths::data_dir().map(|d| d.join("ai-examples.jsonl"))
     }
 
     pub fn path(&self) -> &Path {

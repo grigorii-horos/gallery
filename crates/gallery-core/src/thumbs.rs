@@ -44,7 +44,7 @@ fn remove_stale_temp_dirs(dir: &Path) {
 
 /// `<user cache dir>/gallery/thumbs`.
 pub fn default_dir() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("gallery").join("thumbs"))
+    crate::paths::cache_dir().map(|d| d.join("thumbs"))
 }
 
 /// Cache file name for a file in this state: blake3 of path, size, mtime.

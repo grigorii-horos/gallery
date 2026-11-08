@@ -52,7 +52,7 @@ pub struct Overrides {
 impl Overrides {
     /// `<user data dir>/gallery/overrides.json`.
     pub fn default_path() -> Option<PathBuf> {
-        dirs::data_dir().map(|d| d.join("gallery").join("overrides.json"))
+        crate::paths::data_dir().map(|d| d.join("overrides.json"))
     }
 
     /// Read the decisions; a missing file is an empty set. A file that cannot

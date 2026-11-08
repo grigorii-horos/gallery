@@ -14,7 +14,7 @@ fn setup(tmp: &Path) -> std::path::PathBuf {
             "[[sources]]\nid = \"shots\"\npath = \"{r}/shots\"\n\
              [[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"\n[[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = tmp.display()
+            r = tmp.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -26,6 +26,7 @@ fn gallery(tmp: &Path) -> Command {
     c.env("LC_ALL", "C")
         .env("HOME", tmp)
         .env("XDG_DATA_HOME", tmp.join("data"))
+        .env("GALLERY_DATA_DIR", tmp.join("data/gallery"))
         .env("XDG_CACHE_HOME", tmp.join("cache"))
         .env("XDG_CONFIG_HOME", tmp.join("config"));
     c
@@ -41,7 +42,11 @@ fn pending_prints_counts_and_json() {
         .output()
         .unwrap();
     let text = String::from_utf8(out.stdout).unwrap();
-    assert!(out.status.success(), "{text}");
+    assert!(
+        out.status.success(),
+        "{text}{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
     assert!(text.starts_with("pending: 2\n"), "{text}");
     assert!(text.contains("  pics: 2"), "{text}");
 

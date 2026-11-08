@@ -374,7 +374,7 @@ pub struct PauseState {
 
 /// `<user data dir>/gallery/sync-paused.json`.
 pub fn default_state_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("gallery").join("sync-paused.json"))
+    crate::paths::data_dir().map(|d| d.join("sync-paused.json"))
 }
 
 /// The state file; a missing one is `None`. An unreadable one is an error:
