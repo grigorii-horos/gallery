@@ -452,6 +452,7 @@ mod tests {
         assert_eq!(o.get(a), Some(&Action::Keep));
     }
 
+    #[cfg(unix)]
     #[test]
     fn set_checked_keys_like_the_scan_through_a_symlinked_root() {
         let dir = tempfile::tempdir().unwrap();
@@ -471,6 +472,7 @@ mod tests {
         assert_eq!(o.get(&scanned[0]), Some(&Action::Keep));
     }
 
+    #[cfg(unix)]
     #[test]
     fn set_checked_rejects_what_the_scan_would_not_route() {
         let dir = tempfile::tempdir().unwrap();
@@ -542,6 +544,7 @@ mod tests {
         assert_eq!(o.len(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn set_checked_rejects_a_path_through_a_symlinked_dir_below_the_root() {
         // The scan does not follow symlinked directories, so a decision for a

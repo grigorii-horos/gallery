@@ -1754,10 +1754,15 @@ mod tests {
 
     fn fake_tools() -> Tools {
         let p = PathBuf::from("/nonexistent/tool");
+        // The shell-script stand-in needs unix; elsewhere the tool is absent.
+        #[cfg(unix)]
+        let exiftool = fake_exiftool();
+        #[cfg(not(unix))]
+        let exiftool = p.clone();
         Tools {
             ffmpeg: p.clone(),
             ffprobe: p.clone(),
-            exiftool: fake_exiftool(),
+            exiftool,
             avifenc: p.clone(),
             magick: p,
             optipng: None,
@@ -2735,7 +2740,7 @@ mod tests {
 
 /// A stand-in exiftool for tests: answers every file of the `-@` argfile
 /// with an entry holding only its `SourceFile`.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn fake_exiftool() -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -2755,7 +2760,7 @@ pub(crate) fn fake_exiftool() -> PathBuf {
     .clone()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cancel_tests {
     use super::*;
     use crate::plan::{PLAN_VERSION, Side};
@@ -3017,7 +3022,7 @@ mod cancel_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod exif_failure_tests {
     use super::*;
     use crate::plan::{PLAN_VERSION, Side};
@@ -3130,7 +3135,7 @@ mod exif_failure_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod mtime_tests {
     use super::*;
     use crate::config::{MetadataPreset, PhotoPreset};

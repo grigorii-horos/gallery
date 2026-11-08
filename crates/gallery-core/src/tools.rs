@@ -137,6 +137,7 @@ impl Tools {
     /// set to `self.tz` on unix. Windows does not understand IANA `TZ`
     /// names, so nothing may depend on it: dates cross as explicit values.
     pub fn command(&self, tool: &Path) -> Command {
+        #[cfg_attr(not(unix), allow(unused_mut))]
         let mut cmd = self.bare_command(tool);
         #[cfg(unix)]
         if let Some(tz) = &self.tz {

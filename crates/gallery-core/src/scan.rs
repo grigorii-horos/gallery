@@ -339,6 +339,7 @@ mod tests {
         assert_eq!(r[0].mtime_ns, ns);
     }
 
+    #[cfg(unix)]
     #[test]
     fn scan_ignores_symlinks() {
         let d = tempfile::tempdir().unwrap();
