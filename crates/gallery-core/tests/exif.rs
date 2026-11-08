@@ -39,6 +39,9 @@ fn exif_write_error_is_reported() {
     assert!(r.is_err());
 }
 
+/// exiftool's own `-api QuickTimeUTC` follows the process `TZ`, which only
+/// unix honours; gallery converts in Rust instead (next test).
+#[cfg(unix)]
 #[test]
 fn quicktime_create_date_utc_converts_to_local_under_n() {
     require_tool!("ffmpeg");
@@ -59,6 +62,30 @@ fn quicktime_create_date_utc_converts_to_local_under_n() {
         "{}",
         v[0]
     );
+}
+
+/// The plan's zone decides the local QuickTime dates on every OS, whatever
+/// zone the process (or Windows) is in.
+#[test]
+fn quicktime_dates_read_in_the_tools_zone() {
+    require_tool!("ffmpeg");
+    require_tool!("exiftool");
+    let dir = tempfile::tempdir().unwrap();
+    let p = support::fixture_mp4(dir.path(), "v.mp4", 1, Some("2026:04:12 10:00:00"));
+    let at = |zone: &str| {
+        let tools = Tools {
+            tz: Some(zone.into()),
+            ..Tools::discover().unwrap()
+        };
+        exif::read(&tools, std::slice::from_ref(&p)).unwrap()[&p]["QuickTime:CreateDate"]
+            .as_str()
+            .unwrap()
+            .to_string()
+    };
+    assert_eq!(at("Europe/Chisinau"), "2026:04:12 13:00:00+03:00");
+    assert_eq!(at("Asia/Tokyo"), "2026:04:12 19:00:00+09:00");
+    assert_eq!(at("America/New_York"), "2026:04:12 06:00:00-04:00");
+    assert_eq!(at("UTC"), "2026:04:12 10:00:00+00:00");
 }
 
 #[test]

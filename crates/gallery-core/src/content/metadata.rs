@@ -83,7 +83,7 @@ impl MetadataPreset {
             copy_keep_mtime(input, out)?;
             let mut args = Vec::new();
             if let Some(d) = date {
-                args.extend(date_args(container, d));
+                args.extend(date_args(ctx.tools, container, d)?);
             }
             let rec = ctx.original_exif;
             if QUICKTIME_EXT.contains(&container) {
@@ -92,9 +92,7 @@ impl MetadataPreset {
                 args.extend(self.plan_photo(rec, container == "avif", warnings));
             }
             if !args.is_empty() {
-                let mut all = vec!["-api".to_string(), "QuickTimeUTC".to_string()];
-                all.append(&mut args);
-                match exif::write(ctx.tools, out, &all) {
+                match exif::write(ctx.tools, out, &args) {
                     Ok(()) => {}
                     // exiftool leaves the file untouched when it has no writer for it.
                     Err(Error::Unwritable(_)) => warnings.push(crate::t!(
@@ -327,27 +325,35 @@ fn re(cell: &'static OnceLock<Regex>, pattern: &str) -> &'static Regex {
     cell.get_or_init(|| Regex::new(pattern).expect("static regex"))
 }
 
-/// prepare-media's date tags for `container`, value in local time (exiftool
-/// runs with `TZ` set to the plan's zone).
-fn date_args(container: &str, d: NaiveDateTime) -> Vec<String> {
-    let val = d.format("%Y:%m:%d %H:%M:%S").to_string();
-    let tags: &[&str] = if QUICKTIME_EXT.contains(&container) {
-        // QuickTime stores UTC: with -api QuickTimeUTC exiftool converts local time.
-        &[
-            "QuickTime:CreateDate",
-            "QuickTime:ModifyDate",
-            "QuickTime:TrackCreateDate",
-            "QuickTime:TrackModifyDate",
-            "QuickTime:MediaCreateDate",
-            "QuickTime:MediaModifyDate",
-        ]
+/// prepare-media's date tags for `container`. `d` is local time in the
+/// tools' zone. Nothing is left to exiftool's idea of the local zone (the
+/// process `TZ`, which Windows does not understand): QuickTime stores UTC, so
+/// those tags get the UTC time computed here; EXIF dates are plain local
+/// wall-clock times; the file time gets an explicit offset.
+pub(crate) fn date_args(tools: &Tools, container: &str, d: NaiveDateTime) -> Result<Vec<String>> {
+    let fmt = "%Y:%m:%d %H:%M:%S";
+    let local = local_time(tools, d)?;
+    let (tags, val): (&[&str], String) = if QUICKTIME_EXT.contains(&container) {
+        (
+            &[
+                "QuickTime:CreateDate",
+                "QuickTime:ModifyDate",
+                "QuickTime:TrackCreateDate",
+                "QuickTime:TrackModifyDate",
+                "QuickTime:MediaCreateDate",
+                "QuickTime:MediaModifyDate",
+            ],
+            local.with_timezone(&Utc).format(fmt).to_string(),
+        )
     } else {
-        &["AllDates"]
+        (&["AllDates"], d.format(fmt).to_string())
     };
-    tags.iter()
-        .chain(&["FileModifyDate"])
-        .map(|t| format!("-{t}={val}"))
-        .collect()
+    let mut args: Vec<String> = tags.iter().map(|t| format!("-{t}={val}")).collect();
+    args.push(format!(
+        "-FileModifyDate={}",
+        local.format("%Y:%m:%d %H:%M:%S%:z")
+    ));
+    Ok(args)
 }
 
 /// exiftool cannot write Matroska: remux with ffmpeg, creation time in UTC.
@@ -402,6 +408,7 @@ fn set_mtime(tools: &Tools, path: &Path, d: NaiveDateTime) -> Result<()> {
 mod tests {
     use super::*;
     use serde_json::json;
+    use std::path::PathBuf;
 
     fn rec(dto: &str, lat: f64, lon: f64, gps: Option<(&str, &str)>) -> Value {
         let mut r = json!({
@@ -471,6 +478,153 @@ mod tests {
         let args = plan_offset(&r, &mut w);
         assert_eq!(args[0], "-ExifIFD:OffsetTimeOriginal=+02:00");
         assert!(w.is_empty());
+    }
+
+    fn tools_in(tz: Option<&str>) -> Tools {
+        let p = PathBuf::from("unused");
+        Tools {
+            ffmpeg: p.clone(),
+            ffprobe: p.clone(),
+            exiftool: p.clone(),
+            avifenc: p.clone(),
+            magick: p,
+            optipng: None,
+            tz: tz.map(String::from),
+        }
+    }
+
+    fn dt(s: &str) -> NaiveDateTime {
+        NaiveDateTime::parse_from_str(s, "%Y-%m-%d %H:%M:%S").unwrap()
+    }
+
+    /// The date tags depend only on the plan's zone, never on the zone the
+    /// process runs in (Windows exiftool cannot read an IANA `TZ`).
+    #[test]
+    fn date_args_use_explicit_values_for_the_plan_zone() {
+        let summer = dt("2026-07-01 12:00:00");
+        let winter = dt("2026-01-10 12:00:00");
+        let args = |tz, c, d| date_args(&tools_in(Some(tz)), c, d).unwrap();
+
+        // QuickTime stores UTC: 12:00 in Chisinau (EEST, +03:00) is 09:00.
+        let qt = args("Europe/Chisinau", "mp4", summer);
+        assert_eq!(qt[0], "-QuickTime:CreateDate=2026:07:01 09:00:00");
+        assert_eq!(qt[5], "-QuickTime:MediaModifyDate=2026:07:01 09:00:00");
+        assert_eq!(qt[6], "-FileModifyDate=2026:07:01 12:00:00+03:00");
+        assert_eq!(qt.len(), 7);
+        // The same wall clock in winter (EET, +02:00) and in other zones.
+        assert_eq!(
+            args("Europe/Chisinau", "mov", winter)[0],
+            "-QuickTime:CreateDate=2026:01:10 10:00:00"
+        );
+        assert_eq!(
+            args("Asia/Tokyo", "mp4", summer)[0],
+            "-QuickTime:CreateDate=2026:07:01 03:00:00"
+        );
+        assert_eq!(
+            args("America/New_York", "mp4", summer)[0],
+            "-QuickTime:CreateDate=2026:07:01 16:00:00"
+        );
+        assert_eq!(
+            args("America/New_York", "mp4", summer)[6],
+            "-FileModifyDate=2026:07:01 12:00:00-04:00"
+        );
+        assert_eq!(
+            args("UTC", "mp4", summer)[0],
+            "-QuickTime:CreateDate=2026:07:01 12:00:00"
+        );
+        // EXIF dates are the wall clock itself, whatever the zone.
+        for tz in ["Europe/Chisinau", "Asia/Tokyo", "UTC"] {
+            assert_eq!(args(tz, "jpg", summer)[0], "-AllDates=2026:07:01 12:00:00");
+        }
+        assert_eq!(
+            args("Asia/Tokyo", "jpg", summer)[1],
+            "-FileModifyDate=2026:07:01 12:00:00+09:00"
+        );
+    }
+
+    #[test]
+    fn date_args_without_zone_use_the_machine_zone() {
+        let d = dt("2026-07-01 12:00:00");
+        let a = date_args(&tools_in(None), "mp4", d).unwrap();
+        let off = local_time(&tools_in(None), d)
+            .unwrap()
+            .format("%:z")
+            .to_string();
+        assert_eq!(a[6], format!("-FileModifyDate=2026:07:01 12:00:00{off}"));
+    }
+
+    #[test]
+    fn date_args_reject_a_bad_zone_and_a_skipped_hour() {
+        assert!(
+            date_args(
+                &tools_in(Some("Not/AZone")),
+                "mp4",
+                dt("2026-07-01 12:00:00")
+            )
+            .is_err()
+        );
+        // 02:30 does not exist in Chisinau on 2026-03-29 (clocks jump 02:00 -> 03:00).
+        let t = tools_in(Some("Europe/Chisinau"));
+        assert!(date_args(&t, "mp4", dt("2026-03-29 02:30:00")).is_err());
+    }
+
+    /// End to end: the tags exiftool stores are identical whatever `TZ` the
+    /// process has, because nothing is left to exiftool's local zone.
+    #[test]
+    fn written_quicktime_dates_do_not_depend_on_process_tz() {
+        let (Some(ffmpeg), Some(exiftool)) =
+            (crate::tools::find("ffmpeg"), crate::tools::find("exiftool"))
+        else {
+            eprintln!("skip: ffmpeg/exiftool not found");
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let mut tools = tools_in(Some("Asia/Tokyo"));
+        tools.exiftool = exiftool.clone();
+        let src = dir.path().join("v.mp4");
+        let ok = std::process::Command::new(ffmpeg)
+            .args([
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "lavfi",
+                "-i",
+                "color=c=red:s=64x64:d=1",
+            ])
+            .arg(&src)
+            .status()
+            .is_ok_and(|s| s.success());
+        assert!(ok, "fixture");
+        let args = date_args(&tools, "mp4", dt("2026-07-01 12:00:00")).unwrap();
+        let mut seen = Vec::new();
+        for tz in ["UTC", "America/Los_Angeles", "Asia/Tokyo"] {
+            let out = dir.path().join(format!("{}.mp4", tz.replace('/', "_")));
+            std::fs::copy(&src, &out).unwrap();
+            // The process zone is set on the exiftool child only where the
+            // OS knows IANA names; the result must not change.
+            let mut cmd = std::process::Command::new(&exiftool);
+            cmd.env("TZ", tz)
+                .args(["-overwrite_original", "-m", "-q"])
+                .args(&args)
+                .arg(&out);
+            assert!(cmd.status().unwrap().success());
+            let raw = std::process::Command::new(&exiftool)
+                .args(["-s3", "-QuickTime:CreateDate", "-QuickTime:MediaModifyDate"])
+                .arg(&out)
+                .output()
+                .unwrap();
+            seen.push(
+                String::from_utf8_lossy(&raw.stdout)
+                    .replace("\r", "")
+                    .trim()
+                    .to_string(),
+            );
+        }
+        // 12:00 JST is 03:00 UTC.
+        assert_eq!(seen[0], "2026:07:01 03:00:00\n2026:07:01 03:00:00");
+        assert!(seen.iter().all(|s| *s == seen[0]), "{seen:?}");
     }
 
     #[test]
