@@ -56,16 +56,61 @@ pub struct Capabilities {
     pub versions: BTreeMap<String, String>,
 }
 
-/// Search directories in priority order: `GALLERY_TOOLS_DIR`, then `PATH`.
+/// Search directories in priority order: `GALLERY_TOOLS_DIR`, a `tools`
+/// folder next to the app executable (tools bundled with the app), then
+/// `PATH`.
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(d) = std::env::var_os("GALLERY_TOOLS_DIR") {
         dirs.push(PathBuf::from(d));
     }
+    if let Some(d) = bundled_dir() {
+        dirs.push(d);
+    }
     if let Some(p) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
     dirs
+}
+
+/// `<folder of the running executable>/tools`.
+fn bundled_dir() -> Option<PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    Some(exe.parent()?.join("tools"))
+}
+
+/// How to install `tool` on this OS (a command line to run), for `gallery
+/// check` when it is missing.
+pub fn install_hint(tool: &str) -> Option<String> {
+    let cmd = if cfg!(windows) {
+        match tool {
+            "ffmpeg" | "ffprobe" => "winget install Gyan.FFmpeg",
+            "exiftool" => "winget install OliverBetz.ExifTool",
+            "magick" => "winget install ImageMagick.ImageMagick",
+            "avifenc" => "scoop install libavif",
+            "optipng" => "scoop install optipng",
+            _ => return None,
+        }
+    } else if cfg!(target_os = "macos") {
+        match tool {
+            "ffmpeg" | "ffprobe" => "brew install ffmpeg",
+            "exiftool" => "brew install exiftool",
+            "magick" => "brew install imagemagick",
+            "avifenc" => "brew install libavif",
+            "optipng" => "brew install optipng",
+            _ => return None,
+        }
+    } else {
+        match tool {
+            "ffmpeg" | "ffprobe" => "sudo apt install ffmpeg",
+            "exiftool" => "sudo apt install libimage-exiftool-perl",
+            "magick" => "sudo apt install imagemagick",
+            "avifenc" => "sudo apt install libavif-bin",
+            "optipng" => "sudo apt install optipng",
+            _ => return None,
+        }
+    };
+    Some(cmd.to_string())
 }
 
 /// First directory (in order) holding `name` or `name` + the platform exe suffix.
@@ -183,6 +228,28 @@ impl Tools {
                 cmd
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod hint_tests {
+    use super::*;
+
+    #[test]
+    fn every_tool_has_an_install_hint() {
+        for t in [
+            "ffmpeg", "ffprobe", "exiftool", "avifenc", "magick", "optipng",
+        ] {
+            assert!(install_hint(t).is_some(), "{t}");
+        }
+        assert_eq!(install_hint("nope"), None);
+    }
+
+    #[test]
+    fn bundled_tools_dir_sits_next_to_the_executable() {
+        let d = bundled_dir().unwrap();
+        assert_eq!(d.file_name().unwrap(), "tools");
+        assert_eq!(d.parent(), std::env::current_exe().unwrap().parent());
     }
 }
 

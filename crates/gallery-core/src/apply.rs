@@ -1624,7 +1624,40 @@ fn rename_fallback(from: &Path, to: &Path) -> std::io::Result<()> {
         Err(e) if matches!(e.raw_os_error(), Some(libc::EINVAL | libc::ENOSYS)) => {}
         r => return r,
     }
+    rename_last_resort(from, to)
+}
+
+/// The final, non-atomic-where-unavoidable step of [`rename_fallback`].
+#[cfg(windows)]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
+    rename_exclusive_windows(from, to)
+}
+
+#[cfg(not(windows))]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
+}
+
+/// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (what `std::fs::rename`
+/// always sets): atomic, fails with `AlreadyExists` instead of overwriting,
+/// and, with no `MOVEFILE_COPY_ALLOWED`, never turns into a copy across
+/// volumes. The only way to place a file on FAT/exFAT without ever
+/// overwriting; NTFS goes through the hard link path first.
+#[cfg(windows)]
+fn rename_exclusive_windows(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (f, t) = (wide(from), wide(to));
+    // SAFETY: both are NUL-terminated UTF-16 paths alive for the call.
+    let ok =
+        unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(f.as_ptr(), t.as_ptr(), 0) };
+    if ok != 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    // ERROR_ALREADY_EXISTS (183) and ERROR_FILE_EXISTS (80) are AlreadyExists
+    // to std; ERROR_NOT_SAME_DEVICE (17) is CrossesDevices.
+    Err(e)
 }
 
 /// `renameat2(from, to, RENAME_NOREPLACE)`: fails with `AlreadyExists`

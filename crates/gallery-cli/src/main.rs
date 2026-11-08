@@ -734,6 +734,9 @@ fn check() -> Result<u8> {
                         "cli.check_missing_png"
                     })
                 );
+                if let Some(hint) = gallery_core::tools::install_hint(name) {
+                    println!("    {hint}");
+                }
             }
         }
     }
