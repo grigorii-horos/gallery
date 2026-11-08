@@ -2357,6 +2357,8 @@ mod tests {
         // Windows locks are mandatory: the file cannot be read while held.
         #[cfg(unix)]
         assert_eq!(std::fs::read_to_string(&lock).unwrap(), me);
+        #[cfg(not(unix))]
+        let _ = &lock;
         // Undo of the same plan waits for it too.
         let rp = report_path(&plan);
         std::fs::write(&rp, "{}").unwrap();

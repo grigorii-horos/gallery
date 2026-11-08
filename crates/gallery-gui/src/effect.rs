@@ -291,6 +291,12 @@ mod tests {
         eprintln!("scan {} ms, diff {} ms", first.scan_ms, second.diff_ms);
         assert!(!second.rescanned);
         // Debug build; release is about three times faster.
-        assert!(second.scan_ms + second.diff_ms < 1000, "{second:?}");
+        // macOS/Windows runners stat 5000 files several times slower (1.5 s seen).
+        let limit = if cfg!(target_os = "linux") {
+            1000
+        } else {
+            5000
+        };
+        assert!(second.scan_ms + second.diff_ms < limit, "{second:?}");
     }
 }
