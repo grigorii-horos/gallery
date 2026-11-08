@@ -333,3 +333,23 @@ pub fn decimal(v: f64, places: usize) -> String {
 pub fn try_translate(key: &str) -> Option<String> {
     find(locale(), key)
 }
+
+/// What stands where `%{placeholder}` is in message `key`, read back out of a
+/// rendered `text`: `extract("plan.server_needs_paths", "list", msg)`.
+/// Looks for the message in the language in force and in English (a text made
+/// before the language changed). `None` when `text` is not that message.
+pub fn extract(key: &str, placeholder: &str, text: &str) -> Option<String> {
+    const MARK: &str = "\u{1}";
+    [locale(), DEFAULT].iter().find_map(|loc| {
+        let template = fill(lookup(loc, key), &[(placeholder, MARK.to_string())]);
+        let (head, tail) = template.split_once(MARK)?;
+        let start = text.find(head)? + head.len();
+        let rest = &text[start..];
+        let end = if tail.is_empty() {
+            rest.len()
+        } else {
+            rest.find(tail)?
+        };
+        Some(rest[..end].trim().to_string())
+    })
+}

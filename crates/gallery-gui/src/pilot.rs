@@ -42,13 +42,10 @@ pub struct PilotSplit {
 pub fn choose(plan: &Plan, per_target: usize) -> Result<(Plan, Plan), String> {
     let (pilot, rest) = gallery_core::plan::pilot(plan, per_target.max(1));
     if pilot.items.is_empty() {
-        return Err("The plan has no files for a pilot.".into());
+        return Err(gallery_core::t!("pilot.no_files"));
     }
     if rest.items.is_empty() {
-        return Err(
-            "The plan has so few files that a pilot would cover everything. Run the whole plan."
-                .into(),
-        );
+        return Err(gallery_core::t!("pilot.too_few"));
     }
     Ok((pilot, rest))
 }

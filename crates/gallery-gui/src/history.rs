@@ -28,9 +28,9 @@ pub const ERROR_EVENT: &str = "undo-error";
 const REPORT_MARK: &str = ".report.";
 
 /// Why a report is not undone or retried here.
-const SERVER_REFUSAL: &str = "This is a report of a run on a server: its paths are server paths, so it \
-     cannot be undone or retried here. Undo it on the server with gallery undo \
-     (you can copy the command from the report details); the GUI never touches the server.";
+fn server_refusal() -> String {
+    gallery_core::t!("history.server_refusal")
+}
 
 /// One report in the list.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -145,7 +145,7 @@ fn is_archived(name: &str) -> bool {
 fn read_report(path: &Path) -> Result<Report, String> {
     let text = std::fs::read_to_string(path).map_err(|e| format!("{}: {e}", path.display()))?;
     serde_json::from_str(&text)
-        .map_err(|e| format!("{}: could not read the report: {e}", path.display()))
+        .map_err(|e| gallery_core::t!("history.unreadable", path = path.display(), error = e))
 }
 
 fn entry_of(
@@ -368,7 +368,7 @@ pub fn shell_quote(s: &str) -> String {
 pub fn server_command(report: &Report, file_name: &str) -> String {
     match report.plan.parent().filter(|d| d.is_absolute()) {
         Some(dir) => format!("gallery undo {}", shell_quote(&shown(&dir.join(file_name)))),
-        None => format!("gallery undo <plan folder on the server>/{file_name}"),
+        None => gallery_core::t!("history.undo_command", file = file_name),
     }
 }
 
@@ -416,12 +416,13 @@ pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, Stri
 /// another machine's.
 pub fn ensure_local_report(path: &Path, plans_dir: Option<&Path>) -> Result<Report, String> {
     let outside = || {
-        format!(
-            "{SERVER_REFUSAL}\n\nThe report is not in the GUI plans directory: {}",
-            path.display()
+        gallery_core::t!(
+            "history.outside",
+            refusal = server_refusal(),
+            path = path.display()
         )
     };
-    let dir = plans_dir.ok_or("no GUI plans directory")?;
+    let dir = plans_dir.ok_or_else(|| gallery_core::t!("history.no_plans_dir"))?;
     let parent = path.parent().ok_or_else(outside)?;
     let (Ok(parent), Ok(dir)) = (parent.canonicalize(), dir.canonicalize()) else {
         return Err(outside());
@@ -430,24 +431,18 @@ pub fn ensure_local_report(path: &Path, plans_dir: Option<&Path>) -> Result<Repo
         return Err(outside());
     }
     let report = read_report(path)?;
-    let plan = plan_of_report(path).ok_or("not a gallery report (name has no .report.)")?;
-    let head = plan_head(&plan).ok_or_else(|| {
-        format!(
-            "The plan of this report was not found or could not be read: {}. Without it undo and retry \
-             do not run here; you can undo with the gallery undo command.",
-            plan.display()
-        )
-    })?;
+    let plan = plan_of_report(path).ok_or_else(|| gallery_core::t!("history.not_a_report_name"))?;
+    let head = plan_head(&plan)
+        .ok_or_else(|| gallery_core::t!("history.plan_missing", path = plan.display()))?;
     if head.side == Side::Server {
-        return Err(SERVER_REFUSAL.into());
+        return Err(server_refusal());
     }
     let canon = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
     if canon(&report.plan) != canon(&plan) {
-        return Err(format!(
-            "The report was written for a plan at a different path ({}) but sits next to {}: it looks like \
-             the run was on another computer. Such a report cannot be undone here.",
-            report.plan.display(),
-            plan.display()
+        return Err(gallery_core::t!(
+            "history.other_path",
+            report = report.plan.display(),
+            plan = plan.display()
         ));
     }
     Ok(report)
@@ -497,7 +492,7 @@ impl From<String> for UndoError {
 pub fn guard_undo(path: &Path, plans_dir: Option<&Path>) -> Result<Report, String> {
     let r = ensure_local_report(path, plans_dir)?;
     if r.undone {
-        return Err("This run was already undone.".into());
+        return Err(gallery_core::t!("history.already_undone"));
     }
     Ok(r)
 }
@@ -671,9 +666,9 @@ pub fn retry(path: &Path, plans_dir: Option<&Path>) -> Result<RetryDone, String>
         .filter(|i| matches!(i.status, ItemStatus::Failed { .. }))
         .count();
     if failed == 0 {
-        return Err("This run has no failed files.".into());
+        return Err(gallery_core::t!("history.no_failed"));
     }
-    let plan = plan_of_report(path).ok_or("not a gallery report")?;
+    let plan = plan_of_report(path).ok_or_else(|| gallery_core::t!("history.not_a_report"))?;
     if let Some(p) = pending_retry(&plan, &report.run_id) {
         let sub = gallery_core::plan::Plan::load(&p).map_err(|e| e.to_string())?;
         return Ok(RetryDone {

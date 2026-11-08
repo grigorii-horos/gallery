@@ -18,6 +18,18 @@ pub struct TraySettings {
     pub notify_threshold: u32,
     /// The window's close button hides it to the tray instead of quitting.
     pub hide_to_tray: bool,
+    /// Interface language: `"system"` (the OS's, else English) or one of the
+    /// supported codes (`gallery_core::i18n::LANGUAGES`).
+    pub language: String,
+}
+
+/// The setting a language choice is stored as: `"system"` or a supported code.
+pub fn language_setting(value: &str) -> String {
+    let v = value.trim();
+    gallery_core::i18n::LANGUAGES
+        .iter()
+        .find(|l| l.code == v)
+        .map_or_else(|| "system".to_string(), |l| l.code.to_string())
 }
 
 impl Default for TraySettings {
@@ -26,6 +38,7 @@ impl Default for TraySettings {
             check_interval_min: 30,
             notify_threshold: 1,
             hide_to_tray: true,
+            language: "system".into(),
         }
     }
 }
@@ -37,6 +50,7 @@ impl TraySettings {
             .check_interval_min
             .clamp(MIN_INTERVAL_MIN, MAX_INTERVAL_MIN);
         self.notify_threshold = self.notify_threshold.max(1);
+        self.language = language_setting(&self.language);
         self
     }
 }
@@ -95,17 +109,36 @@ mod tests {
     }
 
     #[test]
+    fn language_is_system_or_a_supported_code() {
+        assert_eq!(TraySettings::default().language, "system");
+        for code in [
+            "en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "zh-CN",
+        ] {
+            assert_eq!(language_setting(code), code);
+        }
+        for junk in ["", "system", " ru-RU ", "klingon", "pt_BR"] {
+            assert_eq!(language_setting(junk), "system", "{junk}");
+        }
+        // Older files have no language.
+        let s: TraySettings = serde_json::from_str(r#"{"check_interval_min": 60}"#).unwrap();
+        assert_eq!(s.language, "system");
+    }
+
+    #[test]
     fn bounds_are_enforced() {
         let s = TraySettings {
             check_interval_min: 0,
             notify_threshold: 0,
             hide_to_tray: true,
+            language: "klingon".into(),
         }
         .sanitized();
         assert_eq!(
             (s.check_interval_min, s.notify_threshold),
             (MIN_INTERVAL_MIN, 1)
         );
+        // An unknown language is the system's.
+        assert_eq!(s.language, "system");
         let s = TraySettings {
             check_interval_min: u32::MAX,
             ..Default::default()
@@ -123,6 +156,7 @@ mod tests {
             check_interval_min: 90,
             notify_threshold: 10,
             hide_to_tray: false,
+            language: "pt-BR".into(),
         };
         save(&p, &s).unwrap();
         assert_eq!(load(&p), s);

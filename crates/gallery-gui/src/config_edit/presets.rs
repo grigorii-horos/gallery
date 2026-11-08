@@ -173,10 +173,13 @@ impl ContentPresetDraft {
 fn group(doc: &DocumentMut, kind: PresetKind) -> R<Option<&dyn TableLike>> {
     match doc.get(kind.key()) {
         None => Ok(None),
-        Some(i) => i
-            .as_table_like()
-            .map(Some)
-            .ok_or_else(|| format!("{}: expected a table", kind.key())),
+        Some(i) => i.as_table_like().map(Some).ok_or_else(|| {
+            gallery_core::t!(
+                "edit.expected",
+                path = kind.key(),
+                what = gallery_core::t!("edit.what.table")
+            )
+        }),
     }
 }
 
@@ -188,7 +191,13 @@ fn entries(doc: &DocumentMut, kind: PresetKind) -> R<Vec<(String, &dyn TableLike
         .map(|(k, item)| {
             item.as_table_like()
                 .map(|t| (k.to_string(), t))
-                .ok_or_else(|| format!("{}.{k}: expected a table", kind.key()))
+                .ok_or_else(|| {
+                    gallery_core::t!(
+                        "edit.expected",
+                        path = format!("{}.{k}", kind.key()),
+                        what = gallery_core::t!("edit.what.table")
+                    )
+                })
         })
         .collect()
 }
@@ -220,11 +229,11 @@ fn read_content(name: String, t: &dyn TableLike, path: &str) -> R<ContentPresetD
             let slot = p.slot(key).expect("a known key");
             let v = slot.read(item).ok_or_else(|| {
                 let what = match slot {
-                    Slot::B(_) => "true or false",
-                    Slot::I(_) => "an integer",
-                    Slot::S(_) => "a string",
+                    Slot::B(_) => gallery_core::t!("edit.what.bool"),
+                    Slot::I(_) => gallery_core::t!("edit.what.int"),
+                    Slot::S(_) => gallery_core::t!("edit.what.string"),
                 };
-                format!("{path}.{key}: expected {what}")
+                gallery_core::t!("edit.expected", path = format!("{path}.{key}"), what = what)
             })?;
             p.set_slot(key, v);
         }
@@ -260,9 +269,13 @@ pub fn read(
             .iter()
             .map(|(k, item)| {
                 let p = format!("masks.{k}");
-                let v = item
-                    .as_value()
-                    .ok_or_else(|| format!("{p}: a mask: a string or a list of strings"))?;
+                let v = item.as_value().ok_or_else(|| {
+                    gallery_core::t!(
+                        "edit.expected",
+                        path = p,
+                        what = gallery_core::t!("edit.what.mask")
+                    )
+                })?;
                 Ok(MaskDraft {
                     name: k.to_string(),
                     items: mask_value(v, &p)?,
@@ -320,11 +333,7 @@ fn group_mut(doc: &mut DocumentMut, kind: PresetKind) -> R<Option<&mut Table>> {
     match doc.get_mut(kind.key()) {
         None => Ok(None),
         Some(Item::Table(t)) => Ok(Some(t)),
-        Some(_) => Err(format!(
-            "{} is not written as a table [{}] — edit it in the file",
-            kind.key(),
-            kind.key()
-        )),
+        Some(_) => Err(gallery_core::t!("edit.group_not_table", key = kind.key())),
     }
 }
 
@@ -347,30 +356,27 @@ fn with_entry(
             *n.decor_mut() = decor;
             *it = n;
         }
-        Some(_) => return Err(format!("{}.{name}: expected a table", kind.key())),
+        Some(_) => {
+            return Err(gallery_core::t!(
+                "edit.expected",
+                path = format!("{}.{name}", kind.key()),
+                what = gallery_core::t!("edit.what.table")
+            ));
+        }
         None => return Err(missing(kind, name)),
     }
     Ok(())
 }
 
-fn what(kind: PresetKind) -> &'static str {
-    match kind {
-        PresetKind::Name => "name preset",
-        PresetKind::Content => "content preset",
-        PresetKind::Mask => "mask",
-    }
-}
-
 fn missing(kind: PresetKind, name: &str) -> String {
-    format!("{} “{name}” is not in the config", capital(what(kind)))
-}
-
-fn capital(s: &str) -> String {
-    // "name preset" → "Name preset": the noun starts the sentence.
-    let mut c = s.chars();
-    c.next()
-        .map(|f| f.to_uppercase().collect::<String>() + c.as_str())
-        .unwrap_or_default()
+    gallery_core::t!(
+        match kind {
+            PresetKind::Name => "edit.name_preset_missing",
+            PresetKind::Content => "edit.content_preset_missing",
+            PresetKind::Mask => "edit.mask_missing",
+        },
+        name = name
+    )
 }
 
 fn is_targets(p: &TablePath) -> bool {
@@ -535,20 +541,28 @@ pub fn references(d: &ConfigDraft, kind: PresetKind, name: &str) -> Vec<String> 
                 if f.matches.as_deref().is_some_and(|m| mask_has(m, name))
                     || mask_has(&f.exclude, name)
                 {
-                    push(format!("target “{tn}”, filter {}", i + 1));
+                    push(gallery_core::t!("edit.ref_filter", target = tn, n = i + 1));
                 }
             }
             if let Some(p) = &t.prefilter
                 && (p.matches.as_deref().is_some_and(|m| mask_has(m, name))
                     || mask_has(&p.exclude, name))
             {
-                push(format!("target “{tn}”, prefilter"));
+                push(gallery_core::t!("edit.ref_prefilter", target = tn));
             }
         }
         for (i, o) in t.outputs.iter().enumerate() {
             for (pipe, steps, title) in [
-                (PresetKind::Content, &o.content, "content"),
-                (PresetKind::Name, &o.rename, "name"),
+                (
+                    PresetKind::Content,
+                    &o.content,
+                    gallery_core::t!("explain.kind_content"),
+                ),
+                (
+                    PresetKind::Name,
+                    &o.rename,
+                    gallery_core::t!("explain.kind_name"),
+                ),
             ] {
                 for s in steps {
                     let hit = match kind {
@@ -556,7 +570,12 @@ pub fn references(d: &ConfigDraft, kind: PresetKind, name: &str) -> Vec<String> 
                         k => k == pipe && s.preset == name,
                     };
                     if hit {
-                        push(format!("target “{tn}”, output {}: {title}", i + 1));
+                        push(gallery_core::t!(
+                            "edit.ref_output",
+                            target = tn,
+                            n = i + 1,
+                            title = title
+                        ));
                     }
                 }
             }
@@ -582,7 +601,7 @@ pub fn references(d: &ConfigDraft, kind: PresetKind, name: &str) -> Vec<String> 
         }
         for m in &d.mask_defs {
             if m.name != name && mask_has(&m.items, name) {
-                push(format!("mask @{}", m.name));
+                push(gallery_core::t!("edit.ref_mask", name = m.name));
             }
         }
         for p in &d.name_presets {
@@ -590,12 +609,12 @@ pub fn references(d: &ConfigDraft, kind: PresetKind, name: &str) -> Vec<String> 
                 .into_iter()
                 .any(|m| m.as_deref().is_some_and(|m| mask_has(m, name)));
             if uses {
-                push(format!("name preset “{}”", p.name));
+                push(gallery_core::t!("config.who_name_preset", name = p.name));
             }
         }
         for p in &d.content_presets {
             if p.mask.as_deref().is_some_and(|m| mask_has(m, name)) {
-                push(format!("content preset “{}”", p.name));
+                push(gallery_core::t!("config.who_content_preset", name = p.name));
             }
         }
     }
@@ -810,31 +829,45 @@ fn user_names(d: &ConfigDraft, kind: PresetKind) -> Vec<&str> {
 
 /// A name a new (or renamed) item of `kind` may take.
 fn check_new_name(doc: &DocumentMut, kind: PresetKind, name: &str) -> R<()> {
-    let noun = match kind {
-        PresetKind::Mask => "mask",
-        _ => "preset",
-    };
+    let mask = kind == PresetKind::Mask;
     if name.trim().is_empty() {
-        return Err(format!("a {noun} must have a name"));
+        return Err(gallery_core::t!(if mask {
+            "edit.mask_needs_name"
+        } else {
+            "edit.preset_needs_name"
+        }));
     }
     if name.trim() != name {
-        return Err(format!(
-            "{noun} name “{name}” has leading or trailing spaces"
+        return Err(gallery_core::t!(
+            if mask {
+                "edit.mask_name_spaces"
+            } else {
+                "edit.preset_name_spaces"
+            },
+            name = name
         ));
     }
-    if kind == PresetKind::Mask && (name.contains('@') || name.contains(char::is_whitespace)) {
-        return Err(format!("mask name “{name}”: no “@” and no spaces"));
+    if mask && (name.contains('@') || name.contains(char::is_whitespace)) {
+        return Err(gallery_core::t!("edit.mask_name_chars", name = name));
     }
     if is_builtin(kind, name) {
-        return Err(match kind {
-            PresetKind::Mask => format!("“{name}” is a built-in mask name; choose another"),
-            _ => format!("“{name}” is a built-in preset name; choose another"),
-        });
+        return Err(gallery_core::t!(
+            if mask {
+                "edit.builtin_mask_name"
+            } else {
+                "edit.builtin_preset_name"
+            },
+            name = name
+        ));
     }
     if user_names(&read_draft(doc)?, kind).contains(&name) {
-        return Err(format!(
-            "{} “{name}” is already in the config",
-            capital(what(kind))
+        return Err(gallery_core::t!(
+            match kind {
+                PresetKind::Name => "edit.name_preset_exists",
+                PresetKind::Content => "edit.content_preset_exists",
+                PresetKind::Mask => "edit.mask_exists",
+            },
+            name = name
         ));
     }
     Ok(())
@@ -910,14 +943,14 @@ pub fn remove(doc: &mut DocumentMut, kind: PresetKind, name: &str) -> R<()> {
     }
     let refs = references(&d, kind, name);
     if !refs.is_empty() {
-        let label = match kind {
-            PresetKind::Name => format!("Name preset “{name}”"),
-            PresetKind::Content => format!("Content preset “{name}”"),
-            PresetKind::Mask => format!("Mask @{name}"),
-        };
-        return Err(format!(
-            "{label} is in use: {}. Remove these references first.",
-            refs.join("; ")
+        return Err(gallery_core::t!(
+            match kind {
+                PresetKind::Name => "edit.name_preset_in_use",
+                PresetKind::Content => "edit.content_preset_in_use",
+                PresetKind::Mask => "edit.mask_in_use",
+            },
+            name = name,
+            refs = refs.join("; ")
         ));
     }
     match kind {
@@ -956,9 +989,13 @@ pub fn rename(
 
 pub fn copy_builtin(doc: &mut DocumentMut, kind: PresetKind, from: &str, to: &str) -> R<()> {
     let unknown = || {
-        format!(
-            "{} “{from}” is not among the built-in ones",
-            capital(what(kind))
+        gallery_core::t!(
+            match kind {
+                PresetKind::Name => "edit.name_preset_not_builtin",
+                PresetKind::Content => "edit.content_preset_not_builtin",
+                PresetKind::Mask => "edit.mask_not_builtin",
+            },
+            name = from
         )
     };
     match kind {

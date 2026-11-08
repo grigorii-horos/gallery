@@ -12,7 +12,7 @@ use serde::{Deserialize, Serialize};
 pub fn default_file() -> Result<PathBuf, String> {
     match crate::data_dir_override() {
         Some(dir) => Ok(dir.join("overrides.json")),
-        None => Overrides::default_path().ok_or_else(|| "no user data directory".to_string()),
+        None => Overrides::default_path().ok_or_else(|| gallery_core::t!("lock.no_data_dir")),
     }
 }
 
@@ -141,9 +141,7 @@ pub fn retarget_in(
     let (_, current) =
         crate::config_edit::file::read(config).map_err(|e| format!("{}: {e}", config.display()))?;
     if current != version {
-        return Err(
-            "the config changed after it was saved; decisions were not carried over".into(),
-        );
+        return Err(gallery_core::t!("overrides.config_changed"));
     }
     let cfg = Config::load(config).map_err(|e| e.to_string())?;
     let t = &cfg.targets;
@@ -156,7 +154,7 @@ pub fn retarget_in(
             .any(|n| n == name)
     };
     if let Some((_, to)) = renames.iter().find(|(_, to)| !known(to)) {
-        return Err(format!("the config has no target “{to}”"));
+        return Err(gallery_core::t!("overrides.no_target", target = to));
     }
     let map: std::collections::HashMap<&str, &str> = renames
         .iter()

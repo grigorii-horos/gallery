@@ -37,17 +37,25 @@ fn err(path: String, message: impl Into<String>) -> FieldError {
 
 fn check_mask(path: String, items: &[String]) -> Result<(), FieldError> {
     if items.is_empty() {
-        return Err(err(path, "empty mask: add at least one"));
+        return Err(err(path, gallery_core::t!("edit.empty_mask")));
     }
     for m in items {
-        MaskItem::parse(m).map_err(|e| err(path.clone(), format!("mask “{m}”: {e}")))?;
+        MaskItem::parse(m).map_err(|e| {
+            err(
+                path.clone(),
+                gallery_core::t!("edit.bad_mask", mask = m, error = e),
+            )
+        })?;
     }
     Ok(())
 }
 
 fn check_target(path: &str, stage: Stage, t: &TargetDraft) -> Result<(), FieldError> {
     if t.name.trim().is_empty() {
-        return Err(err(format!("{path}.name"), "the target has no name"));
+        return Err(err(
+            format!("{path}.name"),
+            gallery_core::t!("edit.target_no_name"),
+        ));
     }
     if stage.is_mask() {
         for (i, f) in t.filters.iter().enumerate() {
@@ -63,7 +71,7 @@ fn check_target(path: &str, stage: Stage, t: &TargetDraft) -> Result<(), FieldEr
         if t.description.as_deref().is_none_or(|d| d.trim().is_empty()) {
             return Err(err(
                 format!("{path}.description"),
-                "the AI target has no description: the AI will not know what to put in it",
+                gallery_core::t!("edit.ai_no_description"),
             ));
         }
         if let Some(p) = &t.prefilter {
@@ -78,13 +86,16 @@ fn check_target(path: &str, stage: Stage, t: &TargetDraft) -> Result<(), FieldEr
     for (i, o) in t.outputs.iter().enumerate() {
         let op = format!("{path}.outputs[{i}]");
         if o.dir.trim().is_empty() {
-            return Err(err(format!("{op}.dir"), "the output has no folder"));
+            return Err(err(
+                format!("{op}.dir"),
+                gallery_core::t!("edit.output_no_dir"),
+            ));
         }
         for (pipe, steps) in [("content", &o.content), ("rename", &o.rename)] {
             for (j, s) in steps.iter().enumerate() {
                 let sp = format!("{op}.{pipe}[{j}]");
                 if s.preset.trim().is_empty() {
-                    return Err(err(sp, "step without a preset"));
+                    return Err(err(sp, gallery_core::t!("edit.step_no_preset")));
                 }
                 if let Some(m) = &s.mask {
                     check_mask(format!("{sp}.mask"), m)?;
@@ -100,7 +111,7 @@ fn check_name_preset(p: &NamePresetDraft) -> Result<(), FieldError> {
     if p.template.trim().is_empty() {
         return Err(err(
             format!("{base}.template"),
-            "the name preset has no template",
+            gallery_core::t!("edit.no_template"),
         ));
     }
     if let Some(d) = &p.date
@@ -108,7 +119,7 @@ fn check_name_preset(p: &NamePresetDraft) -> Result<(), FieldError> {
     {
         return Err(err(
             format!("{base}.date"),
-            format!("date “{d}”: capture, file_created or none"),
+            gallery_core::t!("edit.bad_date", value = d),
         ));
     }
     for (key, m) in [("mask", &p.mask), ("skip_if", &p.skip_if)] {
@@ -124,19 +135,22 @@ fn check_content_preset(p: &ContentPresetDraft) -> Result<(), FieldError> {
     if !KINDS.contains(&p.kind.as_str()) {
         return Err(err(
             format!("{base}.kind"),
-            format!("kind “{}”: {}", p.kind, KINDS.join(", ")),
+            gallery_core::t!("edit.bad_kind", kind = p.kind, kinds = KINDS.join(", ")),
         ));
     }
     if p.kind == "bundle" {
         if p.mask.is_some() {
             return Err(err(
                 format!("{base}.mask"),
-                "a set has no mask of its own: its steps define the masks",
+                gallery_core::t!("edit.set_has_mask"),
             ));
         }
         let steps = p.steps.as_deref().unwrap_or_default();
         if steps.is_empty() {
-            return Err(err(format!("{base}.steps"), "the set has no steps"));
+            return Err(err(
+                format!("{base}.steps"),
+                gallery_core::t!("edit.set_no_steps"),
+            ));
         }
         for (i, s) in steps.iter().enumerate() {
             if let Some(m) = &s.mask {
@@ -152,7 +166,13 @@ fn check_content_preset(p: &ContentPresetDraft) -> Result<(), FieldError> {
                 {
                     return Err(err(
                         format!("{base}.{key}"),
-                        format!("{key} = {v}: allowed range is {} to {}", l.min, l.max),
+                        gallery_core::t!(
+                            "edit.range",
+                            key = key,
+                            value = v,
+                            min = l.min,
+                            max = l.max
+                        ),
                     ));
                 }
             }
@@ -162,7 +182,12 @@ fn check_content_preset(p: &ContentPresetDraft) -> Result<(), FieldError> {
                 {
                     return Err(err(
                         format!("{base}.{key}"),
-                        format!("{key} = “{v}”: one of {}", c.join(", ")),
+                        gallery_core::t!(
+                            "edit.one_of",
+                            key = key,
+                            value = v,
+                            choices = c.join(", ")
+                        ),
                     ));
                 }
             }
@@ -180,16 +205,22 @@ pub fn precheck(d: &ConfigDraft) -> Result<(), FieldError> {
     for (i, s) in d.sources.iter().enumerate() {
         let p = format!("sources[{i}]");
         if s.id.trim().is_empty() {
-            return Err(err(format!("{p}.id"), "the source has no id"));
+            return Err(err(
+                format!("{p}.id"),
+                gallery_core::t!("edit.source_no_id"),
+            ));
         }
         if d.sources[..i].iter().any(|o| o.id == s.id) {
             return Err(err(
                 format!("{p}.id"),
-                format!("id “{}” is already used by another source", s.id),
+                gallery_core::t!("edit.id_used", id = s.id),
             ));
         }
         if s.path.trim().is_empty() {
-            return Err(err(format!("{p}.path"), "the source has no path"));
+            return Err(err(
+                format!("{p}.path"),
+                gallery_core::t!("edit.source_no_path"),
+            ));
         }
     }
     for (stage, i, t) in d.targets.all() {
@@ -207,58 +238,56 @@ pub fn precheck(d: &ConfigDraft) -> Result<(), FieldError> {
     Ok(())
 }
 
-/// The text between the quotes after `marker` in `m`.
-fn quoted<'a>(m: &'a str, marker: &str) -> Option<&'a str> {
-    let rest = &m[m.find(marker)? + marker.len()..];
-    rest.find('\'').map(|e| &rest[..e])
-}
-
 /// The field a core error message is about: the target or source it names.
 pub fn locate(message: &str, d: &ConfigDraft) -> Option<String> {
-    for marker in ["duplicate target name '", "target '"] {
-        if let Some(name) = quoted(message, marker) {
-            // A duplicate: the second one with the name.
-            let skip = usize::from(marker.starts_with("duplicate"));
-            if let Some((s, i, _)) = d.targets.all().filter(|(_, _, t)| t.name == name).nth(skip) {
-                return Some(target_path(s, i));
-            }
+    // The core's messages are in the interface language: the names are read
+    // back out of them with the catalog's own phrases (`config.who_*`).
+    use gallery_core::i18n::extract;
+    for (key, placeholder, skip) in [
+        ("config.duplicate_target", "name", 1),
+        ("config.who_target", "name", 0),
+    ] {
+        if let Some(name) = extract(key, placeholder, message)
+            && let Some((s, i, _)) = d.targets.all().filter(|(_, _, t)| t.name == name).nth(skip)
+        {
+            return Some(target_path(s, i));
         }
     }
-    for marker in ["source id '", "source '"] {
-        if let Some(id) = quoted(message, marker)
+    for key in ["config.bad_source_id", "config.who_source"] {
+        if let Some(id) = extract(key, "id", message)
             && let Some(i) = d.sources.iter().position(|s| s.id == id)
         {
             return Some(format!("sources[{i}]"));
         }
     }
-    for (marker, base, names) in [
+    for (key, base, names) in [
         (
-            "name preset '",
+            "config.who_name_preset",
             "name_presets",
             d.name_presets.iter().map(|p| &p.name).collect::<Vec<_>>(),
         ),
         (
-            "content preset '",
+            "config.who_content_preset",
             "content_presets",
             d.content_presets.iter().map(|p| &p.name).collect(),
         ),
         (
-            "mask '",
+            "config.who_mask",
             "masks",
             d.mask_defs.iter().map(|m| &m.name).collect(),
         ),
     ] {
-        if let Some(n) = quoted(message, marker)
-            && names.iter().any(|x| *x == n)
+        if let Some(n) = extract(key, "name", message)
+            && names.iter().any(|x| **x == n)
         {
             return Some(format!("{base}.{n}"));
         }
     }
-    if let Some(rest) = message.split("mask cycle: ").nth(1) {
-        let first = rest.split(" -> ").next().unwrap_or("").trim();
-        if d.mask_defs.iter().any(|m| m.name == first) {
-            return Some(format!("masks.{first}"));
-        }
+    if let Some(first) = extract("config.mask_cycle", "cycle", message)
+        .map(|c| c.split(" -> ").next().unwrap_or("").trim().to_string())
+        && d.mask_defs.iter().any(|m| m.name == first)
+    {
+        return Some(format!("masks.{first}"));
     }
     None
 }
@@ -408,7 +437,7 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
         if v.outputs.is_empty() {
             w.push(FieldWarning {
                 path: format!("{path}.outputs"),
-                message: "No outputs: matched files will stay in the source.".into(),
+                message: gallery_core::t!("edit.warn_no_outputs"),
             });
         }
         if v.stage.is_mask() {
@@ -421,14 +450,14 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
                 if f.sources.is_empty() {
                     w.push(FieldWarning {
                         path: format!("{path}.filters[{i}].sources"),
-                        message: "A filter without sources will not take any files.".into(),
+                        message: gallery_core::t!("edit.warn_filter_no_sources"),
                     });
                 }
             }
         } else if v.sources.is_empty() {
             w.push(FieldWarning {
                 path: format!("{path}.sources"),
-                message: "No sources set: the AI will not see any files for this target.".into(),
+                message: gallery_core::t!("edit.warn_ai_no_sources"),
             });
         }
         for (oi, o) in v.outputs.iter().enumerate() {
@@ -451,10 +480,7 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
             if !twice.is_empty() {
                 w.push(FieldWarning {
                     path: format!("{op}.content"),
-                    message: format!(
-                        "Double lossy re-encoding: {}. Check the step masks.",
-                        twice.join(", ")
-                    ),
+                    message: gallery_core::t!("edit.warn_double_encode", list = twice.join(", ")),
                 });
             }
             let fixed = gallery_core::config::expand_tilde(Path::new(fixed_dir(&o.dir)));
@@ -468,11 +494,7 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
                 {
                     w.push(FieldWarning {
                         path: format!("{op}.dir"),
-                        message: format!(
-                            "Folder inside source “{}”: a file that needs no content step \
-will be moved or renamed in place, not copied (no trash).",
-                            s.id
-                        ),
+                        message: gallery_core::t!("edit.warn_inside_source", id = s.id),
                     });
                     break;
                 }
@@ -521,7 +543,7 @@ mod tests {
             Some("targets.after_ai[1]")
         );
         assert_eq!(
-            locate("source id 'cam': must be", &d).as_deref(),
+            locate(&gallery_core::t!("config.bad_source_id", id = "cam"), &d).as_deref(),
             Some("sources[0]")
         );
         assert_eq!(locate("something else", &d), None);

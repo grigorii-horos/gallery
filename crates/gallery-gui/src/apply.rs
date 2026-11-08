@@ -22,8 +22,9 @@ pub const DONE_EVENT: &str = "apply-done";
 pub const ERROR_EVENT: &str = "apply-error";
 
 /// Why an undone plan does not run again.
-pub const UNDONE_MESSAGE: &str = "This plan was undone. To sort again, \
-     open Sort: the current plan accounts for the files and decisions by itself.";
+pub fn undone_message() -> String {
+    gallery_core::t!("apply.undone")
+}
 
 /// Failures listed in `apply-done`; the report holds all of them.
 const MAX_FAILURES: usize = 200;
@@ -220,25 +221,18 @@ pub fn guard_real_run(req: &ApplyRequest, overrides_file: Option<&Path>) -> Resu
     let path = Path::new(&req.plan_path);
     match already_applied(path) {
         Some(Applied::WithFailures) => {
-            return Err(
-                "This plan was already run, but some files were not processed. \
-                        Retry them from History instead of running the plan again."
-                    .into(),
-            );
+            return Err(gallery_core::t!("apply.already_run_failures"));
         }
         Some(Applied::Clean) => {
-            return Err("This plan was already run. New files will show up in the current plan on the Sort screen.".into());
+            return Err(gallery_core::t!("apply.already_run"));
         }
         Some(Applied::Undone) => {
-            return Err(UNDONE_MESSAGE.into());
+            return Err(undone_message());
         }
         None => {}
     }
     if overrides_newer(path, overrides_file) {
-        return Err(
-            "Manual decisions changed after the plan was built. Wait for the plan to refresh on the Sort screen."
-                .into(),
-        );
+        return Err(gallery_core::t!("apply.decisions_changed"));
     }
     Ok(())
 }
@@ -247,12 +241,7 @@ pub fn guard_real_run(req: &ApplyRequest, overrides_file: Option<&Path>) -> Resu
 pub fn ensure_local(plan: &Plan) -> Result<(), String> {
     match plan.side {
         Side::Local => Ok(()),
-        Side::Server => Err(
-            "This is a server plan: it holds paths on the server and cannot be run \
-             here. Copy it to the server and run `gallery apply` there; \
-             the GUI runs local plans only."
-                .into(),
-        ),
+        Side::Server => Err(gallery_core::t!("apply.server_plan")),
     }
 }
 
@@ -325,9 +314,9 @@ fn failure(it: &ItemResult) -> Option<Failure> {
                     Some(format!("{}: {e}", o.planned.display()))
                 })
             })
-            .unwrap_or_else(|| "unknown error".into()),
-        ItemStatus::Stale => "changed after the plan — left untouched".into(),
-        ItemStatus::Missing => "file is missing".into(),
+            .unwrap_or_else(|| gallery_core::t!("cli.unknown_error")),
+        ItemStatus::Stale => gallery_core::t!("apply.stale"),
+        ItemStatus::Missing => gallery_core::t!("undo.file_missing"),
         ItemStatus::Done { .. } | ItemStatus::DryRun => return None,
     };
     Some(Failure {
@@ -407,7 +396,7 @@ pub fn run(
         // Never a reason not to run: a warning instead.
         match crate::sync::discover() {
             Ok(s) => opts.pause_sync = Some(s),
-            Err(e) => sync_warning = Some(format!("Syncthing was not paused: {e}")),
+            Err(e) => sync_warning = Some(gallery_core::t!("apply.sync_was_not_paused", error = e)),
         }
     }
     let report = apply_observed(path, tools, &opts, &progress, cancel, &on_item)

@@ -20,7 +20,7 @@ pub fn state_path() -> Option<PathBuf> {
 
 /// The local Syncthing with the GUI's state file.
 pub fn discover() -> Result<SyncPause, String> {
-    let state_path = state_path().ok_or("no data directory")?;
+    let state_path = state_path().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?;
     Ok(SyncPause {
         client: Syncthing::discover().map_err(|e| e.to_string())?,
         state_path,
@@ -56,7 +56,7 @@ pub fn check(plan_path: &Path, pilot: Option<usize>) -> SyncCheck {
 
 /// What Gallery paused and has not resumed (the state file; no network).
 pub fn paused() -> Result<Option<PauseState>, String> {
-    let path = state_path().ok_or("no data directory")?;
+    let path = state_path().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?;
     load_state(&path).map_err(|e| e.to_string())
 }
 

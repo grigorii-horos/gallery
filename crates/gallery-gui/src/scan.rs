@@ -126,7 +126,7 @@ impl From<Error> for ScanError {
         let cancelled = matches!(e, Error::Cancelled);
         ScanError {
             message: if cancelled {
-                "Scan cancelled".into()
+                gallery_core::t!("scan.cancelled")
             } else {
                 e.to_string()
             },
@@ -175,14 +175,14 @@ pub fn run_guarded<T>(
     work: impl FnOnce() -> Result<T, ScanError>,
 ) -> Result<T, ScanError> {
     crate::busy::run_guarded(busy, work, |what| ScanError {
-        message: format!("internal scan error: {what}"),
+        message: gallery_core::t!("gui.internal_scan", error = what),
         cancelled: false,
     })
 }
 
 /// Default locations of a GUI scan.
 pub fn default_plans_dir() -> Result<PathBuf, String> {
-    crate::plans::default_dir().ok_or_else(|| "no user data directory".to_string())
+    crate::plans::default_dir().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))
 }
 
 #[cfg(test)]

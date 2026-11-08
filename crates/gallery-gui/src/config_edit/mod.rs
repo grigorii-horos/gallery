@@ -117,8 +117,12 @@ struct Edited {
 }
 
 fn read_doc(text: &str) -> Result<DocumentMut, EditFailure> {
-    text.parse::<DocumentMut>()
-        .map_err(|e| EditFailure::new(FailureKind::Read, format!("config is not valid TOML: {e}")))
+    text.parse::<DocumentMut>().map_err(|e| {
+        EditFailure::new(
+            FailureKind::Read,
+            gallery_core::t!("triage.invalid_toml", error = e),
+        )
+    })
 }
 
 /// Apply `ops` to `text` (the file at `path`) and check the result.
@@ -188,9 +192,7 @@ fn model_of(doc: &DocumentMut) -> Result<ConfigDraft, EditFailure> {
     doc::read_draft(doc).map_err(|m| {
         EditFailure::new(
             FailureKind::Read,
-            format!(
-                "the editor does not understand this config entry ({m}); edit the file by hand"
-            ),
+            gallery_core::t!("edit.not_understood", detail = m),
         )
     })
 }
@@ -250,10 +252,7 @@ fn parsed(text: &str) -> Option<Config> {
 }
 
 fn changed_failure() -> EditFailure {
-    EditFailure::new(
-        FailureKind::Changed,
-        "the file changed after the editor read it; save cancelled, file untouched",
-    )
+    EditFailure::new(FailureKind::Changed, gallery_core::t!("edit.file_changed"))
 }
 
 /// Add to `out` a warning for every renamed target that overrides in
@@ -279,15 +278,18 @@ pub fn with_override_warnings(out: &mut EditOutcome, overrides: &Path) {
             .count();
         if r.overrides > 0 {
             let after = if kept {
-                format!("the name “{}” will belong to another target", r.from)
+                gallery_core::t!("edit.rename_kept", from = r.from)
             } else {
-                "they will point to a target that no longer exists".to_string()
+                gallery_core::t!("edit.rename_gone")
             };
             out.warnings.push(FieldWarning {
                 path: format!("{}.name", model::target_path(r.stage, r.index)),
-                message: format!(
-                    "{1} manual decision(s) use target “{0}”. After the rename {2}; after saving you can move them to “{3}”.",
-                    r.from, r.overrides, after, r.to
+                message: gallery_core::tn!(
+                    "edit.rename_decisions",
+                    r.overrides,
+                    from = r.from,
+                    after = after,
+                    to = r.to
                 ),
             });
         }
@@ -338,7 +340,7 @@ pub fn save(path: &Path, version: &str, ops: &[EditOp]) -> Result<EditOutcome, E
         file::WriteError::Changed => changed(),
         file::WriteError::Io(err) => EditFailure::new(
             FailureKind::Io,
-            format!("could not write {}: {err}", path.display()),
+            gallery_core::t!("edit.write_failed", path = path.display(), error = err),
         ),
     })?;
     let v = file::version_of(e.text.as_bytes());
@@ -447,7 +449,7 @@ pub fn preview_prompt(
         .sources
         .iter()
         .find(|s| s.id == source_id)
-        .ok_or_else(|| format!("source “{source_id}” is not in the config"))?;
+        .ok_or_else(|| gallery_core::t!("edit.no_source", id = source_id))?;
     let categories: Vec<(String, String)> = cfg
         .targets
         .ai
@@ -500,7 +502,9 @@ pub struct MaskTestResult {
 fn parse_mask(items: &[String]) -> Result<MaskExpr, String> {
     items
         .iter()
-        .map(|m| MaskItem::parse(m).map_err(|e| format!("mask “{m}”: {e}")))
+        .map(|m| {
+            MaskItem::parse(m).map_err(|e| gallery_core::t!("edit.bad_mask", mask = m, error = e))
+        })
         .collect::<Result<Vec<_>, _>>()
         .map(MaskExpr)
 }
@@ -609,7 +613,7 @@ fn parse_date(s: &str) -> Result<chrono::NaiveDateTime, String> {
             .ok()
             .and_then(|d| d.and_hms_opt(0, 0, 0))
     })
-    .ok_or_else(|| format!("date “{s}” is not valid: expected the form 2026-11-05 10:15:00"))
+    .ok_or_else(|| gallery_core::t!("edit.bad_preview_date", value = s))
 }
 
 /// A name preset draft as the core reads it (template checked).
@@ -628,7 +632,7 @@ fn core_name_preset(
     cfg.name_presets
         .get("preview")
         .cloned()
-        .ok_or_else(|| "preset could not be parsed".to_string())
+        .ok_or_else(|| gallery_core::t!("edit.preset_unparsed"))
 }
 
 /// What name preset `s.preset` makes of each sample name with the date
@@ -650,7 +654,7 @@ pub fn preview_name(
         PresetRef::Named(n) => scope
             .name_preset(n)
             .cloned()
-            .ok_or_else(|| format!("there is no preset named “{n}”"))?,
+            .ok_or_else(|| gallery_core::t!("edit.no_preset_named", name = n))?,
     };
     let ctx = gallery_core::name::NameCtx {
         capture: date,

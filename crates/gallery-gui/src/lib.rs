@@ -92,7 +92,7 @@ async fn blocking<T: Send + 'static>(
 ) -> Result<T, String> {
     tauri::async_runtime::spawn_blocking(f)
         .await
-        .map_err(|e| format!("internal error: {e}"))?
+        .map_err(|e| gallery_core::t!("gui.internal", error = e))?
 }
 
 #[tauri::command]
@@ -213,7 +213,7 @@ pub fn spawn_refresh(app: &AppHandle, config: PathBuf) -> bool {
                 current::refresh_notify(&env, false, &on_stale, &NoProgress, &cancel)?;
                 Ok::<_, String>(current::load(&env)?.map(|v| current::pending_of(&v)))
             }))
-            .unwrap_or_else(|_| Err("internal error refreshing the plan".to_string()));
+            .unwrap_or_else(|_| Err(gallery_core::t!("gui.internal_refresh")));
             // Another pass was asked for meanwhile: it supersedes this one, but
             // a failure of this one is still told.
             if !busy.finish_rebuild() {
@@ -358,7 +358,7 @@ fn start_apply(
                 apply::run(&request, &tools, TrashMode::from_env(), &sink, &cancel)
             },
             |what| apply::ApplyError {
-                message: format!("internal run error: {what}"),
+                message: gallery_core::t!("gui.internal_run", error = what),
             },
         );
         let dry = request.dry_run;
@@ -432,7 +432,7 @@ fn start_apply_current(
             || {
                 let _global = global_lock(run.dry_run)?;
                 let archive =
-                    plans::default_dir().ok_or_else(|| "no user data directory".to_string())?;
+                    plans::default_dir().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?;
                 let prepared = current::prepare_run(
                     &owned.env(),
                     &archive,
@@ -474,7 +474,7 @@ fn start_apply_current(
                 apply::run(&request, &tools, TrashMode::from_env(), &sink, &cancel)
                     .map_err(|e| e.message)
             },
-            |what| format!("internal run error: {what}"),
+            |what| gallery_core::t!("gui.internal_run", error = what),
         );
         let dry = run.dry_run;
         let _ = match result {
@@ -543,7 +543,7 @@ async fn export_server_plan(
 ) -> Result<export::ExportDone, String> {
     // The export must match the local plan: no overrides, no export.
     let overrides = overrides::default_file()
-        .map_err(|e| format!("could not locate the manual decisions file: {e}"))?;
+        .map_err(|e| gallery_core::t!("gui.no_decisions_file", error = e))?;
     let cancel = app.state::<busy::Busy>().begin(busy::Op::Export)?;
     let config = config_path(path);
     blocking(move || {
@@ -658,7 +658,7 @@ fn start_undo(
                 history::undo(&path, plans.as_deref(), &sink, &cancel)
             },
             |what| history::UndoError {
-                message: format!("internal undo error: {what}"),
+                message: gallery_core::t!("gui.internal_undo", error = what),
             },
         );
         let _ = match result {
@@ -701,7 +701,7 @@ async fn start_retry(app: AppHandle, report_path: String) -> Result<history::Ret
                 let _global = global_lock(false)?;
                 history::retry(&path, plans.as_deref())
             },
-            |what| format!("internal retry error: {what}"),
+            |what| gallery_core::t!("gui.internal_retry", error = what),
         )
     })
     .await;
@@ -998,7 +998,7 @@ async fn config_retarget_overrides(
 fn internal(e: impl std::fmt::Display) -> config_edit::EditFailure {
     config_edit::EditFailure {
         kind: config_edit::FailureKind::Io,
-        message: format!("internal error: {e}"),
+        message: gallery_core::t!("gui.internal", error = e),
         op: None,
     }
 }
@@ -1077,7 +1077,7 @@ fn set_tray_settings(
     autostart: bool,
 ) -> Result<TrayView, String> {
     if autostart != autostart_enabled() {
-        let dir = dirs::config_dir().ok_or("no user settings directory")?;
+        let dir = dirs::config_dir().ok_or_else(|| gallery_core::t!("gui.no_config_dir"))?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         gallery_core::desktop::set_autostart(&dir, &exe, autostart).map_err(|e| e.to_string())?;
     }
@@ -1086,6 +1086,46 @@ fn set_tray_settings(
         settings,
         autostart: autostart_enabled(),
     })
+}
+
+/// The interface language: the stored choice, the language now in force and
+/// the one the operating system asks for.
+#[derive(serde::Serialize)]
+struct LocaleView {
+    /// `"system"` or a supported code.
+    setting: String,
+    /// The supported code in force (what `setting` resolves to).
+    locale: String,
+    /// The supported code the system's language maps to.
+    system: String,
+}
+
+fn locale_view(setting: &str) -> LocaleView {
+    LocaleView {
+        setting: setting.to_string(),
+        locale: gallery_core::i18n::locale().to_string(),
+        system: gallery_core::i18n::detect_system().to_string(),
+    }
+}
+
+#[tauri::command]
+fn get_locale(state: State<'_, tray::Watch>) -> LocaleView {
+    locale_view(&state.settings().language)
+}
+
+/// Switch the interface language (`"system"` or a code) now: the backend's
+/// messages, the tray and notifications follow at once; the choice is stored
+/// in the settings file. The UI switches its own texts itself.
+#[tauri::command]
+fn set_locale(
+    app: AppHandle,
+    state: State<'_, tray::Watch>,
+    language: String,
+) -> Result<LocaleView, String> {
+    let saved = state.set_language(&language)?;
+    gallery_core::i18n::set_locale(gallery_core::i18n::from_setting(&saved.language));
+    tray::relabel(&app);
+    Ok(locale_view(&saved.language))
 }
 
 /// The last background check's result, `None` before the first one.
@@ -1115,6 +1155,9 @@ pub fn run() {
         .manage(tray::Watch::new())
         .manage(effect::EffectState::default())
         .setup(|app| {
+            // The language comes first: the tray is created in it.
+            let language = app.state::<tray::Watch>().settings().language;
+            gallery_core::i18n::set_locale(gallery_core::i18n::from_setting(&language));
             // The webview may read thumbnails and nothing else from disk.
             if let Some(dir) = gallery_core::thumbs::default_dir() {
                 std::fs::create_dir_all(&dir)?;
@@ -1194,6 +1237,8 @@ pub fn run() {
             preset_limits,
             tray_settings,
             set_tray_settings,
+            get_locale,
+            set_locale,
             pending_status,
             check_pending
         ])

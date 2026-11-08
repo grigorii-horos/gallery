@@ -41,16 +41,15 @@ pub fn decide_pause(state: &mut NotifyState, folders: &[String], now_secs: u64) 
         return None;
     }
     state.last_pause_reminder = Some(now_secs);
-    Some(format!(
-        "Gallery: Syncthing paused: {}. Resume sync when the run is finished.",
-        folders.join(", ")
+    Some(gallery_core::t!(
+        "notify.sync_paused",
+        names = folders.join(", ")
     ))
 }
 
 /// "1 new file", "5 new files".
 pub fn new_files(n: usize) -> String {
-    let word = if n == 1 { "new file" } else { "new files" };
-    format!("{n} {word}")
+    gallery_core::tn!("notify.new_files", n)
 }
 
 /// Update `state` for a check that found `total` files waiting; the text of
@@ -73,7 +72,7 @@ pub fn decide(
     }
     state.baseline = total;
     state.last_notified = Some(now_secs);
-    Some(format!("Gallery: {} to sort", new_files(grown)))
+    Some(gallery_core::tn!("notify.to_sort", grown))
 }
 
 pub fn load(path: &Path) -> NotifyState {

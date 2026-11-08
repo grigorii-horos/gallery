@@ -71,9 +71,9 @@ impl Snapshot {
 pub fn tooltip(s: Option<&Snapshot>) -> String {
     match s {
         None => "Gallery".into(),
-        Some(s) if s.error.is_some() => "Gallery: check failed".into(),
-        Some(s) if s.total == 0 => "Gallery: all sorted".into(),
-        Some(s) => format!("Gallery: {} to sort", s.total),
+        Some(s) if s.error.is_some() => gallery_core::t!("tray.check_failed"),
+        Some(s) if s.total == 0 => gallery_core::t!("tray.all_sorted"),
+        Some(s) => gallery_core::t!("tray.to_sort", n = s.total),
     }
 }
 
@@ -85,9 +85,12 @@ pub fn sync_line(state: &Result<Option<PauseState>, String>) -> Option<String> {
         Ok(None) => None,
         Ok(Some(p)) => {
             let names: Vec<&str> = p.folders.iter().map(|f| f.label.as_str()).collect();
-            Some(format!("Syncthing paused: {}", names.join(", ")))
+            Some(gallery_core::t!(
+                "tray.sync_paused",
+                names = names.join(", ")
+            ))
         }
-        Err(e) => Some(format!("Syncthing: could not read the pause state ({e})")),
+        Err(e) => Some(gallery_core::t!("tray.sync_unreadable", error = e)),
     }
 }
 
@@ -118,6 +121,8 @@ pub struct Watch {
     /// The pause line and the resume entry of the menu.
     sync_item: Mutex<Option<MenuItem<Wry>>>,
     resume_item: Mutex<Option<MenuItem<Wry>>>,
+    /// The fixed entries (open, check, quit), to relabel when the language changes.
+    labeled: Mutex<Vec<(&'static str, MenuItem<Wry>)>>,
     sync_line: Mutex<Option<String>>,
     tray_ready: AtomicBool,
 }
@@ -140,6 +145,7 @@ impl Watch {
             status_item: Mutex::new(None),
             sync_item: Mutex::new(None),
             resume_item: Mutex::new(None),
+            labeled: Mutex::new(Vec::new()),
             sync_line: Mutex::new(None),
             tray_ready: AtomicBool::new(false),
         }
@@ -149,10 +155,23 @@ impl Watch {
         lock(&self.settings).clone()
     }
 
+    /// Save a new interface language (a setting: `"system"` or a code) without
+    /// touching the rest or waking the background loop.
+    pub fn set_language(&self, language: &str) -> Result<TraySettings, String> {
+        let dir = settings::data_dir().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?;
+        let mut s = lock(&self.settings);
+        s.language = settings::language_setting(language);
+        settings::save(&dir.join("settings.json"), &s)?;
+        Ok(s.clone())
+    }
+
     /// Save and use `s` (in bounds); wakes the background loop.
     pub fn set_settings(&self, s: TraySettings) -> Result<TraySettings, String> {
-        let s = s.sanitized();
-        let dir = settings::data_dir().ok_or("no user data directory")?;
+        let mut s = s.sanitized();
+        // The language is changed by `set_locale` alone: a stale copy from the
+        // Settings screen must not bring an old one back.
+        s.language = lock(&self.settings).language.clone();
+        let dir = settings::data_dir().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?;
         settings::save(&dir.join("settings.json"), &s)?;
         *lock(&self.settings) = s.clone();
         *lock(&self.wake.0) = true;
@@ -205,7 +224,7 @@ fn bring_up_to_date(
     crate::current::refresh_notify(&env, false, on_stale, &NoProgress, cancel)?;
     crate::current::load(&env)?
         .map(|v| crate::current::pending_of(&v))
-        .ok_or_else(|| "the plan is not built yet".to_string())
+        .ok_or_else(|| gallery_core::t!("tray.plan_not_built"))
 }
 
 /// Count now. Skipped (an error text) while a scan, apply or other
@@ -214,7 +233,7 @@ fn bring_up_to_date(
 pub fn check(app: &AppHandle, notify: bool) -> Result<Snapshot, String> {
     let w = app.state::<Watch>();
     if w.running.swap(true, Ordering::SeqCst) {
-        return Err("a check is already running".into());
+        return Err(gallery_core::t!("tray.check_running"));
     }
     struct Done<'a>(&'a AtomicBool);
     impl Drop for Done<'_> {
@@ -228,7 +247,7 @@ pub fn check(app: &AppHandle, notify: bool) -> Result<Snapshot, String> {
     let busy = app.state::<busy::Busy>();
     let cancel = busy
         .begin(busy::Op::Rebuild)
-        .map_err(|_| "another operation is running: check postponed".to_string())?;
+        .map_err(|_| gallery_core::t!("tray.check_postponed"))?;
     let at = chrono::Local::now().to_rfc3339();
     let config = w.config();
     let counted = busy::run_guarded(
@@ -239,7 +258,7 @@ pub fn check(app: &AppHandle, notify: bool) -> Result<Snapshot, String> {
             };
             bring_up_to_date(&config, &on_stale, &cancel)
         },
-        |what| format!("internal check error: {what}"),
+        |what| gallery_core::t!("gui.internal_check", error = what),
     );
     let snap = match counted {
         Ok(p) => Snapshot::from_pending(p, at),
@@ -312,7 +331,10 @@ pub fn refresh_sync(app: &AppHandle) -> Result<Option<PauseState>, String> {
     let paused = matches!(state, Ok(Some(_)));
     *lock(&w.sync_line) = line.clone();
     if let Some(item) = &*lock(&w.sync_item) {
-        let _ = item.set_text(line.as_deref().unwrap_or("Syncthing: not paused"));
+        let _ = item.set_text(
+            line.clone()
+                .unwrap_or_else(|| gallery_core::t!("tray.sync_not_paused")),
+        );
     }
     if let Some(item) = &*lock(&w.resume_item) {
         let _ = item.set_enabled(paused);
@@ -329,9 +351,9 @@ pub fn refresh_sync(app: &AppHandle) -> Result<Option<PauseState>, String> {
 fn resume_from_tray(app: &AppHandle) {
     let out = crate::sync::resume();
     let body = match &out {
-        Ok(o) if o.failed.is_empty() => "Gallery: Syncthing sync resumed".to_string(),
-        Ok(o) => format!("Gallery: could not resume: {}", o.failed.join(", ")),
-        Err(e) => format!("Gallery: could not resume sync: {e}"),
+        Ok(o) if o.failed.is_empty() => gallery_core::t!("tray.resumed"),
+        Ok(o) => gallery_core::t!("tray.resume_failed", names = o.failed.join(", ")),
+        Err(e) => gallery_core::t!("tray.resume_error", error = e),
     };
     let _ = refresh_sync(app);
     let _ = app
@@ -381,11 +403,41 @@ fn open_main(app: &AppHandle) {
 /// the window then closes normally (`hide_on_close` stays false).
 pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     let status = MenuItem::with_id(app, "status", tooltip(None), false, None::<&str>)?;
-    let open = MenuItem::with_id(app, "open", "Open", true, None::<&str>)?;
-    let check_now = MenuItem::with_id(app, "check", "Check now", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
-    let sync = MenuItem::with_id(app, "sync", "Syncthing: not paused", false, None::<&str>)?;
-    let resume = MenuItem::with_id(app, "resume", "Resume sync", false, None::<&str>)?;
+    let open = MenuItem::with_id(
+        app,
+        "open",
+        gallery_core::t!("tray.open"),
+        true,
+        None::<&str>,
+    )?;
+    let check_now = MenuItem::with_id(
+        app,
+        "check",
+        gallery_core::t!("tray.check_now"),
+        true,
+        None::<&str>,
+    )?;
+    let quit = MenuItem::with_id(
+        app,
+        "quit",
+        gallery_core::t!("tray.quit"),
+        true,
+        None::<&str>,
+    )?;
+    let sync = MenuItem::with_id(
+        app,
+        "sync",
+        gallery_core::t!("tray.sync_not_paused"),
+        false,
+        None::<&str>,
+    )?;
+    let resume = MenuItem::with_id(
+        app,
+        "resume",
+        gallery_core::t!("tray.resume_sync"),
+        false,
+        None::<&str>,
+    )?;
     let sep = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(
         app,
@@ -428,8 +480,34 @@ pub fn setup(app: &AppHandle) -> tauri::Result<()> {
     *lock(&w.status_item) = Some(status);
     *lock(&w.sync_item) = Some(sync);
     *lock(&w.resume_item) = Some(resume);
+    *lock(&w.labeled) = vec![("open", open), ("check", check_now), ("quit", quit)];
     w.tray_ready.store(true, Ordering::Relaxed);
     Ok(())
+}
+
+/// The tray in the language now in force: fixed entries, the status and
+/// pause lines and the tooltip.
+pub fn relabel(app: &AppHandle) {
+    let w = app.state::<Watch>();
+    for (id, item) in lock(&w.labeled).iter() {
+        let _ = item.set_text(gallery_core::t!(match *id {
+            "open" => "tray.open",
+            "check" => "tray.check_now",
+            _ => "tray.quit",
+        }));
+    }
+    if let Some(item) = &*lock(&w.resume_item) {
+        let _ = item.set_text(gallery_core::t!("tray.resume_sync"));
+    }
+    match w.last() {
+        Some(snap) => refresh_tray(app, &snap),
+        None => {
+            if let Some(item) = &*lock(&w.status_item) {
+                let _ = item.set_text(tooltip(None));
+            }
+        }
+    }
+    let _ = refresh_sync(app);
 }
 
 /// Background loop: a check at startup, then every interval (re-read each

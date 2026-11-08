@@ -57,19 +57,13 @@ impl Op {
     /// Why another operation cannot start now.
     fn busy_message(&self) -> String {
         match self {
-            Op::Scan(_) => "a scan is running — wait for it to finish or cancel it".into(),
-            Op::Apply { request, .. } if request.dry_run => {
-                "a plan check (dry-run) is running — wait for it to finish or cancel it".into()
-            }
-            Op::Apply { .. } => {
-                "a plan run is in progress — wait for it to finish or cancel it".into()
-            }
-            Op::Export => "a server plan export is running — wait for it to finish".into(),
-            Op::Undo { .. } => "an undo is running — wait for it to finish or cancel it".into(),
-            Op::Retry => {
-                "a retry of the failed files is being prepared — wait for it to finish".into()
-            }
-            Op::Rebuild => "the plan is being refreshed — wait for it to finish".into(),
+            Op::Scan(_) => gallery_core::t!("busy.scan"),
+            Op::Apply { request, .. } if request.dry_run => gallery_core::t!("busy.check"),
+            Op::Apply { .. } => gallery_core::t!("busy.apply"),
+            Op::Export => gallery_core::t!("busy.export"),
+            Op::Undo { .. } => gallery_core::t!("busy.undo"),
+            Op::Retry => gallery_core::t!("busy.retry"),
+            Op::Rebuild => gallery_core::t!("busy.rebuild"),
         }
     }
 }
@@ -236,7 +230,7 @@ pub fn run_guarded<T, E>(
             .downcast_ref::<&str>()
             .map(|s| s.to_string())
             .or_else(|| payload.downcast_ref::<String>().cloned())
-            .unwrap_or_else(|| "unknown error".into());
+            .unwrap_or_else(|| gallery_core::t!("cli.unknown_error"));
         Err(on_panic(what))
     })
 }

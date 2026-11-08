@@ -103,7 +103,7 @@ fn source_index(doc: &DocumentMut, id: &str) -> R<usize> {
         .sources
         .iter()
         .position(|s| s.id == id)
-        .ok_or_else(|| format!("source “{id}” is not in the config"))
+        .ok_or_else(|| gallery_core::t!("edit.no_source", id = id))
 }
 
 fn check_index(doc: &DocumentMut, stage: Stage, index: usize) -> R<()> {
@@ -111,10 +111,10 @@ fn check_index(doc: &DocumentMut, stage: Stage, index: usize) -> R<()> {
     if index < n {
         Ok(())
     } else {
-        Err(format!(
-            "target {} #{} is not in the config",
-            stage.key(),
-            index + 1
+        Err(gallery_core::t!(
+            "edit.no_target_at",
+            stage = stage.key(),
+            n = index + 1
         ))
     }
 }
@@ -147,14 +147,7 @@ pub(super) fn stage_table(
         .and_then(|t| t.get_mut(stage.key()))
         .and_then(|a| a.as_array_of_tables_mut())
         .and_then(|a| a.get_mut(i))
-        .ok_or_else(|| {
-            format!(
-                "target {} #{} is not written as [[targets.{}]] — edit it in the file",
-                stage.key(),
-                i + 1,
-                stage.key()
-            )
-        })
+        .ok_or_else(|| gallery_core::t!("edit.target_not_table", stage = stage.key(), n = i + 1))
 }
 
 pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
@@ -171,7 +164,7 @@ pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
                 .get_mut("sources")
                 .and_then(|s| s.as_array_of_tables_mut())
                 .and_then(|a| a.get_mut(i))
-                .ok_or("sources are not written as [[sources]] — edit them in the file")?;
+                .ok_or_else(|| gallery_core::t!("edit.sources_not_table"))?;
             write_source(t, &old, source);
             if source.id != *id {
                 let (from, to) = (id.clone(), source.id.clone());
@@ -219,14 +212,12 @@ pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
             check_index(doc, *from, *index)?;
             stage_table(doc, *from, *index)?;
             if from.is_mask() != to.is_mask() {
-                return Err(
-                    "an AI target cannot be moved to the mask stage, or the other way round".into(),
-                );
+                return Err(gallery_core::t!("edit.move_across_kinds"));
             }
             let len_to = read_draft(doc)?.targets.stage(*to).len();
             if from == to {
                 if *to_index >= len_to {
-                    return Err(format!("the stage has no position #{}", to_index + 1));
+                    return Err(gallery_core::t!("edit.no_position", n = to_index + 1));
                 }
                 regroup(doc, Group::Stage(*from), Shape::Slots, |a| {
                     let t = a.remove(*index);
@@ -234,7 +225,7 @@ pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
                 })?;
             } else {
                 if *to_index > len_to {
-                    return Err(format!("the stage has no position #{}", to_index + 1));
+                    return Err(gallery_core::t!("edit.no_position", n = to_index + 1));
                 }
                 let t = regroup(doc, Group::Stage(*from), Shape::Slots, |a| a.remove(*index))?;
                 regroup(doc, Group::Stage(*to), Shape::Slots, |a| {

@@ -120,7 +120,7 @@ fn add_to_target(g: &Group, item: &str, draft: &ConfigDraft) -> Vec<SuggestedAct
                 }
                 m.push(item.to_string());
                 (
-                    format!("Add {item} to the match of target “{}”", t.name),
+                    gallery_core::t!("triage.add_to_match", item = item, target = t.name),
                     &mut listing,
                 )
             }
@@ -131,9 +131,11 @@ fn add_to_target(g: &Group, item: &str, draft: &ConfigDraft) -> Vec<SuggestedAct
                     exclude: Vec::new(),
                 });
                 (
-                    format!(
-                        "Add a new filter to target “{}” for source {}: {item}",
-                        t.name, g.source
+                    gallery_core::t!(
+                        "triage.add_filter",
+                        target = t.name,
+                        source = g.source,
+                        item = item
                     ),
                     &mut others,
                 )
@@ -188,7 +190,7 @@ fn skip_actions(g: &Group, draft: &ConfigDraft, cfg: &Config) -> Vec<SuggestedAc
         if let Some(op) = skip_op(draft, cfg, &g.source, glob.clone()) {
             out.push(SuggestedAction {
                 kind: ActionKind::SkipFolder,
-                label: format!("Always ignore in folder {}: skip “{glob}”", g.dir),
+                label: gallery_core::t!("triage.ignore_folder", dir = g.dir, glob = glob),
                 target: None,
                 dir: None,
                 ops: vec![op],
@@ -199,10 +201,7 @@ fn skip_actions(g: &Group, draft: &ConfigDraft, cfg: &Config) -> Vec<SuggestedAc
     if let Some(op) = skip_op(draft, cfg, &g.source, glob.clone()) {
         out.push(SuggestedAction {
             kind: ActionKind::SkipSource,
-            label: format!(
-                "Always ignore in the whole source {}: skip “{glob}”",
-                g.source
-            ),
+            label: gallery_core::t!("triage.ignore_source", source = g.source, glob = glob),
             target: None,
             dir: None,
             ops: vec![op],
@@ -267,7 +266,7 @@ pub fn create_target(
     };
     SuggestedAction {
         kind: ActionKind::CreateTarget,
-        label: "Create target…".into(),
+        label: gallery_core::t!("triage.create_target"),
         target: Some(name),
         dir: Some(dir),
         ops: vec![EditOp::AddTarget {
@@ -297,7 +296,7 @@ fn load(config: &Path) -> Result<Loaded, String> {
     let (text, version) = file::read(config).map_err(|e| format!("{}: {e}", config.display()))?;
     let doc = text
         .parse::<toml_edit::DocumentMut>()
-        .map_err(|e| format!("config is not valid TOML: {e}"))?;
+        .map_err(|e| gallery_core::t!("triage.invalid_toml", error = e))?;
     let draft = read_draft(&doc)?;
     let dir = config.parent().unwrap_or(Path::new(""));
     let label = config.file_name().map(Path::new).unwrap_or(config);
@@ -341,10 +340,9 @@ pub fn create_ops(
 ) -> Result<SuggestedAction, String> {
     let l = load(config)?;
     if l.version != version {
-        return Err("the file changed after triage read it: refresh the triage".into());
+        return Err(gallery_core::t!("triage.changed"));
     }
-    let item =
-        ext_item(ext).ok_or("the files have no extension: write a target for them by hand")?;
+    let item = ext_item(ext).ok_or_else(|| gallery_core::t!("triage.no_extension"))?;
     let g = Group {
         source: source.into(),
         dir: rel_dir.into(),

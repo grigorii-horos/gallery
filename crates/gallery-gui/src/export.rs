@@ -44,23 +44,18 @@ pub struct ExportDone {
 
 /// `gallery apply <path to the plan on the server>/<file_name>`.
 pub fn command_line(file_name: &str) -> String {
-    format!("gallery apply <path to the plan on the server>/{file_name}")
+    gallery_core::t!("export.command", file = file_name)
 }
 
 /// A missing server path is the user's to configure: say what and where.
 fn explain(mut e: ScanError) -> ScanError {
     if e.cancelled {
-        e.message = "Export cancelled".into();
+        e.message = gallery_core::t!("export.cancelled");
         return e;
     }
-    if let Some(i) = e.message.find("server plan needs paths:") {
-        let list = e.message[i + "server plan needs paths:".len()..].trim();
+    if let Some(list) = gallery_core::i18n::extract("plan.server_needs_paths", "list", &e.message) {
         let lines: Vec<String> = list.split("; ").map(|w| format!("  • {w}")).collect();
-        e.message = format!(
-            "A server plan is missing server paths:\n{}\n\
-             Set server_path on these sources and server_dir on these target outputs in the config.",
-            lines.join("\n")
-        );
+        e.message = gallery_core::t!("export.missing_paths", lines = lines.join("\n"));
     }
     e
 }
@@ -103,7 +98,7 @@ pub fn run_with_examples(
     let dest = gallery_core::config::expand_tilde(Path::new(req.dest_dir.trim()));
     if req.dest_dir.trim().is_empty() || !dest.is_absolute() {
         return Err(ScanError {
-            message: "choose a folder to export to".into(),
+            message: gallery_core::t!("export.choose_folder"),
             cancelled: false,
         });
     }

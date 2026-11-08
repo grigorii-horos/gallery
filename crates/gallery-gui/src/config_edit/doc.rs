@@ -14,8 +14,9 @@ type R<T> = Result<T, String>;
 
 // ---------- reading ----------
 
+/// `path: expected <what>`; `what` is a catalog key (`edit.what.*`).
 fn wrong(path: &str, what: &str) -> String {
-    format!("{path}: expected {what}")
+    gallery_core::t!("edit.expected", path = path, what = gallery_core::t!(what))
 }
 
 pub(super) fn str_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<String>> {
@@ -24,7 +25,7 @@ pub(super) fn str_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<Strin
         Some(i) => i
             .as_str()
             .map(|s| Some(s.to_string()))
-            .ok_or_else(|| wrong(&format!("{path}.{key}"), "a string")),
+            .ok_or_else(|| wrong(&format!("{path}.{key}"), "edit.what.string")),
     }
 }
 
@@ -34,19 +35,19 @@ pub(super) fn bool_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<bool
         Some(i) => i
             .as_bool()
             .map(Some)
-            .ok_or_else(|| wrong(&format!("{path}.{key}"), "true or false")),
+            .ok_or_else(|| wrong(&format!("{path}.{key}"), "edit.what.bool")),
     }
 }
 
 fn strings(v: &Value, path: &str) -> R<Vec<String>> {
     let a = v
         .as_array()
-        .ok_or_else(|| wrong(path, "a list of strings"))?;
+        .ok_or_else(|| wrong(path, "edit.what.strings"))?;
     a.iter()
         .map(|x| {
             x.as_str()
                 .map(str::to_string)
-                .ok_or_else(|| wrong(path, "a list of strings"))
+                .ok_or_else(|| wrong(path, "edit.what.strings"))
         })
         .collect()
 }
@@ -57,7 +58,7 @@ fn str_list_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<Vec<String>
         None => Ok(None),
         Some(i) => i
             .as_value()
-            .ok_or_else(|| wrong(&p, "a list of strings"))
+            .ok_or_else(|| wrong(&p, "edit.what.strings"))
             .and_then(|v| strings(v, &p))
             .map(Some),
     }
@@ -67,7 +68,7 @@ fn str_list_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<Vec<String>
 pub(super) fn mask_value(v: &Value, path: &str) -> R<Vec<String>> {
     match v.as_str() {
         Some(s) => Ok(vec![s.to_string()]),
-        None => strings(v, path).map_err(|_| wrong(path, "a mask: a string or a list of strings")),
+        None => strings(v, path).map_err(|_| wrong(path, "edit.what.mask")),
     }
 }
 
@@ -77,7 +78,7 @@ pub(super) fn mask_at(t: &dyn TableLike, key: &str, path: &str) -> R<Option<Vec<
         None => Ok(None),
         Some(i) => i
             .as_value()
-            .ok_or_else(|| wrong(&p, "a mask: a string or a list of strings"))
+            .ok_or_else(|| wrong(&p, "edit.what.mask"))
             .and_then(|v| mask_value(v, &p))
             .map(Some),
     }
@@ -90,7 +91,7 @@ pub(super) fn steps_at(t: &dyn TableLike, key: &str, path: &str) -> R<Vec<StepDr
     };
     let arr = item
         .as_array()
-        .ok_or_else(|| wrong(&p, "a list of steps"))?;
+        .ok_or_else(|| wrong(&p, "edit.what.steps"))?;
     arr.iter()
         .enumerate()
         .map(|(i, v)| {
@@ -103,9 +104,10 @@ pub(super) fn steps_at(t: &dyn TableLike, key: &str, path: &str) -> R<Vec<StepDr
             }
             let it = v
                 .as_inline_table()
-                .ok_or_else(|| wrong(&sp, "a preset name or { mask, preset }"))?;
+                .ok_or_else(|| wrong(&sp, "edit.what.step"))?;
             Ok(StepDraft {
-                preset: str_at(it, "preset", &sp)?.ok_or_else(|| format!("{sp}: no preset"))?,
+                preset: str_at(it, "preset", &sp)?
+                    .ok_or_else(|| gallery_core::t!("edit.step_no_preset_at", path = sp))?,
                 mask: mask_at(it, "mask", &sp)?,
             })
         })
@@ -123,10 +125,10 @@ fn tables_at<'a>(t: &'a dyn TableLike, key: &str, path: &str) -> R<Vec<&'a dyn T
             .map(|v| {
                 v.as_inline_table()
                     .map(|t| t as &dyn TableLike)
-                    .ok_or_else(|| wrong(&p, "a list of tables"))
+                    .ok_or_else(|| wrong(&p, "edit.what.tables"))
             })
             .collect(),
-        Some(_) => Err(wrong(&p, "a list of tables")),
+        Some(_) => Err(wrong(&p, "edit.what.tables")),
     }
 }
 
@@ -176,7 +178,9 @@ fn target(t: &dyn TableLike, path: &str) -> R<TargetDraft> {
         None => None,
         Some(i) => {
             let pp = format!("{path}.prefilter");
-            let p = i.as_table_like().ok_or_else(|| wrong(&pp, "a table"))?;
+            let p = i
+                .as_table_like()
+                .ok_or_else(|| wrong(&pp, "edit.what.table"))?;
             Some(PrefilterDraft {
                 matches: mask_at(p, "match", &pp)?,
                 exclude: mask_at(p, "exclude", &pp)?.unwrap_or_default(),
@@ -205,7 +209,7 @@ pub fn read_draft(doc: &DocumentMut) -> R<ConfigDraft> {
     if let Some(t) = doc.get("targets") {
         let t = t
             .as_table_like()
-            .ok_or_else(|| wrong("targets", "a table"))?;
+            .ok_or_else(|| wrong("targets", "edit.what.table"))?;
         for stage in Stage::ALL {
             let list = tables_at(t, stage.key(), "targets")?
                 .into_iter()

@@ -61,7 +61,7 @@ pub fn ai_scan_estimate_default(
     overrides: Option<&Path>,
 ) -> Result<AiEstimate, String> {
     let cache =
-        AiClassifier::default_cache_path().ok_or_else(|| "no user cache directory".to_string())?;
+        AiClassifier::default_cache_path().ok_or_else(|| gallery_core::t!("ai.no_cache_dir"))?;
     ai_scan_estimate(
         config,
         overrides,

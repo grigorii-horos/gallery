@@ -16,7 +16,7 @@ use crate::overrides::{OverrideRequest, OverrideResult};
 pub fn default_file() -> Result<PathBuf, String> {
     match crate::data_dir_override() {
         Some(dir) => Ok(dir.join("ai-examples.jsonl")),
-        None => Store::default_path().ok_or_else(|| "no user data directory".to_string()),
+        None => Store::default_path().ok_or_else(|| gallery_core::t!("lock.no_data_dir")),
     }
 }
 

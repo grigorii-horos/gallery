@@ -321,7 +321,7 @@ impl Owned {
     /// AI cache and index (under `$GALLERY_DATA_DIR` in debug builds when set).
     pub fn for_config(config: &Path, tools: Option<Tools>) -> Result<Owned, String> {
         Ok(Owned {
-            dir: crate::plans::current_dir().ok_or("no user data directory")?,
+            dir: crate::plans::current_dir().ok_or_else(|| gallery_core::t!("lock.no_data_dir"))?,
             config: config.to_path_buf(),
             overrides: crate::overrides::default_file().ok(),
             ai_cache: gallery_core::ai::AiClassifier::default_cache_path()
@@ -535,7 +535,7 @@ pub fn prepare_run(
         return Err(Refusal::Stale);
     }
     if plan.items.is_empty() {
-        return Err(Refusal::Other("The plan has no files to run.".into()));
+        return Err(Refusal::Other(gallery_core::t!("current.no_files")));
     }
     let files = plan.items.len();
     if dry_run && pilot.is_none() {
