@@ -76,10 +76,14 @@ pub fn acquire_apply_at(path: &Path) -> Result<FileLock> {
         std::fs::create_dir_all(dir)?;
     }
     FileLock::acquire(path, |pid, p| {
+        // Windows locks are mandatory: the holder's pid may be unreadable.
+        let pid = match pid.trim() {
+            "" => "unknown",
+            t => t,
+        };
         format!(
-            "Another Gallery run (GUI or CLI) is already applying or undoing a plan (pid {}). \
+            "Another Gallery run (GUI or CLI) is already applying or undoing a plan (pid {pid}). \
              Wait for it to finish. If there is no such process, delete {}",
-            pid.trim(),
             p.display()
         )
     })

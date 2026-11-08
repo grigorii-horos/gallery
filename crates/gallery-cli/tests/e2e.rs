@@ -828,7 +828,10 @@ fn apply_and_undo_are_refused_while_another_run_holds_the_global_lock() {
             .failure();
         let err = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
         assert!(err.contains("Another Gallery run"), "{err}");
-        assert!(err.contains(&std::process::id().to_string()), "{err}");
+        // Windows locks are mandatory: the holder's pid is unreadable there.
+        if cfg!(unix) {
+            assert!(err.contains(&std::process::id().to_string()), "{err}");
+        }
         assert!(lock.exists(), "a live holder's lock stays");
     }
     drop(held);
