@@ -1,4 +1,6 @@
 import { useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import type { MessageKey } from "../i18n";
 import type { AppData } from "../store";
 import type { PlanState } from "../plan/usePlan";
 import type { RunState } from "../run/useRun";
@@ -24,16 +26,17 @@ interface Props {
   onUndoPilot: (reportPath: string) => void;
 }
 
-const TITLES: Record<StepId, string> = {
-  check: "Check",
-  decide: "Decide",
-  run: "Run",
+const TITLES: Record<StepId, MessageKey> = {
+  check: "step_check",
+  decide: "step_decide",
+  run: "step_run",
 };
 
 /// Sort: the whole sorting on one screen over the one current plan.
 /// The status line says where things stand; three steps open in order —
 /// check the plan, decide the doubtful files (only when there are any), run it.
 export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetryDone, onOpenHistory, onUndoPilot }: Props) {
+  const { t } = useTranslation();
   const view = plan.view;
   const cfg = data.summary;
   // The steps start over after each real run: the plan has changed under them.
@@ -72,20 +75,20 @@ export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetr
       <Notices data={data} plan={plan} />
       {retryPath && !run.run && <RetryCard path={retryPath} run={run} busy={otherBusy} onDone={onRetryDone} />}
       {plan.loading && !view ? (
-        <p className="empty">Opening the current plan…</p>
+        <p className="empty">{t("flow_opening")}</p>
       ) : plan.loadError ? (
         <div className="notice bad">
-          <p className="notice-title">The plan did not open</p>
+          <p className="notice-title">{t("flow_open_failed")}</p>
           <pre className="notice-text">{plan.loadError}</pre>
         </div>
       ) : !view ? (
         <div className="plan-empty">
           <p>
             {plan.updateError
-              ? "The plan could not be built (see the reason above)."
-              : "The plan builds itself: it reads the sources from the config and assigns files to targets. The files themselves are not changed."}
+              ? t("flow_build_failed")
+              : t("flow_builds_itself")}
           </p>
-          <p className="muted">AI is not called until you press “Ask AI” yourself.</p>
+          <p className="muted">{t("flow_ai_manual")}</p>
         </div>
       ) : (
         <>
@@ -101,7 +104,7 @@ export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetr
                 id === "run" && states.run === "locked"
                   ? runLockedText(input)
                   : id === "decide"
-                    ? `${view.plan.review.length.toLocaleString("en-US")} to decide`
+                    ? t("flow_to_decide", { n: view.plan.review.length })
                     : null
               }
             >
@@ -110,7 +113,7 @@ export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetr
                   <CheckStep data={data} plan={plan} onConfigSaved={data.reload} />
                   <div className="step-foot">
                     <button type="button" className="btn primary" disabled={states.check === "locked"} onClick={checkDone}>
-                      {input.checked ? "Checked" : "Looks right — next"}
+                      {input.checked ? t("flow_checked") : t("flow_check_next")}
                     </button>
                   </div>
                 </>
@@ -122,9 +125,9 @@ export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetr
                   </div>
                   <div className="step-foot">
                     <button type="button" className="btn primary" onClick={decideDone}>
-                      {input.decided ? "Decided" : "Decisions made — next"}
+                      {input.decided ? t("flow_decided") : t("flow_decide_next")}
                     </button>
-                    <span className="muted small">Undecided files will not be part of this run and stay where they are.</span>
+                    <span className="muted small">{t("flow_undecided")}</span>
                   </div>
                 </>
               )}
@@ -149,13 +152,14 @@ export function FlowScreen({ data, plan, run, sync, otherBusy, retryPath, onRetr
 
 /// Collapsible section for the export, below the three steps.
 function ServerSection({ data, plan, run, busy }: { data: AppData; plan: PlanState; run: RunState; busy: string | null }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <section className="flow-step flow-server">
       <h2>
         <button type="button" className="flow-step-head" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
-          <span className="step-title">For server</span>
-          <span className="muted small">export plan</span>
+          <span className="step-title">{t("flow_for_server")}</span>
+          <span className="muted small">{t("flow_export_plan")}</span>
         </button>
       </h2>
       {open && (
@@ -168,9 +172,10 @@ function ServerSection({ data, plan, run, busy }: { data: AppData; plan: PlanSta
 }
 
 function StatusLine({ plan }: { plan: PlanState }) {
+  const { t } = useTranslation();
   const view = plan.view;
   return (
-    <div className="flow-status" role="status" aria-label="Plan status">
+    <div className="flow-status" role="status" aria-label={t("flow_status_aria")}>
       {view ? (
         <ul className="flow-counts">
           {statusParts(view).map((p) => (
@@ -180,32 +185,33 @@ function StatusLine({ plan }: { plan: PlanState }) {
           ))}
         </ul>
       ) : (
-        <span className="muted">{plan.loading ? "Opening the plan…" : "No plan yet"}</span>
+        <span className="muted">{plan.loading ? t("flow_opening_short") : t("flow_no_plan")}</span>
       )}
-      {plan.updating && <span className="muted small">Refreshing the plan…</span>}
+      {plan.updating && <span className="muted small">{t("flow_refreshing")}</span>}
     </div>
   );
 }
 
 function Notices({ data, plan }: { data: AppData; plan: PlanState }) {
+  const { t } = useTranslation();
   const notes = plan.view?.notes ?? [];
   return (
     <>
       {!data.summary && data.loadError && (
         <div className="notice bad">
-          <p className="notice-title">Config could not be read, the plan is not refreshed</p>
+          <p className="notice-title">{t("flow_config_unread")}</p>
           <pre className="notice-text">{data.loadError}</pre>
         </div>
       )}
       {plan.updateError && (
         <div className="notice bad">
-          <p className="notice-title">The plan was not refreshed</p>
+          <p className="notice-title">{t("flow_not_refreshed")}</p>
           <pre className="notice-text">{plan.updateError}</pre>
         </div>
       )}
       {plan.scanError && (
         <div className="notice bad">
-          <p className="notice-title">The AI request failed</p>
+          <p className="notice-title">{t("flow_ai_failed")}</p>
           <pre className="notice-text">{plan.scanError}</pre>
         </div>
       )}
@@ -238,15 +244,16 @@ function Step({
   note: string | null;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   const locked = state === "locked";
   return (
-    <section className={`flow-step ${state}`} aria-label={TITLES[id]} data-step={id}>
+    <section className={`flow-step ${state}`} aria-label={t(TITLES[id])} data-step={id}>
       <h2>
         <button type="button" className="flow-step-head" aria-expanded={open} disabled={locked} onClick={onToggle}>
           <span className="step-n" aria-hidden>
             {state === "done" ? "✓" : n}
           </span>
-          <span className="step-title">{TITLES[id]}</span>
+          <span className="step-title">{t(TITLES[id])}</span>
           {note && <span className="muted small">{note}</span>}
         </button>
       </h2>

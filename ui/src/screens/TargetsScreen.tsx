@@ -1,4 +1,7 @@
 import { useState, type DragEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { t as tr, type MessageKey } from "../i18n";
+import { num } from "../i18n/format";
 import type { Stage } from "../api";
 import type { AppData } from "../store";
 import { EditorBar, EditorFailure, Field, FolderInput, Issues, MaskChips, MaskTester, PipeEditor, SourceToggles, TextInput, type PresetChoice } from "../editor/fields";
@@ -18,10 +21,10 @@ import type { ConfigEditor } from "../editor/useConfigEditor";
 import { EffectPanel } from "../editor/EffectPanel";
 import { useEffectPreview } from "../editor/useEffectPreview";
 
-const STAGES: { id: Stage; title: string; hint: string }[] = [
-  { id: "before_ai", title: "Masks before AI", hint: "in order, first match wins" },
-  { id: "ai", title: "AI", hint: "order does not matter" },
-  { id: "after_ai", title: "Masks after AI", hint: "in order, for the remaining files" },
+const STAGES: { id: Stage; title: MessageKey; hint: MessageKey }[] = [
+  { id: "before_ai", title: "targets_stage_before", hint: "targets_hint_before" },
+  { id: "ai", title: "stage_ai", hint: "targets_hint_ai" },
+  { id: "after_ai", title: "targets_stage_after", hint: "targets_hint_after" },
 ];
 
 const OTHER: Partial<Record<Stage, Stage>> = { before_ai: "after_ai", after_ai: "before_ai" };
@@ -32,6 +35,7 @@ interface Sel {
 }
 
 export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigEditor }) {
+  const { t } = useTranslation();
   const v = editor.view;
   const [picked, setSelected] = useState<Sel | null>(null);
   const [drag, setDrag] = useState<Sel | null>(null);
@@ -39,7 +43,7 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
   const effect = useEffectPreview(data.configPath, editor.ops, editor.dirty && !editor.view?.error);
   if (!v) {
     if (editor.failure) return <EditorFailure editor={editor} />;
-    return <p className="empty">Reading config…</p>;
+    return <p className="empty">{t("gate_reading")}</p>;
   }
   const targets = v.draft.targets;
   const first = STAGES.find((st) => targets[st.id].length > 0);
@@ -47,11 +51,11 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
     picked && targets[picked.stage][picked.index] ? picked : first ? { stage: first.id, index: 0 } : null;
   const current = selected ? targets[selected.stage][selected.index] : undefined;
   const general = v.error && !v.error.path?.startsWith("targets") ? v.error : null;
-  const allNames = STAGES.flatMap((s) => targets[s.id].map((t) => t.name));
+  const allNames = STAGES.flatMap((s) => targets[s.id].map((x) => x.name));
 
   const add = async (stage: Stage) => {
-    const t = { ...emptyTarget(stage), name: freeName("New target", allNames) };
-    const o = await editor.editNow({ op: "add_target", stage, target: t });
+    const fresh = { ...emptyTarget(stage), name: freeName(t("targets_new_name"), allNames) };
+    const o = await editor.editNow({ op: "add_target", stage, target: fresh });
     if (o) setSelected({ stage, index: o.draft.targets[stage].length - 1 });
   };
 
@@ -80,7 +84,7 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
       <EditorFailure editor={editor} />
       {general && (
         <div className="notice bad">
-          <p className="notice-title">The config with these changes will not pass validation</p>
+          <p className="notice-title">{t("editor_invalid")}</p>
           <pre className="notice-text">{general.message}</pre>
         </div>
       )}
@@ -88,16 +92,16 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
         {STAGES.map((st, n) => {
           const list = targets[st.id];
           return (
-            <section key={st.id} className="stage" aria-label={st.title}>
+            <section key={st.id} className="stage" aria-label={t(st.title)}>
               <header className="stage-head">
                 <span className="stage-no">{n + 1}</span>
-                <h2>{st.title}</h2>
-                <span className="count">{list.length}</span>
-                <button type="button" className="btn quiet add" onClick={() => add(st.id)} aria-label={`Add target: ${st.title}`}>
-                  + target
+                <h2>{t(st.title)}</h2>
+                <span className="count">{num(list.length)}</span>
+                <button type="button" className="btn quiet add" onClick={() => add(st.id)} aria-label={t("targets_add_aria", { stage: t(st.title) })}>
+                  {t("targets_add")}
                 </button>
               </header>
-              <p className="stage-hint">{st.hint}</p>
+              <p className="stage-hint">{t(st.hint)}</p>
               <ol
                 className={`target-list${drag && dropMoveOk(drag.stage, st.id) ? " droppable" : ""}`}
                 onDragOver={(e) => {
@@ -108,8 +112,8 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
                 }}
                 onDrop={onDrop}
               >
-                {list.length === 0 && <li className="empty small">No targets{drag && dropMoveOk(drag.stage, st.id) ? " — drop here" : ""}</li>}
-                {list.map((t, i) => {
+                {list.length === 0 && <li className="empty small">{t("targets_none")}{drag && dropMoveOk(drag.stage, st.id) ? ` — ${t("targets_drop_here")}` : ""}</li>}
+                {list.map((tg, i) => {
                   const path = pathOf(st.id, i);
                   const bad = v.error ? issuesUnder([v.error], path).length > 0 : false;
                   const warn = issuesUnder(v.warnings, path).length > 0;
@@ -117,13 +121,13 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
                   const lineAfter = drop?.stage === st.id && drop.before === list.length && i === list.length - 1;
                   return (
                     <li
-                      key={`${t.name}-${i}`}
+                      key={`${tg.name}-${i}`}
                       className={`${lineBefore ? "drop-before" : ""}${lineAfter ? " drop-after" : ""}`}
                       draggable
                       onDragStart={(e) => {
                         setDrag({ stage: st.id, index: i });
                         e.dataTransfer.effectAllowed = "move";
-                        e.dataTransfer.setData("text/plain", t.name);
+                        e.dataTransfer.setData("text/plain", tg.name);
                       }}
                       onDragEnd={() => {
                         setDrag(null);
@@ -142,10 +146,10 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
                         </span>
                         <span className="target-text">
                           <span className="target-name">
-                            {t.name || <span className="muted">no name</span>}
-                            {bad ? <span className="flag bad" aria-label="error" /> : warn && <span className="flag warn" aria-label="has warnings" />}
+                            {tg.name || <span className="muted">{t("targets_no_name")}</span>}
+                            {bad ? <span className="flag bad" aria-label={t("flag_error")} /> : warn && <span className="flag warn" aria-label={t("flag_warnings")} />}
                           </span>
-                          <span className="target-meta">{targetMeta(t)}</span>
+                          <span className="target-meta">{targetMeta(tg)}</span>
                         </span>
                       </button>
                     </li>
@@ -155,7 +159,7 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
             </section>
           );
         })}
-        <aside className="inspector" aria-label="Selected target">
+        <aside className="inspector" aria-label={t("targets_selected")}>
           {current && selected ? (
             <TargetForm
               key={`${selected.stage}-${selected.index}-${editor.formGen}`}
@@ -168,7 +172,7 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
               onSelect={setSelected}
             />
           ) : (
-            <p className="empty">Choose a target or add a new one.</p>
+            <p className="empty">{t("targets_choose")}</p>
           )}
         </aside>
       </div>
@@ -182,9 +186,9 @@ function dropMoveOk(from: Stage, to: Stage): boolean {
   return (from === "ai") === (to === "ai");
 }
 
-function targetMeta(t: TargetDraft): string {
-  if (t.outputs.length === 0) return "no outputs: files stay in place";
-  const dirs = t.outputs.map((o) => o.dir.split("/").filter(Boolean).pop() ?? o.dir);
+function targetMeta(tg: TargetDraft): string {
+  if (tg.outputs.length === 0) return tr("targets_no_outputs");
+  const dirs = tg.outputs.map((o) => o.dir.split("/").filter(Boolean).pop() ?? o.dir);
   return dirs.join(", ");
 }
 
@@ -205,6 +209,7 @@ function TargetForm({
   editor: ConfigEditor;
   onSelect: (s: Sel | null) => void;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(target);
   const v = editor.view!;
   const path = pathOf(stage, index);
@@ -235,15 +240,15 @@ function TargetForm({
   return (
     <div className="detail form">
       <div className="form-head">
-        <TextInput label="Target name" value={form.name} invalid={!!errAt(".name")} onChange={(name) => update({ ...form, name })} />
+        <TextInput label={t("triage_target_name")} value={form.name} invalid={!!errAt(".name")} onChange={(name) => update({ ...form, name })} />
       </div>
       <Issues items={[]} error={errAt(".name") ?? ownErr} />
       <div className="form-tools">
         <button type="button" className="btn quiet" disabled={index === 0} onClick={() => structural({ op: "move_target", from: stage, index, to: stage, to_index: index - 1 }, { stage, index: index - 1 })}>
-          Up
+          {t("targets_up")}
         </button>
         <button type="button" className="btn quiet" disabled={index >= count - 1} onClick={() => structural({ op: "move_target", from: stage, index, to: stage, to_index: index + 1 }, { stage, index: index + 1 })}>
-          Down
+          {t("targets_down")}
         </button>
         {other && (
           <button
@@ -255,31 +260,31 @@ function TargetForm({
               void structural({ op: "move_target", from: stage, index, to: other, to_index: at }, { stage: other, index: at });
             }}
           >
-            {other === "after_ai" ? "To “Masks after AI”" : "To “Masks before AI”"}
+            {other === "after_ai" ? t("targets_to_after") : t("targets_to_before")}
           </button>
         )}
         <span className="spacer" />
         <button type="button" className="btn quiet danger" onClick={() => structural({ op: "remove_target", stage, index }, null)}>
-          Delete target
+          {t("targets_delete")}
         </button>
       </div>
 
       {stage === "ai" ? (
         <>
-          <h3>Sources</h3>
-          <SourceToggles all={sourceIds} value={form.sources} label="Sources of the AI target" onChange={(sources) => update({ ...form, sources })} />
+          <h3>{t("nav_sources")}</h3>
+          <SourceToggles all={sourceIds} value={form.sources} label={t("targets_ai_sources")} onChange={(sources) => update({ ...form, sources })} />
           <Issues items={warnAt(".sources")} />
-          <h3>Description for the AI</h3>
+          <h3>{t("targets_description")}</h3>
           <textarea
             className="input"
-            aria-label="Description for the AI"
+            aria-label={t("targets_description")}
             aria-invalid={!!errAt(".description") || undefined}
             rows={4}
             value={form.description ?? ""}
             onChange={(e) => update({ ...form, description: e.target.value })}
           />
           <Issues items={[]} error={errAt(".description")} />
-          <h3>Prefilter</h3>
+          <h3>{t("explain_prefilter_title")}</h3>
           {form.prefilter ? (
             <PrefilterEditor
               value={form.prefilter}
@@ -292,17 +297,17 @@ function TargetForm({
             />
           ) : (
             <p className="field-inline">
-              <span className="muted">none: the AI is asked about any file of the sources </span>
+              <span className="muted">{t("targets_prefilter_none")} </span>
               <button type="button" className="link small" onClick={() => update({ ...form, prefilter: { match: ["@photo", "@video"], exclude: [] } })}>
-                Add
+                {t("targets_add_prefilter")}
               </button>
             </p>
           )}
         </>
       ) : (
         <>
-          <h3>Filters <span className="muted small">— the target takes a file if any filter matches</span></h3>
-          {form.filters.length === 0 && <p className="notice warn">No filters: the target takes no files.</p>}
+          <h3>{t("targets_filters")} <span className="muted small">— {t("targets_filters_hint")}</span></h3>
+          {form.filters.length === 0 && <p className="notice warn">{t("targets_no_filters")}</p>}
           <ul className="filters">
             {form.filters.map((f, i) => (
               <li key={i}>
@@ -322,12 +327,12 @@ function TargetForm({
             ))}
           </ul>
           <button type="button" className="link small" onClick={() => update({ ...form, filters: [...form.filters, { sources: [], match: null, exclude: [] }] })}>
-            Add filter
+            {t("targets_add_filter")}
           </button>
         </>
       )}
 
-      <h3>Outputs</h3>
+      <h3>{t("trace_outputs")}</h3>
       <Issues items={warnAt(".outputs")} />
       {form.outputs.map((o, i) => (
         <OutputEditor
@@ -344,7 +349,7 @@ function TargetForm({
         />
       ))}
       <button type="button" className="link small" onClick={() => update({ ...form, outputs: [...form.outputs, { dir: "", server_dir: null, content: [], rename: [] }] })}>
-        Add output
+        {t("targets_add_output")}
       </button>
     </div>
   );
@@ -373,10 +378,11 @@ function FilterEditor({
   onChange: (f: FilterDraft) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="filter-edit">
-      <Field label="Sources">
-        <SourceToggles all={sourceIds} value={f.sources} label="Sources of the filter" onChange={(sources) => onChange({ ...f, sources })} />
+      <Field label={t("nav_sources")}>
+        <SourceToggles all={sourceIds} value={f.sources} label={t("targets_filter_sources")} onChange={(sources) => onChange({ ...f, sources })} />
         <Issues items={warnings} />
       </Field>
       <MatchFields
@@ -390,7 +396,7 @@ function FilterEditor({
       <div className="filter-foot">
         <MaskTester editor={editor} configPath={configPath} match={f.match} exclude={f.exclude} />
         <button type="button" className="link small danger" onClick={onRemove}>
-          Remove filter
+          {t("targets_remove_filter")}
         </button>
       </div>
     </div>
@@ -414,13 +420,14 @@ function PrefilterEditor({
   configPath: string | null;
   onChange: (p: PrefilterDraft | null) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="filter-edit">
       <MatchFields match={p.match} exclude={p.exclude} path={path} errorAt={errorAt} suggestions={suggestions} onChange={(match, exclude) => onChange({ match, exclude })} />
       <div className="filter-foot">
         <MaskTester editor={editor} configPath={configPath} match={p.match} exclude={p.exclude} />
         <button type="button" className="link small danger" onClick={() => onChange(null)}>
-          Remove prefilter
+          {t("targets_remove_prefilter")}
         </button>
       </div>
     </div>
@@ -442,35 +449,36 @@ function MatchFields({
   suggestions: string[];
   onChange: (match: string[] | null, exclude: string[]) => void;
 }) {
+  const { t } = useTranslation();
   return (
     <>
-      <Field label="Matches">
+      <Field label={t("field_matches")}>
         {match === null ? (
           <p className="field-inline">
-            <span className="muted">any file </span>
+            <span className="muted">{t("match_any_file")} </span>
             <button type="button" className="link small" onClick={() => onChange([], exclude)}>
-              Set mask
+              {t("match_set_mask")}
             </button>
           </p>
         ) : (
           <>
-            <MaskChips label="Mask: matches" value={match} invalid={!!errorAt(`${path}.match`)} suggestions={suggestions} onChange={(m) => onChange(m, exclude)} />
+            <MaskChips label={t("match_mask_matches")} value={match} invalid={!!errorAt(`${path}.match`)} suggestions={suggestions} onChange={(m) => onChange(m, exclude)} />
             <button type="button" className="link small" onClick={() => onChange(null, exclude)}>
-              Any file
+              {t("match_any")}
             </button>
           </>
         )}
         <Issues items={[]} error={errorAt(`${path}.match`)} />
       </Field>
-      <Field label="Except">
+      <Field label={t("match_except")}>
         <MaskChips
-          label="Mask: except"
+          label={t("match_mask_except")}
           value={exclude}
           invalid={!!errorAt(`${path}.exclude`)}
           suggestions={suggestions}
-          placeholder="nothing"
+          placeholder={t("match_nothing")}
           allowNot={false}
-          exceptionField="Matches"
+          exceptionField={t("field_matches")}
           onChange={(x) => onChange(match, x)}
         />
         <Issues items={[]} error={errorAt(`${path}.exclude`)} />
@@ -500,6 +508,7 @@ function OutputEditor({
   onChange: (o: OutputDraft) => void;
   onRemove: () => void;
 }) {
+  const { t } = useTranslation();
   const presets = (kind: "content" | "name"): PresetChoice[] => [
     ...(data.summary?.presets[kind] ?? []).map((p) => ({ name: p.name, mask: p.mask, description: p.description, own: true, bundle: p.kind === "bundle" })),
     ...(data.builtins?.[kind] ?? []).map((p) => ({ name: p.name, mask: p.mask, description: p.description, own: false, bundle: p.kind === "bundle" })),
@@ -508,42 +517,42 @@ function OutputEditor({
   return (
     <div className="output">
       <div className="output-head">
-        <span className="output-no">Output {n + 1}</span>
+        <span className="output-no">{t("output_n", { n: n + 1 })}</span>
         <button type="button" className="link small danger" onClick={onRemove}>
-          Remove output
+          {t("output_remove")}
         </button>
       </div>
-      <Field label="Folder" hint={<>Templates allowed: <code>{"{YYYY}"}</code>, <code>{"{MM}"}</code>, <code>{"{source}"}</code></>}>
-        <FolderInput label={`Output ${n + 1} folder`} value={o.dir} invalid={!!error && !o.dir.trim()} onChange={(dir) => onChange({ ...o, dir })} />
+      <Field label={t("folder")} hint={<>{t("output_templates")} <code>{"{YYYY}"}</code>, <code>{"{MM}"}</code>, <code>{"{source}"}</code></>}>
+        <FolderInput label={t("output_folder", { n: n + 1 })} value={o.dir} invalid={!!error && !o.dir.trim()} onChange={(dir) => onChange({ ...o, dir })} />
         <Issues items={warnFor(".dir")} />
       </Field>
-      <Field label="On the server">
+      <Field label={t("sources_on_server")}>
         <TextInput
-          label={`Folder on the server, output ${n + 1}`}
+          label={t("output_server_folder", { n: n + 1 })}
           mono
           value={o.server_dir ?? ""}
-          placeholder="same as here"
+          placeholder={t("sources_same")}
           onChange={(s) => onChange({ ...o, server_dir: s.trim() ? s : null })}
         />
       </Field>
-      <Field label="Content">
+      <Field label={t("pipe_content")}>
         <PipeEditor
-          label={`Content, output ${n + 1}`}
+          label={t("output_content", { n: n + 1 })}
           steps={o.content}
           presets={presets("content")}
           maskSuggestions={suggestions}
-          empty="copy as is"
+          empty={t("output_copy")}
           onChange={(content) => onChange({ ...o, content })}
         />
         <Issues items={warnFor(".content")} />
       </Field>
-      <Field label="Name">
+      <Field label={t("pipe_name")}>
         <PipeEditor
-          label={`Name, output ${n + 1}`}
+          label={t("output_name", { n: n + 1 })}
           steps={o.rename}
           presets={presets("name")}
           maskSuggestions={suggestions}
-          empty="keep the name"
+          empty={t("output_keep_name")}
           onChange={(rename) => onChange({ ...o, rename })}
         />
       </Field>

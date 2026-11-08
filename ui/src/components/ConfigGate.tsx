@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { ConfigSummary } from "../api";
 import type { AppData } from "../store";
+import { useTranslation } from "react-i18next";
 
 /// Renders `children` with the loaded config, or says why there is none.
 /// Validation errors and warnings are shown above the content.
@@ -11,13 +12,14 @@ export function ConfigGate({
   data: AppData;
   children: (summary: ConfigSummary) => ReactNode;
 }) {
+  const { t } = useTranslation();
   if (!data.summary) {
-    if (data.loading) return <p className="empty">Reading config…</p>;
+    if (data.loading) return <p className="empty">{t("gate_reading")}</p>;
     return (
       <div className="notice bad">
-        <p className="notice-title">Config could not be read</p>
+        <p className="notice-title">{t("gate_unreadable")}</p>
         <pre className="notice-text">{data.loadError}</pre>
-        <p>Fix the file and press “Reload”, or open another config.</p>
+        <p>{t("gate_fix_hint")}</p>
       </div>
     );
   }
@@ -26,7 +28,7 @@ export function ConfigGate({
     <>
       {!s.valid && (
         <div className="notice bad">
-          <p className="notice-title">The config failed validation, so it cannot be scanned</p>
+          <p className="notice-title">{t("gate_invalid")}</p>
           <pre className="notice-text">{s.error}</pre>
         </div>
       )}

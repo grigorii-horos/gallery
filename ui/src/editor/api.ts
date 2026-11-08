@@ -1,5 +1,6 @@
 // Tauri commands of the config editor (crates/gallery-gui/src/config_edit).
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "../i18n";
 import type { EditFailure, EditOp, EditOutcome, MaskTestResult, NamePresetDraft, PromptPreview } from "./model";
 import type { Limit, NameResult } from "./presets";
 
@@ -48,7 +49,7 @@ export async function pickTextFile(current: string | null, title: string): Promi
     directory: false,
     multiple: false,
     defaultPath: current ?? undefined,
-    filters: [{ name: "Text", extensions: ["md", "txt"] }],
+    filters: [{ name: t("dialog_text_filter"), extensions: ["md", "txt"] }],
   });
   return typeof picked === "string" ? picked : null;
 }

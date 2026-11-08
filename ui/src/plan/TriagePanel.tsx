@@ -1,4 +1,6 @@
 import { Fragment, useCallback, useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { num } from "../i18n/format";
 import { errorText } from "../api";
 import { asFailure, editorApi } from "../editor/api";
 import { Field, FolderInput, TextInput } from "../editor/fields";
@@ -24,6 +26,8 @@ interface Active {
   action: SuggestedAction;
   preview: ChangePreview | null;
   error: string | null;
+  /** The config file changed after the triage read it: refresh, then try again. */
+  stale?: boolean;
   saving: boolean;
 }
 
@@ -44,6 +48,7 @@ export function TriagePanel({
   /** The config was saved: the plan is stale now. */
   onConfigSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const [view, setView] = useState<TriageView | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [open, setOpen] = useState<string | null>(null);
@@ -75,7 +80,10 @@ export function TriagePanel({
         const p = await triageApi.preview(configPath, version, action.ops);
         if (my === seq.current) setActive({ gid, group, action, preview: p, error: null, saving: false });
       } catch (e) {
-        if (my === seq.current) setActive({ gid, group, action, preview: null, error: asFailure(e).message, saving: false });
+        if (my === seq.current) {
+          const f = asFailure(e);
+          setActive({ gid, group, action, preview: null, error: f.message, stale: f.kind === "changed", saving: false });
+        }
       }
     },
     [configPath],
@@ -87,28 +95,29 @@ export function TriagePanel({
     try {
       const out = await editorApi.save(configPath, view.version, active.action.ops);
       if (!out.saved) {
-        setActive({ ...active, saving: false, error: out.error?.message ?? "The config did not change" });
+        setActive({ ...active, saving: false, error: out.error?.message ?? t("triage_unchanged") });
         return;
       }
       setActive(null);
-      setSaved(`Saved to the config: ${active.action.label}. The previous version is next to it as .bak.`);
+      setSaved(t("triage_saved", { label: active.action.label }));
       onConfigSaved();
       setGen((g) => g + 1);
     } catch (e) {
-      setActive({ ...active, saving: false, error: asFailure(e).message });
+      const f = asFailure(e);
+      setActive({ ...active, saving: false, error: f.message, stale: f.kind === "changed" });
     }
   };
 
   if (error) {
     return (
       <div className="notice bad">
-        <p className="notice-title">The triage did not open</p>
+        <p className="notice-title">{t("triage_open_failed")}</p>
         <pre className="notice-text">{error}</pre>
       </div>
     );
   }
-  if (!view) return <p className="empty">Triaging unmatched files…</p>;
-  if (view.groups.length === 0) return <p className="empty">No unmatched files.</p>;
+  if (!view) return <p className="empty">{t("triage_loading")}</p>;
+  if (view.groups.length === 0) return <p className="empty">{t("triage_none")}</p>;
 
   return (
     <div className="triage">
@@ -116,11 +125,11 @@ export function TriagePanel({
       <table className="triage-table">
         <thead>
           <tr>
-            <th>Folder</th>
-            <th>Extension</th>
-            <th className="num">Files</th>
-            <th className="num">Size</th>
-            <th>Why unmatched</th>
+            <th>{t("triage_col_folder")}</th>
+            <th>{t("triage_col_ext")}</th>
+            <th className="num">{t("triage_col_files")}</th>
+            <th className="num">{t("triage_col_size")}</th>
+            <th>{t("triage_col_why")}</th>
           </tr>
         </thead>
         <tbody>
@@ -145,14 +154,14 @@ export function TriagePanel({
                     </button>
                   </td>
                   <td className="mono">{extLabel(g.ext)}</td>
-                  <td className="num">{g.count.toLocaleString("en-US")}</td>
+                  <td className="num">{num(g.count)}</td>
                   <td className="num">{formatSize(g.size)}</td>
                   <td className="triage-reason">{g.reason}</td>
                 </tr>
                 {isOpen && (
                   <tr className="triage-detail">
                     <td colSpan={5}>
-                      <ul className="triage-samples" aria-label="Example files">
+                      <ul className="triage-samples" aria-label={t("triage_examples")}>
                         {g.samples.map((p) => (
                           <li key={p} title={p}>
                             <span className="triage-thumb">
@@ -162,7 +171,7 @@ export function TriagePanel({
                           </li>
                         ))}
                         {g.count > g.samples.length && (
-                          <li className="muted small">…and {(g.count - g.samples.length).toLocaleString("en-US")} more</li>
+                          <li className="muted small">{t("triage_and_more", { n: g.count - g.samples.length })}</li>
                         )}
                       </ul>
                       <Actions
@@ -209,18 +218,19 @@ function Actions({
   onSave: () => void;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const adds = group.actions.filter((a) => a.kind === "add_to_target");
   const others = group.actions.filter((a) => a.kind !== "add_to_target" && a.kind !== "create_target");
   const create = group.actions.find((a) => a.kind === "create_target");
   const [addIdx, setAddIdx] = useState(0);
   if (group.actions.length === 0) {
-    return <p className="muted small">No changes are suggested for files without an extension: edit the config by hand.</p>;
+    return <p className="muted small">{t("triage_no_suggestions")}</p>;
   }
   return (
     <div className="triage-actions">
       {adds.length > 0 && (
         <div className="triage-add">
-          <select aria-label="Target" value={addIdx} onChange={(e) => setAddIdx(Number(e.target.value))}>
+          <select aria-label={t("triage_target")} value={addIdx} onChange={(e) => setAddIdx(Number(e.target.value))}>
             {adds.map((a, i) => (
               <option key={a.label} value={i}>
                 {a.target}
@@ -228,18 +238,18 @@ function Actions({
             ))}
           </select>
           <button type="button" className="btn" onClick={() => onPick(adds[addIdx])}>
-            Add to target…
+            {t("triage_add_to_target")}
           </button>
         </div>
       )}
       {others.map((a) => (
         <button key={a.kind} type="button" className="btn" onClick={() => onPick(a)}>
-          {a.kind === "skip_folder" ? "Always ignore in this folder" : "Always ignore in the whole source"}
+          {a.kind === "skip_folder" ? t("triage_ignore_folder") : t("triage_ignore_source")}
         </button>
       ))}
       {create && (
         <button type="button" className="btn" onClick={() => onPick(create)}>
-          Create target…
+          {t("triage_create_target")}
         </button>
       )}
       {active && (
@@ -275,6 +285,7 @@ function ChangeView({
   onSave: () => void;
   onRefresh: () => void;
 }) {
+  const { t } = useTranslation();
   const { action, preview, error } = active;
   const creating = action.kind === "create_target";
   const [name, setName] = useState(action.target ?? "");
@@ -291,22 +302,22 @@ function ChangeView({
     );
   };
   const block = blocker(preview);
-  const stale = error?.includes("changed");
+  const stale = !!active.stale;
   return (
-    <section className="triage-change" aria-label="Config change">
+    <section className="triage-change" aria-label={t("triage_change_aria")}>
       {creating && (
         <div className="triage-form">
-          <Field label="Target name">
-            <TextInput label="Target name" value={name} onChange={(v) => edit(v, dir)} />
+          <Field label={t("triage_target_name")}>
+            <TextInput label={t("triage_target_name")} value={name} onChange={(v) => edit(v, dir)} />
           </Field>
-          <Field label="Folder" hint="By default files stay in place and are only renamed.">
-            <FolderInput label="Target folder" value={dir} onChange={(v) => edit(name, v)} />
+          <Field label={t("triage_col_folder")} hint={t("triage_folder_hint")}>
+            <FolderInput label={t("triage_target_folder")} value={dir} onChange={(v) => edit(name, v)} />
           </Field>
         </div>
       )}
-      <p className="small muted">The config will change like this:</p>
+      <p className="small muted">{t("triage_will_change")}</p>
       {preview && (
-        <pre className="diff" aria-label="TOML change">
+        <pre className="diff" aria-label={t("triage_toml_aria")}>
           {preview.diff.map((l, i) => (
             <span key={i} className={`diff-${l.kind}`}>
               {l.kind === "add" ? "+ " : l.kind === "del" ? "- " : "  "}
@@ -325,14 +336,14 @@ function ChangeView({
       {preview && block && !error && <p className="bad-text">{block}</p>}
       <div className="triage-buttons">
         <button type="button" className="btn primary" disabled={!!block || active.saving} onClick={onSave}>
-          Save to config
+          {t("triage_save")}
         </button>
         <button type="button" className="btn quiet" onClick={onCancel}>
-          Cancel
+          {t("cancel")}
         </button>
         {stale && (
           <button type="button" className="btn" onClick={onRefresh}>
-            Refresh triage
+            {t("triage_refresh")}
           </button>
         )}
       </div>

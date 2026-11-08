@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
-import { errorText, trayApi, type TraySettings } from "../api";
+import { useTranslation } from "react-i18next";
+import { errorText, localeApi, trayApi, type TraySettings } from "../api";
+import { LANGUAGES, SYSTEM, applyLanguageSetting, languageSetting, normalizeSetting, systemLocale } from "../i18n";
 import type { PendingState } from "../tray/usePending";
 import { AiExamples } from "./AiExamples";
 
@@ -8,6 +10,9 @@ const MAX_INTERVAL = 24 * 60;
 
 /// Tray and notifications. Gallery only counts and tells; it never applies by itself.
 export function SettingsScreen({ pending }: { pending: PendingState }) {
+  const { t } = useTranslation();
+  const [language, setLanguage] = useState(languageSetting);
+  const [languageError, setLanguageError] = useState<string | null>(null);
   const [settings, setSettings] = useState<TraySettings | null>(null);
   const [autostart, setAutostart] = useState(false);
   const [saved, setSaved] = useState<{ settings: TraySettings; autostart: boolean } | null>(null);
@@ -25,7 +30,7 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
     );
   }, []);
 
-  if (!settings) return <p className="muted">{error ?? "Reading settings…"}</p>;
+  if (!settings) return <p className="muted">{error ?? t("settings_reading")}</p>;
 
   const dirty =
     !saved ||
@@ -52,19 +57,48 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
     }
   };
 
+  // Applied at once, with no Save: the UI, the backend's messages, the tray and notifications.
+  const chooseLanguage = async (value: string) => {
+    const next = normalizeSetting(value);
+    setLanguage(next);
+    setLanguageError(null);
+    await applyLanguageSetting(next);
+    try {
+      await localeApi.set(next);
+    } catch (e) {
+      setLanguageError(errorText(e));
+    }
+  };
+
   const s = pending.snapshot;
+  const systemName = LANGUAGES.find((l) => l.code === systemLocale())?.native ?? "";
   return (
     <section className="settings">
-      <p className="muted">
-        Gallery quietly counts new files and tells you about them. It never applies anything by itself: only you run a plan.
-      </p>
+      <p className="muted">{t("settings_intro")}</p>
+      <div className="field">
+        <label className="field-label" htmlFor="language">
+          {t("settings_language")}
+        </label>
+        <div className="field-body">
+          <select id="language" className="select" value={language} onChange={(e) => void chooseLanguage(e.target.value)}>
+            <option value={SYSTEM}>{t("settings_language_system", { language: systemName })}</option>
+            {LANGUAGES.map((l) => (
+              <option key={l.code} value={l.code} lang={l.code}>
+                {l.native}
+              </option>
+            ))}
+          </select>
+          <p className="field-hint">{t("settings_language_hint")}</p>
+          {languageError && <p className="bad-text">{languageError}</p>}
+        </div>
+      </div>
       <div className="field">
         <label className="field-label" htmlFor="interval">
-          Check
+          {t("settings_check")}
         </label>
         <div className="field-body">
           <span>
-            every{" "}
+            {t("settings_every")}{" "}
             <input
               id="interval"
               type="number"
@@ -73,18 +107,18 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
               value={settings.check_interval_min}
               onChange={(e) => set({ check_interval_min: num(e.target.value) })}
             />{" "}
-            min
+            {t("settings_min")}
           </span>
-          <p className="field-hint">From {MIN_INTERVAL} minutes to a day; one more check runs at startup.</p>
+          <p className="field-hint">{t("settings_interval_hint", { min: MIN_INTERVAL })}</p>
         </div>
       </div>
       <div className="field">
         <label className="field-label" htmlFor="threshold">
-          Notify
+          {t("settings_notify")}
         </label>
         <div className="field-body">
           <span>
-            when there are at least{" "}
+            {t("settings_when_at_least")}{" "}
             <input
               id="threshold"
               type="number"
@@ -93,11 +127,11 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
               onChange={(e) => set({ notify_threshold: num(e.target.value) })}
             />
           </span>
-          <p className="field-hint">At most once an hour.</p>
+          <p className="field-hint">{t("settings_once_hour")}</p>
         </div>
       </div>
       <div className="field">
-        <span className="field-label">Window</span>
+        <span className="field-label">{t("settings_window")}</span>
         <div className="field-body">
           <label>
             <input
@@ -105,26 +139,26 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
               checked={settings.hide_to_tray}
               onChange={(e) => set({ hide_to_tray: e.target.checked })}
             />{" "}
-            Closing the window hides it to the tray
+            {t("settings_hide_tray")}
           </label>
         </div>
       </div>
       <div className="field">
-        <span className="field-label">Startup</span>
+        <span className="field-label">{t("settings_startup")}</span>
         <div className="field-body">
           <label>
             <input type="checkbox" checked={autostart} onChange={(e) => setAutostart(e.target.checked)} />{" "}
-            Start at login (minimized to the tray)
+            {t("settings_autostart")}
           </label>
-          <p className="field-hint">Writes ~/.config/autostart/gallery.desktop only when this is checked.</p>
+          <p className="field-hint">{t("settings_autostart_hint")}</p>
         </div>
       </div>
       <div className="form-actions">
         <button type="button" className="btn primary" disabled={!dirty || saving} onClick={() => void save()}>
-          Save
+          {t("save")}
         </button>{" "}
         <button type="button" className="btn" disabled={pending.checking} onClick={() => void pending.checkNow()}>
-          Check now
+          {t("settings_check_now")}
         </button>
       </div>
       {error && <p className="bad-text">{error}</p>}
@@ -132,10 +166,10 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
       {s && (
         <p className="muted" role="status">
           {s.error
-            ? `Last check failed: ${s.error}`
+            ? t("settings_last_failed", { error: s.error })
             : s.total === 0
-              ? "Last check: all sorted."
-              : `Last check: ${s.total} to sort (ready to run ${s.to_process}, waiting for AI ${s.need_ai}).`}
+              ? t("settings_last_sorted")
+              : t("settings_last", { total: s.total, ready: s.to_process, ai: s.need_ai })}
         </p>
       )}
       <AiExamples />

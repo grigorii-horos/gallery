@@ -1,5 +1,6 @@
 // "Run" state: the current plan's preview, a running apply (kept in App
 // so it keeps reporting on other screens) and the server export.
+import { t } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { PILOT_PER_TARGET } from "./model";
 import {
@@ -176,7 +177,7 @@ export function useRun(planPath: string | null, configPath: string | null = null
               (e) => showPilot({ ...p, resultError: errorText(e) }),
             );
           } else {
-            showPilot({ ...p, resultError: "The pilot report was not written." });
+            showPilot({ ...p, resultError: t("pilot_no_report") });
           }
         }
         if (!d.dry_run && !d.summary.cancelled) setFinished((n) => n + 1);

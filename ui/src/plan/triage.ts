@@ -2,6 +2,8 @@
 // groups, reasons and the config edits come from Rust (crates/gallery-gui/src/triage.rs).
 import { invoke } from "@tauri-apps/api/core";
 import type { EditOp, FieldError, FieldIssue } from "../editor/model";
+import { t } from "../i18n";
+import { bytes } from "../i18n/format";
 
 export type ActionKind = "add_to_target" | "skip_folder" | "skip_source" | "create_target";
 
@@ -75,24 +77,17 @@ export function placeLabel(g: Pick<TriageGroup, "source" | "dir">): string {
 }
 
 export function extLabel(ext: string): string {
-  return ext ? `.${ext}` : "no extension";
+  return ext ? `.${ext}` : t("triage_no_extension");
 }
 
-export function formatSize(bytes: number): string {
-  const units = ["B", "KB", "MB", "GB"];
-  let v = bytes;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return i === 0 ? `${bytes} B` : `${v.toLocaleString("en-US", { maximumFractionDigits: 1, minimumFractionDigits: 1 })} ${units[i]}`;
+export function formatSize(n: number): string {
+  return bytes(n);
 }
 
 /** Why a change cannot be saved, or null when it can. */
 export function blocker(p: ChangePreview | null): string | null {
-  if (!p) return "Checking…";
+  if (!p) return t("triage_checking");
   if (p.error) return p.error.message;
-  if (!p.changed) return "The config already contains this change";
+  if (!p.changed) return t("triage_already");
   return null;
 }

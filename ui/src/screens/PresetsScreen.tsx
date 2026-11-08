@@ -1,4 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { t, type MessageKey } from "../i18n";
+import { num } from "../i18n/format";
 import { errorText, type MaskInfo, type PresetInfo } from "../api";
 import type { AppData } from "../store";
 import { Code } from "../components/ConfigGate";
@@ -38,14 +41,17 @@ import type { ConfigEditor } from "../editor/useConfigEditor";
 
 type Tab = "content" | "bundles" | "name" | "masks";
 
-const TABS: { id: Tab; title: string; kind: PresetKind; path: string }[] = [
-  { id: "content", title: "Content", kind: "content", path: "content_presets" },
-  { id: "bundles", title: "Sets", kind: "content", path: "content_presets" },
-  { id: "name", title: "Name", kind: "name", path: "name_presets" },
-  { id: "masks", title: "Masks", kind: "mask", path: "masks" },
+const TABS: { id: Tab; title: MessageKey; kind: PresetKind; path: string }[] = [
+  { id: "content", title: "presets_tab_content", kind: "content", path: "content_presets" },
+  { id: "bundles", title: "presets_tab_sets", kind: "content", path: "content_presets" },
+  { id: "name", title: "presets_tab_name", kind: "name", path: "name_presets" },
+  { id: "masks", title: "presets_tab_masks", kind: "mask", path: "masks" },
 ];
 
-const KIND_TITLE: Record<string, string> = Object.fromEntries(KINDS.map((k) => [k.id, k.title]));
+const kindTitle = (id: string): string | undefined => {
+  const k = KINDS.find((x) => x.id === id);
+  return k ? t(k.title) : undefined;
+};
 
 interface Sel {
   own: boolean;
@@ -56,7 +62,10 @@ const NAME_SAMPLES = "IMG_20261105_101500.JPEG\nPXL_20261105_101500123.jpg\n2026
 const MASK_SAMPLES = "IMG_20261105_101500.jpg\nScreenshot_20261105-101500.png\nVID_20261105_101500.mp4\nIMG-20261105-WA0001.jpg\nscan_passport.pdf";
 
 export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigEditor }) {
+  const { t } = useTranslation();
   const [tab, setTab] = useState<Tab>("content");
+  // The preset whose removal was tried last: a refusal notice belongs to it.
+  const [removing, setRemoving] = useState<string | null>(null);
   const [sel, setSel] = useState<Record<Tab, Sel | null>>({ content: null, bundles: null, name: null, masks: null });
   const [limits, setLimits] = useState<Limit[]>([]);
   const [nameSamples, setNameSamples] = useState(NAME_SAMPLES);
@@ -71,7 +80,7 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
   const builtin = data.builtins;
   if (!v) {
     if (editor.failure) return <EditorFailure editor={editor} />;
-    return <p className="empty">Reading config…</p>;
+    return <p className="empty">{t("gate_reading")}</p>;
   }
   const d = v.draft;
   const ownNames: Record<Tab, string[]> = {
@@ -139,7 +148,7 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
     if (tab === "content" || tab === "bundles")
       return (d.content_presets ?? []).filter((p) => isBundle(p) === (tab === "bundles")).map((p) => ({
         name: p.name,
-        meta: v.own?.content.find((i) => i.name === p.name)?.description ?? KIND_TITLE[p.kind] ?? p.kind,
+        meta: v.own?.content.find((i) => i.name === p.name)?.description ?? kindTitle(p.kind) ?? p.kind,
       }));
     if (tab === "name") return (d.name_presets ?? []).map((p) => ({ name: p.name, meta: p.template }));
     return (d.mask_defs ?? []).map((m) => ({ name: m.name, meta: m.items.join(" | ") }));
@@ -147,35 +156,35 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
 
   return (
     <div className="editor-screen presets">
-      <div className="tabs" role="tablist" aria-label="Preset kinds">
-        {TABS.map((t) => (
-          <button key={t.id} type="button" role="tab" aria-selected={tab === t.id} className="tab" onClick={() => setTab(t.id)}>
-            {t.title}
-            <span className="count">{builtinNames[t.id].length + ownNames[t.id].length}</span>
+      <div className="tabs" role="tablist" aria-label={t("presets_kinds")}>
+        {TABS.map((x) => (
+          <button key={x.id} type="button" role="tab" aria-selected={tab === x.id} className="tab" onClick={() => setTab(x.id)}>
+            {t(x.title)}
+            <span className="count">{num(builtinNames[x.id].length + ownNames[x.id].length)}</span>
           </button>
         ))}
       </div>
       <EditorFailure editor={editor} />
       {general && (
         <div className="notice bad">
-          <p className="notice-title">The config with these changes will not pass validation</p>
+          <p className="notice-title">{t("editor_invalid")}</p>
           <pre className="notice-text">{general.message}</pre>
         </div>
       )}
       <div className="preset-edit">
         <div className="preset-lists">
-          <section aria-label="Own">
+          <section aria-label={t("pipe_group_own")}>
             <header className="stage-head">
-              <h2>Own</h2>
+              <h2>{t("pipe_group_own")}</h2>
               <span className="count">{ownNames[tab].length}</span>
               <button type="button" className="btn quiet add" onClick={() => void add()}>
-                + {tab === "masks" ? "mask" : tab === "bundles" ? "set" : "preset"}
+                {tab === "masks" ? t("presets_add_mask") : tab === "bundles" ? t("presets_add_set") : t("presets_add_preset")}
               </button>
             </header>
             <ul className="target-list">
               {ownList().length === 0 && (
                 <li className="empty small">
-                  {tab === "masks" ? "No own masks" : tab === "bundles" ? "No own sets" : "No own presets"} — add one or copy a built-in
+                  {tab === "masks" ? t("presets_no_masks") : tab === "bundles" ? t("presets_no_sets") : t("presets_no_presets")} — {t("presets_add_or_copy")}
                 </li>
               )}
               {ownList().map((it) => (
@@ -192,13 +201,13 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
               ))}
             </ul>
           </section>
-          <section aria-label="Built-in">
+          <section aria-label={t("pipe_group_builtin")}>
             <header className="stage-head">
-              <h2>Built-in</h2>
+              <h2>{t("pipe_group_builtin")}</h2>
               <span className="count">{builtinNames[tab].length}</span>
             </header>
             {!builtin ? (
-              <p className="empty small">Loading built-in…</p>
+              <p className="empty small">{t("presets_loading_builtin")}</p>
             ) : tab === "masks" ? (
               <ul className="target-list">
                 {builtin.masks.map((m) => (
@@ -215,7 +224,7 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
             ) : (
               groupByKind(builtinOf(builtin, tab), tab === "content").map(([kind, list]) => (
                 <div key={kind} className="preset-group">
-                  {kind && <h3 className="preset-group-title">{KIND_TITLE[kind] ?? kind}</h3>}
+                  {kind && <h3 className="preset-group-title">{kindTitle(kind) ?? kind}</h3>}
                   <ul className="target-list">
                     {list.map((p) => (
                       <li key={p.name}>
@@ -233,9 +242,9 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
             )}
           </section>
         </div>
-        <aside className="inspector" aria-label="Selected preset">
+        <aside className="inspector" aria-label={t("presets_selected")}>
           {!current ? (
-            <p className="empty">Choose a preset on the left.</p>
+            <p className="empty">{t("presets_choose")}</p>
           ) : current.own ? (
             <OwnForm
               key={`${tab}-${current.name}-${editor.formGen}`}
@@ -250,6 +259,8 @@ export function PresetsScreen({ data, editor }: { data: AppData; editor: ConfigE
               maskSuggestions={maskSuggestions}
               samples={{ nameSamples, setNameSamples, maskSamples, setMaskSamples, date, setDate }}
               onRenamed={(to) => select({ own: true, name: to })}
+              removing={removing}
+              onRemoveTry={setRemoving}
               onRemoved={() => setSel((x) => ({ ...x, [tab]: null }))}
             />
           ) : (
@@ -296,13 +307,14 @@ function ItemButton({
   used?: number;
   onClick: () => void;
 }) {
+  const { t } = useTranslation();
   return (
     <button type="button" className="target preset-item" aria-pressed={pressed} onClick={onClick}>
       <span className="preset-item-head">
         <span className="preset-name">{name}</span>
-        {bad && <span className="flag bad" aria-label="error" />}
+        {bad && <span className="flag bad" aria-label={t("flag_error")} />}
         {used !== undefined && used > 0 && (
-          <span className="used" title="How many places in the config use it">
+          <span className="used" title={t("presets_used_title")}>
             ×{used}
           </span>
         )}
@@ -349,7 +361,8 @@ function BuiltinView({
   samples: Samples;
   onCopied: (to: string) => void;
 }) {
-  const kind = TABS.find((t) => t.id === tab)!.kind;
+  const { t } = useTranslation();
+  const kind = TABS.find((x) => x.id === tab)!.kind;
   const [to, setTo] = useState(freeKey(`my-${name}`, [...taken, ...builtins]));
   const [busy, setBusy] = useState(false);
   const err = newNameError(kind, to, taken, builtins);
@@ -368,7 +381,7 @@ function BuiltinView({
         <h2>
           <Code>{tab === "masks" ? `@${name}` : name}</Code>
         </h2>
-        <span className="badge">built-in</span>
+        <span className="badge">{t("presets_badge_builtin")}</span>
       </div>
       {"description" in info ? (
         <>
@@ -376,12 +389,12 @@ function BuiltinView({
           {tab === "bundles" ? (
             <BundleSteps steps={info.params.steps} builtins={data.builtins?.content ?? []} />
           ) : (
-            <Field label="Files">
+            <Field label={t("presets_files")}>
               <Code title={info.mask_expanded}>{info.mask}</Code>
               {info.mask !== info.mask_expanded && <span className="field-hint wrap-code">{info.mask_expanded}</span>}
             </Field>
           )}
-          <h3>Parameters</h3>
+          <h3>{t("presets_parameters")}</h3>
           <dl className="params">
             {Object.entries(info.params)
               .filter(([k]) => k !== "kind" && k !== "mask" && k !== "steps")
@@ -397,11 +410,11 @@ function BuiltinView({
         </>
       ) : (
         <>
-          <Field label="As written">
+          <Field label={t("presets_as_written")}>
             <Code>{info.source}</Code>
           </Field>
           {info.expanded !== info.source && (
-            <Field label="Expanded">
+            <Field label={t("presets_expanded")}>
               <span className="wrap-code">
                 <Code>{info.expanded}</Code>
               </span>
@@ -410,15 +423,14 @@ function BuiltinView({
         </>
       )}
       <div className="copy-box">
-        <p className="copy-title">Copy as own</p>
+        <p className="copy-title">{t("presets_copy_as_own")}</p>
         <p className="field-hint">
-          {tab === "masks" ? "A built-in mask does not change" : "A built-in preset does not change"}. The copy goes into the config and can be
-          edited.
+          {tab === "masks" ? t("presets_copy_note_mask") : t("presets_copy_note_preset")}
         </p>
         <div className="input-row">
-          <TextInput label="Copy name" value={to} mono invalid={!!err} onChange={setTo} />
+          <TextInput label={t("presets_copy_name")} value={to} mono invalid={!!err} onChange={setTo} />
           <button type="button" className="btn primary" disabled={!!err || busy} onClick={() => void copy()}>
-            Copy
+            {t("copy")}
           </button>
         </div>
         <Issues items={[]} error={err} />
@@ -431,11 +443,12 @@ function BuiltinView({
 
 /** The expansion of a built-in bundle: each step with the mask it runs on. */
 function BundleSteps({ steps, builtins }: { steps: unknown; builtins: PresetInfo[] }) {
+  const { t } = useTranslation();
   const list = (Array.isArray(steps) ? steps : []).map((s) =>
     typeof s === "string" ? { preset: s, mask: null as string | null } : { preset: String(s.preset), mask: Array.isArray(s.mask) ? s.mask.join(" | ") : String(s.mask) },
   );
   return (
-    <Field label="Steps in order">
+    <Field label={t("presets_steps_in_order")}>
       <ol className="bundle-steps">
         {list.map((s, i) => (
           <li key={i}>
@@ -467,6 +480,8 @@ function OwnForm({
   maskSuggestions,
   samples,
   onRenamed,
+  removing,
+  onRemoveTry,
   onRemoved,
 }: {
   tab: Tab;
@@ -480,9 +495,12 @@ function OwnForm({
   maskSuggestions: string[];
   samples: Samples;
   onRenamed: (to: string) => void;
+  removing: string | null;
+  onRemoveTry: (name: string) => void;
   onRemoved: () => void;
 }) {
-  const meta = TABS.find((t) => t.id === tab)!;
+  const { t } = useTranslation();
+  const meta = TABS.find((x) => x.id === tab)!;
   const d = editor.view!.draft;
   const err = editor.view!.error;
   const base = `${meta.path}.${name}`;
@@ -492,6 +510,7 @@ function OwnForm({
     return null;
   };
   const remove = async () => {
+    onRemoveTry(name);
     const op: EditOp =
       tab === "content" || tab === "bundles"
         ? { op: "remove_content_preset", name }
@@ -511,9 +530,9 @@ function OwnForm({
 
   // A refused removal names this item: show it here too, not only above the lists.
   const notice = editor.notice?.tone === "bad" ? editor.notice.text : null;
-  const refusal = notice && (notice.includes(`“${name}”`) || notice.includes(`@${name} `)) ? notice : null;
+  const refusal = notice && removing === name ? notice : null;
   // The core's warnings about this preset (e.g. folders together with skip_if).
-  const own = editor.view!.warnings.filter((w) => w.message.includes(`preset '${name}'`));
+  const own = editor.view!.warnings.filter((w) => w.path === base);
 
   let body: ReactNode = null;
   if (tab === "bundles") {
@@ -540,16 +559,16 @@ function OwnForm({
         <h2>
           <Code>{tab === "masks" ? `@${name}` : name}</Code>
         </h2>
-        <span className="badge own">own</span>
+        <span className="badge own">{t("presets_badge_own")}</span>
       </div>
       <Issues items={own} error={serverErr()} />
       <RenameRow kind={meta.kind} name={name} usage={usage.length} taken={taken} builtins={builtins} editor={editor} onRenamed={onRenamed} />
       <div className="usage">
         {usage.length === 0 ? (
-          <span className="muted">Not used anywhere.</span>
+          <span className="muted">{t("presets_unused")}</span>
         ) : (
           <>
-            <span className="muted">Used by:</span>
+            <span className="muted">{t("presets_used_by")}</span>
             <ul>
               {usage.map((u) => (
                 <li key={u}>{u}</li>
@@ -564,10 +583,10 @@ function OwnForm({
         <button
           type="button"
           className="btn quiet danger"
-          title={usage.length ? "Remove the references to it first" : undefined}
+          title={usage.length ? t("presets_remove_refs") : undefined}
           onClick={() => void remove()}
         >
-          {tab === "masks" ? "Delete mask" : tab === "bundles" ? "Delete set" : "Delete preset"}
+          {tab === "masks" ? t("presets_delete_mask") : tab === "bundles" ? t("presets_delete_set") : t("presets_delete_preset")}
         </button>
       </div>
     </div>
@@ -591,14 +610,15 @@ function RenameRow({
   editor: ConfigEditor;
   onRenamed: (to: string) => void;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [to, setTo] = useState(name);
   const [refs, setRefs] = useState(true);
-  const err = to === name ? null : newNameError(kind, to, taken.filter((t) => t !== name), builtins);
+  const err = to === name ? null : newNameError(kind, to, taken.filter((x) => x !== name), builtins);
   if (!open)
     return (
       <button type="button" className="link small" onClick={() => setOpen(true)}>
-        Rename…
+        {t("rename_open")}
       </button>
     );
   const go = async () => {
@@ -611,19 +631,19 @@ function RenameRow({
   return (
     <div className="rename-box">
       <div className="input-row">
-        <TextInput label="New name" value={to} mono invalid={!!err} onChange={setTo} />
+        <TextInput label={t("rename_new_name")} value={to} mono invalid={!!err} onChange={setTo} />
         <button type="button" className="btn" disabled={!!err || to === name} onClick={() => void go()}>
-          Rename
+          {t("rename_do")}
         </button>
         <button type="button" className="btn quiet" onClick={() => setOpen(false)}>
-          Cancel
+          {t("cancel")}
         </button>
       </div>
       <Issues items={[]} error={err} />
       {usage > 0 && (
         <label className="check">
           <input type="checkbox" checked={refs} onChange={(e) => setRefs(e.target.checked)} />
-          <span>Update references to it ({usage}) in targets and masks</span>
+          <span>{t("rename_update_refs", { n: usage })}</span>
         </label>
       )}
     </div>
@@ -650,6 +670,7 @@ function OptionalMask({
   offText: string;
   allowNot?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <Field label={label}>
       <label className="check">
@@ -666,11 +687,11 @@ function OptionalMask({
               )}
             </>
           ) : (
-            "own"
+            t("optmask_own")
           )}
         </span>
       </label>
-      {value !== null && <MaskChips value={value} onChange={onChange} suggestions={suggestions} label={label} invalid={!!error} allowNot={allowNot} exceptionField="Mask" />}
+      {value !== null && <MaskChips value={value} onChange={onChange} suggestions={suggestions} label={label} invalid={!!error} allowNot={allowNot} exceptionField={t("field_mask")} />}
       <Issues items={[]} error={error} />
     </Field>
   );
@@ -698,6 +719,7 @@ function BundleForm({
   serverErr: (key?: string) => string | null;
   maskSuggestions: string[];
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(preset);
   const choices = stepChoices(data, preset.name);
   const local = validateBundle(form, choices.map((c) => c.name));
@@ -707,16 +729,14 @@ function BundleForm({
   };
   return (
     <>
-      <h3>Steps</h3>
-      <p className="field-hint">
-        The set expands in place, steps run in order; each has its own mask (can be overridden). The set has no mask of its own.
-      </p>
+      <h3>{t("bundle_steps")}</h3>
+      <p className="field-hint">{t("bundle_hint")}</p>
       <PipeEditor
-        label={`Steps of set ${preset.name}`}
+        label={t("bundle_steps_of", { name: preset.name })}
         steps={form.steps ?? []}
         presets={choices}
         maskSuggestions={maskSuggestions}
-        empty="the set has no steps"
+        empty={t("bundle_empty")}
         onChange={(steps) => update({ ...form, steps })}
       />
       <Issues items={[]} error={local.steps ?? local.mask ?? serverErr("steps") ?? serverErr("mask")} />
@@ -737,6 +757,7 @@ function ContentForm({
   serverErr: (key?: string) => string | null;
   maskSuggestions: string[];
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(preset);
   const local = validateContent(form, limits);
   const update = (next: ContentPresetDraft) => {
@@ -746,8 +767,8 @@ function ContentForm({
   const errOf = (k: string) => local[k] ?? serverErr(k);
   return (
     <>
-      <h3>Kind</h3>
-      <div className="seg" role="radiogroup" aria-label="Preset kind">
+      <h3>{t("content_kind")}</h3>
+      <div className="seg" role="radiogroup" aria-label={t("content_kind_aria")}>
         {KINDS.map((k) => (
           <button
             key={k.id}
@@ -757,24 +778,24 @@ function ContentForm({
             aria-checked={form.kind === k.id}
             onClick={() => form.kind !== k.id && update(switchKind(form, k.id))}
           >
-            {k.title}
+            {t(k.title)}
           </button>
         ))}
       </div>
       <Issues items={[]} error={serverErr("kind")} />
-      <h3>Parameters</h3>
+      <h3>{t("presets_parameters")}</h3>
       {fieldsOf(form.kind).map((f) => (
         <ContentField key={f.key} spec={f} preset={form} limit={limitFor(limits, form, f.key)} error={errOf(f.key)} onChange={update} />
       ))}
-      <h3>Files</h3>
+      <h3>{t("presets_files")}</h3>
       <OptionalMask
-        label="Mask"
+        label={t("field_mask")}
         value={form.mask}
         fallback={KIND_MASK[form.kind as ContentKind] ?? null}
         onChange={(mask) => update({ ...form, mask })}
         suggestions={maskSuggestions}
         error={errOf("mask")}
-        offText="default for the kind:"
+        offText={t("content_default_mask")}
       />
     </>
   );
@@ -793,6 +814,7 @@ function ContentField({
   error: string | null;
   onChange: (p: ContentPresetDraft) => void;
 }) {
+  const { t } = useTranslation();
   const v = preset[spec.key];
   const dflt = coreDefault(preset.kind, spec.key);
   const set = (val: unknown) => onChange({ ...preset, [spec.key]: val });
@@ -801,17 +823,17 @@ function ContentField({
     const on = (v ?? dflt) === true;
     input = (
       <label className="check">
-        <input type="checkbox" checked={on} aria-label={spec.label} onChange={(e) => set(e.target.checked)} />
-        <span>{spec.hint ?? (on ? "yes" : "no")}</span>
+        <input type="checkbox" checked={on} aria-label={t(spec.label)} onChange={(e) => set(e.target.checked)} />
+        <span>{spec.hint ? t(spec.hint) : on ? t("yes") : t("no")}</span>
       </label>
     );
   } else if (spec.type === "choice") {
     input = (
-      <select className="select field-select" aria-label={spec.label} value={(v as string | null) ?? ""} onChange={(e) => set(e.target.value || null)}>
-        {!spec.choices!.some((c) => c.value === "") && v == null && <option value="">default{dflt ? ` (${dflt})` : ""}</option>}
+      <select className="select field-select" aria-label={t(spec.label)} value={(v as string | null) ?? ""} onChange={(e) => set(e.target.value || null)}>
+        {!spec.choices!.some((c) => c.value === "") && v == null && <option value="">{dflt ? t("field_default_value", { value: String(dflt) }) : t("field_default")}</option>}
         {spec.choices!.map((c) => (
           <option key={c.value} value={c.value}>
-            {c.label}
+            {t(c.label)}
           </option>
         ))}
       </select>
@@ -825,7 +847,7 @@ function ContentField({
           step={1}
           min={limit?.min}
           max={limit?.max}
-          aria-label={spec.label}
+          aria-label={t(spec.label)}
           aria-invalid={!!error || undefined}
           value={v === null || v === undefined ? "" : String(v)}
           placeholder={dflt === null ? "—" : String(dflt)}
@@ -840,17 +862,17 @@ function ContentField({
     );
   }
   return (
-    <Field label={spec.label} hint={spec.type !== "bool" ? spec.hint : undefined}>
+    <Field label={t(spec.label)} hint={spec.type !== "bool" && spec.hint ? t(spec.hint) : undefined}>
       {input}
       <Issues items={[]} error={error} />
     </Field>
   );
 }
 
-const DATE_SOURCES = [
-  { value: "capture", label: "Capture date" },
-  { value: "file_created", label: "File date" },
-  { value: "none", label: "No date" },
+const DATE_SOURCES: { value: string; label: MessageKey }[] = [
+  { value: "capture", label: "fact_capture" },
+  { value: "file_created", label: "date_file" },
+  { value: "none", label: "date_none" },
 ];
 
 function NameForm({
@@ -868,6 +890,7 @@ function NameForm({
   maskSuggestions: string[];
   samples: Samples;
 }) {
+  const { t } = useTranslation();
   const [form, setForm] = useState(preset);
   const local = validateName(form);
   const errOf = (k: string) => local[k] ?? serverErr(k);
@@ -878,46 +901,46 @@ function NameForm({
   const date = form.date ?? "capture";
   return (
     <>
-      <h3>Template</h3>
-      <TextInput label="Name template" value={form.template} mono invalid={!!errOf("template")} onChange={(template) => update({ ...form, template })} />
+      <h3>{t("name_template")}</h3>
+      <TextInput label={t("name_template_aria")} value={form.template} mono invalid={!!errOf("template")} onChange={(template) => update({ ...form, template })} />
       <p className="field-hint">
-        <code>{"{date:YYYYMMDD_HHMMSS}"}</code> <code>{"{stem}"}</code> <code>{"{ext}"}</code> <code>{"{source}"}</code>; “/” — folders
+        <code>{"{date:YYYYMMDD_HHMMSS}"}</code> <code>{"{stem}"}</code> <code>{"{ext}"}</code> <code>{"{source}"}</code>; {t("name_template_folders")}
       </p>
       <Issues items={[]} error={errOf("template")} />
-      <Field label="Date">
-        <div className="seg" role="radiogroup" aria-label="Date source">
+      <Field label={t("name_date")}>
+        <div className="seg" role="radiogroup" aria-label={t("name_date_source")}>
           {DATE_SOURCES.map((s) => (
             <button key={s.value} type="button" role="radio" className="seg-item" aria-checked={date === s.value} onClick={() => update({ ...form, date: s.value })}>
-              {s.label}
+              {t(s.label)}
             </button>
           ))}
         </div>
         <Issues items={[]} error={errOf("date")} />
       </Field>
-      <Field label="Extension">
+      <Field label={t("name_extension")}>
         <label className="check">
           <input type="checkbox" checked={form.normalize_ext ?? false} onChange={(e) => update({ ...form, normalize_ext: e.target.checked })} />
-          <span>to lower case, jpeg → jpg</span>
+          <span>{t("name_lower")}</span>
         </label>
       </Field>
       <OptionalMask
-        label="Leave alone"
+        label={t("name_leave_alone")}
         value={form.skip_if}
         fallback="@dated"
         onChange={(skip_if) => update({ ...form, skip_if })}
         suggestions={maskSuggestions}
         error={errOf("skip_if")}
-        offText="apply to all that matched"
+        offText={t("name_apply_all")}
         allowNot={false}
       />
       <OptionalMask
-        label="Mask"
+        label={t("field_mask")}
         value={form.mask}
         fallback="*"
         onChange={(mask) => update({ ...form, mask })}
         suggestions={maskSuggestions}
         error={errOf("mask")}
-        offText="all files:"
+        offText={t("name_all_files")}
       />
       <NamePreview editor={editor} configPath={configPath} preset={form} samples={samples} invalid={Object.keys(local).length > 0} />
     </>
@@ -939,6 +962,7 @@ function MaskForm({
   maskSuggestions: string[];
   samples: Samples;
 }) {
+  const { t } = useTranslation();
   const [items, setItems] = useState(mask.items);
   const err = validateMask(items) ?? serverErr();
   const update = (next: string[]) => {
@@ -947,12 +971,12 @@ function MaskForm({
   };
   return (
     <>
-      <h3>Variants <span className="muted small">— a file matches if any variant matches</span></h3>
+      <h3>{t("mask_variants")} <span className="muted small">— {t("mask_variants_hint")}</span></h3>
       <MaskChips
         value={items}
         onChange={update}
         suggestions={maskSuggestions.filter((s) => s !== `@${mask.name}`)}
-        label={`Mask @${mask.name}`}
+        label={t("mask_label", { name: mask.name })}
         invalid={!!err}
       />
       <Issues items={[]} error={err} />
@@ -983,12 +1007,12 @@ function useLive<T>(run: () => Promise<T>, deps: unknown[]): { result: T | null;
   return state;
 }
 
-const STATUS: Record<NameResult["status"], { mark: string; text: string; tone: string }> = {
-  renamed: { mark: "→", text: "", tone: "yes" },
-  same: { mark: "=", text: "name unchanged", tone: "no" },
-  not_matched: { mark: "–", text: "mask does not take it", tone: "no" },
-  skipped: { mark: "–", text: "skipped: “leave alone”", tone: "no" },
-  no_date: { mark: "–", text: "no date", tone: "no" },
+const STATUS: Record<NameResult["status"], { mark: string; text: MessageKey | null; tone: string }> = {
+  renamed: { mark: "→", text: null, tone: "yes" },
+  same: { mark: "=", text: "preview_same", tone: "no" },
+  not_matched: { mark: "–", text: "preview_not_matched", tone: "no" },
+  skipped: { mark: "–", text: "preview_skipped", tone: "no" },
+  no_date: { mark: "–", text: "preview_no_date", tone: "no" },
 };
 
 function NamePreview({
@@ -1004,6 +1028,7 @@ function NamePreview({
   samples: Samples;
   invalid?: boolean;
 }) {
+  const { t } = useTranslation();
   const names = parseSamples(samples.nameSamples);
   const key = JSON.stringify(preset);
   const { result, error } = useLive(
@@ -1019,19 +1044,19 @@ function NamePreview({
     [key, samples.nameSamples, samples.date, configPath, invalid],
   );
   return (
-    <section className="preview" aria-label="Test on examples">
-      <h3>Test on examples</h3>
+    <section className="preview" aria-label={t("preview_title")}>
+      <h3>{t("preview_title")}</h3>
       <div className="preview-date">
         <label className="check">
           <input type="checkbox" checked={samples.date !== null} onChange={(e) => samples.setDate(e.target.checked ? "2026-11-05T10:15:00" : null)} />
-          <span>The file has a date</span>
+          <span>{t("preview_has_date")}</span>
         </label>
         {samples.date !== null && (
           <input
             className="input date"
             type="datetime-local"
             step={1}
-            aria-label="Capture date for the test"
+            aria-label={t("preview_date_aria")}
             value={samples.date}
             onChange={(e) => e.target.value && samples.setDate(e.target.value)}
           />
@@ -1039,7 +1064,7 @@ function NamePreview({
       </div>
       <textarea
         className="input mono"
-        aria-label="File names to test, one per line"
+        aria-label={t("tester_names")}
         rows={Math.min(8, Math.max(3, names.length + 1))}
         value={samples.nameSamples}
         spellCheck={false}
@@ -1056,7 +1081,7 @@ function NamePreview({
                 <span className="mark" aria-hidden>
                   {s.mark}
                 </span>
-                {r.status === "renamed" ? <code className="to">{r.result}</code> : <span className="muted">{s.text}</span>}
+                {r.status === "renamed" ? <code className="to">{r.result}</code> : <span className="muted">{s.text ? t(s.text) : ""}</span>}
               </li>
             );
           })}
@@ -1077,6 +1102,7 @@ function MaskPreview({
   items: string[];
   samples: Samples;
 }) {
+  const { t } = useTranslation();
   const names = parseSamples(samples.maskSamples);
   const { result, error } = useLive<MaskTestResult[]>(
     () => editorApi.maskTest(configPath, editor.currentOps(), { match: items, exclude: [], names }),
@@ -1084,13 +1110,13 @@ function MaskPreview({
   );
   const hits = result?.filter((r) => r.taken).length ?? 0;
   return (
-    <section className="preview" aria-label="Test on examples">
+    <section className="preview" aria-label={t("preview_title")}>
       <h3>
-        Test on examples {result && <span className="muted small">— {hits} of {result.length} match</span>}
+        {t("preview_title")} {result && <span className="muted small">— {t("preview_hits", { hits, total: result.length })}</span>}
       </h3>
       <textarea
         className="input mono"
-        aria-label="File names to test the mask on, one per line"
+        aria-label={t("preview_mask_names")}
         rows={Math.min(8, Math.max(3, names.length + 1))}
         value={samples.maskSamples}
         spellCheck={false}
@@ -1101,7 +1127,7 @@ function MaskPreview({
         <ul className="preview-rows">
           {result.map((r, i) => (
             <li key={`${r.name}-${i}`} className={r.taken ? "yes" : "no"}>
-              <span className="mark" aria-label={r.taken ? "matches" : "does not match"}>
+              <span className="mark" aria-label={r.taken ? t("tester_matches") : t("tester_no_match")}>
                 {r.taken ? "✓" : "✗"}
               </span>
               <code className="from">{r.name}</code>

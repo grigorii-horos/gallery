@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
+import { num } from "../i18n/format";
 import { errorText, historyApi, type ItemView, type ReportDetail, type ReportEntry } from "../api";
 import {
   entryChips,
@@ -32,6 +34,7 @@ interface Props {
 
 /// "History": past runs, newest first, and the files of the chosen one.
 export function HistoryScreen({ history, exportDir, busy, onRunPlan }: Props) {
+  const { t } = useTranslation();
   const [entries, setEntries] = useState<ReportEntry[] | null>(null);
   const [listError, setListError] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
@@ -55,21 +58,20 @@ export function HistoryScreen({ history, exportDir, busy, onRunPlan }: Props) {
 
   return (
     <div className="history">
-      <section className="history-list" aria-label="Runs">
+      <section className="history-list" aria-label={t("history_runs")}>
         {listError && (
           <div className="notice bad">
-            <p className="notice-title">Reports could not be read</p>
+            <p className="notice-title">{t("history_unreadable")}</p>
             <pre className="notice-text">{listError}</pre>
           </div>
         )}
         {entries === null && !listError ? (
-          <p className="empty small">Reading reports…</p>
+          <p className="empty small">{t("history_reading")}</p>
         ) : entries && entries.length === 0 ? (
           <div className="empty history-empty">
-            <p>No runs yet.</p>
+            <p>{t("history_none")}</p>
             <p className="small">
-              A report appears after a plan is run on the Sort screen.
-              {exportDir ? " Server reports arrive in the export folder." : " To see server reports, choose an export folder there too."}
+              {t("history_none_hint")} {exportDir ? t("history_none_server_dir") : t("history_none_server_pick")}
             </p>
           </div>
         ) : (
@@ -83,15 +85,15 @@ export function HistoryScreen({ history, exportDir, busy, onRunPlan }: Props) {
         )}
         {exportDir && (
           <p className="history-foot muted small" title={exportDir}>
-            Server reports — from the export folder
+            {t("history_server_reports")}
           </p>
         )}
       </section>
       {current ? (
         <Detail key={current.path} entry={current} history={history} exportDir={exportDir} busy={busy} onRunPlan={onRunPlan} />
       ) : (
-        <section className="history-detail empty-detail" aria-label="Details">
-          <p className="muted">Choose a run on the left.</p>
+        <section className="history-detail empty-detail" aria-label={t("history_details")}>
+          <p className="muted">{t("history_choose")}</p>
         </section>
       )}
     </div>
@@ -109,6 +111,7 @@ function Tally({ entry }: { entry: ReportEntry }) {
 }
 
 function Chips({ entry }: { entry: ReportEntry }) {
+  useTranslation();
   return (
     <span className="chips">
       {entryChips(entry).map((c) => (
@@ -121,6 +124,7 @@ function Chips({ entry }: { entry: ReportEntry }) {
 }
 
 function EntryRow({ entry, active, onSelect }: { entry: ReportEntry; active: boolean; onSelect: () => void }) {
+  useTranslation();
   const when = runTime(entry.started);
   return (
     <button
@@ -139,7 +143,9 @@ function EntryRow({ entry, active, onSelect }: { entry: ReportEntry; active: boo
   );
 }
 
-function Copy({ text, label = "Copy" }: { text: string; label?: string }) {
+function Copy({ text, label }: { text: string; label?: string }) {
+  const { t } = useTranslation();
+  const shown = label ?? t("copy");
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -151,8 +157,8 @@ function Copy({ text, label = "Copy" }: { text: string; label?: string }) {
     }
   };
   return (
-    <button type="button" className="btn quiet small-btn" onClick={copy} aria-label={`${label}: ${text}`}>
-      {copied ? "Copied" : label}
+    <button type="button" className="btn quiet small-btn" onClick={copy} aria-label={`${shown}: ${text}`}>
+      {copied ? t("copied") : shown}
     </button>
   );
 }
@@ -160,6 +166,7 @@ function Copy({ text, label = "Copy" }: { text: string; label?: string }) {
 const folderOf = (p: string) => p.slice(0, Math.max(p.lastIndexOf("/"), 1));
 
 function PathLine({ label, path }: { label: string; path: string }) {
+  const { t } = useTranslation();
   return (
     <div className="path-line">
       <span className="muted">{label}</span>
@@ -167,7 +174,7 @@ function PathLine({ label, path }: { label: string; path: string }) {
         <bdi>{path}</bdi>
       </span>
       <Copy text={path} />
-      <Copy text={folderOf(path)} label="Folder" />
+      <Copy text={folderOf(path)} label={t("folder")} />
     </div>
   );
 }
@@ -185,6 +192,7 @@ function Detail({
   busy: string | null;
   onRunPlan: (planPath: string) => void;
 }) {
+  const { t } = useTranslation();
   const [detail, setDetail] = useState<ReportDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ItemFilter>("all");
@@ -210,7 +218,7 @@ function Detail({
   const counts = useMemo(() => (detail ? filterCounts(detail.items) : null), [detail]);
   const when = runTime(entry.started);
   const mineUndo = history.undo?.reportPath === entry.path ? history.undo : null;
-  const opBusy = busy ?? (history.undo ? "An undo is running — wait for it to finish." : history.retrying ? "A retry is being prepared — wait for it to finish." : null);
+  const opBusy = busy ?? (history.undo ? t("busy_undo_short") : history.retrying ? t("busy_retry_short") : null);
   const uBlock = undoBlock(entry, opBusy);
   const rBlock = retryBlock(entry, opBusy);
   const undoResult = history.undoResult?.report_path === entry.path ? history.undoResult : null;
@@ -220,44 +228,44 @@ function Detail({
   const s = entry.summary;
 
   return (
-    <section className="history-detail" aria-label="Details">
+    <section className="history-detail" aria-label={t("history_details")}>
       <header className="history-detail-head">
-        <h2>{when ? `Run from ${when}` : entry.file_name}</h2>
+        <h2>{when ? t("history_run_from", { when }) : entry.file_name}</h2>
         <Chips entry={entry} />
       </header>
 
       {entry.error ? (
         <div className="notice bad">
-          <p className="notice-title">The report could not be read</p>
+          <p className="notice-title">{t("history_report_unreadable")}</p>
           <pre className="notice-text">{entry.error}</pre>
         </div>
       ) : (
-        <ul className="history-counts" aria-label="Summary">
+        <ul className="history-counts" aria-label={t("history_summary")}>
           {[
-            [s.done, "processed", "ok"],
-            [s.renamed, "of them renamed in place", ""],
-            [s.failed, "errors", "bad"],
-            [s.stale, "changed after the plan", "warn"],
-            [s.missing, "file missing", "warn"],
-            [s.not_started, "not started (cancelled)", ""],
+            [s.done, t("row_processed"), "ok"],
+            [s.renamed, t("row_renamed"), ""],
+            [s.failed, t("row_errors"), "bad"],
+            [s.stale, t("history_stale"), "warn"],
+            [s.missing, t("row_missing"), "warn"],
+            [s.not_started, t("history_not_started"), ""],
           ]
             .filter(([n], i) => i === 0 || (n as number) > 0)
             .map(([n, label, tone]) => (
               <li key={label as string} className={tone as string}>
-                <span className="fate-count">{(n as number).toLocaleString("en-US")}</span> {label}
+                <span className="fate-count">{num(n as number)}</span> {label}
               </li>
             ))}
         </ul>
       )}
 
       <div className="history-paths">
-        <PathLine label="Report" path={entry.path} />
-        <PathLine label="Plan" path={entry.plan_path} />
+        <PathLine label={t("history_report")} path={entry.path} />
+        <PathLine label={t("history_plan")} path={entry.plan_path} />
       </div>
 
       {entry.side === "server" ? (
         <div className="run-exported">
-          <p>The run was on a server. The GUI does not undo it and does not touch the server — undo it there:</p>
+          <p>{t("history_server_note")}</p>
           {detail?.server_command && (
             <div className="command">
               <code>{detail.server_command}</code>
@@ -277,7 +285,7 @@ function Detail({
               title={uBlock?.text}
               onClick={() => setConfirm("undo")}
             >
-              Undo…
+              {t("history_undo")}
             </button>
             <button
               type="button"
@@ -286,7 +294,7 @@ function Detail({
               title={rBlock?.text}
               onClick={() => setConfirm("retry")}
             >
-              {history.retrying === entry.path ? "Preparing retry…" : "Retry failed…"}
+              {history.retrying === entry.path ? t("history_preparing") : t("history_retry")}
             </button>
           </div>
           {(uBlock && rBlock && !entry.error) && <p className="run-block">{uBlock.text}</p>}
@@ -295,7 +303,7 @@ function Detail({
 
       {undoError && (
         <div className="notice bad">
-          <p className="notice-title">Undo failed</p>
+          <p className="notice-title">{t("history_undo_failed")}</p>
           <pre className="notice-text">{undoError}</pre>
         </div>
       )}
@@ -303,10 +311,10 @@ function Detail({
         <div className={`run-result ${undoResult.problems.length > 0 ? "bad" : undoResult.cancelled ? "warn" : ""}`} role="status">
           <p className="run-result-title">
             {undoResult.cancelled
-              ? "Undo stopped: you can undo the rest again"
+              ? t("history_undo_stopped")
               : undoResult.problems.length > 0
-                ? "Undo with problems: these files were left as they are"
-                : "The run was undone"}
+                ? t("history_undo_problems")
+                : t("history_undone")}
           </p>
           <p>{undoResultText(undoResult.restored, undoResult.removed_outputs)}</p>
           {undoResult.problems.length > 0 && (
@@ -318,12 +326,12 @@ function Detail({
               ))}
             </ul>
           )}
-          {undoResult.undone && <p className="muted small">These files will go back into the current plan on the Sort screen.</p>}
+          {undoResult.undone && <p className="muted small">{t("history_back_to_plan")}</p>}
         </div>
       )}
       {retryError && (
         <div className="notice bad">
-          <p className="notice-title">The retry was not prepared</p>
+          <p className="notice-title">{t("history_retry_failed")}</p>
           <pre className="notice-text">{retryError}</pre>
         </div>
       )}
@@ -332,21 +340,20 @@ function Detail({
           {retryResult.plan_path ? (
             <>
               <p>
-                {retryResult.reused ? "The retry plan was already prepared" : "The retry plan is ready"}: {filesWord(retryResult.files)} of{" "}
-                {retryResult.failed} failed.
-                {retryResult.left_out > 0 && ` ${retryResult.left_out} left out: they changed, went to the trash or their copies could not be removed.`}
+                {retryResult.reused ? t("history_retry_reused") : t("history_retry_ready")}:{" "}
+                {t("history_retry_files", { files: filesWord(retryResult.files), failed: retryResult.failed })}
+                {retryResult.left_out > 0 && ` ${t("history_retry_left_out", { count: retryResult.left_out })}`}
               </p>
               <p className="code">{retryResult.plan_path}</p>
               <div className="run-actions">
                 <button type="button" className="btn primary" onClick={() => onRunPlan(retryResult.plan_path!)}>
-                  Open in Sort
+                  {t("history_open_in_sort")}
                 </button>
               </div>
             </>
           ) : (
             <p>
-              Nothing to retry: none of the {retryResult.failed} failed files qualifies — they changed, went to the trash or
-              their copies could not be removed.
+              {t("history_nothing_to_retry", { count: retryResult.failed })}
             </p>
           )}
         </div>
@@ -360,13 +367,13 @@ function Detail({
 
       {error && (
         <div className="notice bad">
-          <p className="notice-title">The report's files could not be read</p>
+          <p className="notice-title">{t("history_files_unreadable")}</p>
           <pre className="notice-text">{error}</pre>
         </div>
       )}
       {detail && counts && (
         <>
-          <div className="tabs history-tabs" role="tablist" aria-label="Files">
+          <div className="tabs history-tabs" role="tablist" aria-label={t("check_files")}>
             {FILTERS.map((f) => (
               <button
                 key={f.id}
@@ -380,15 +387,15 @@ function Detail({
                   setShown(PAGE);
                 }}
               >
-                {f.label}
-                <span className="count">{counts[f.id].toLocaleString("en-US")}</span>
+                {t(f.label)}
+                <span className="count">{num(counts[f.id])}</span>
               </button>
             ))}
           </div>
           {items.length === 0 ? (
-            <p className="empty small">No files.</p>
+            <p className="empty small">{t("history_no_files")}</p>
           ) : (
-            <ul className="history-items" aria-label="Run files">
+            <ul className="history-items" aria-label={t("history_run_files")}>
               {items.slice(0, shown).map((it) => (
                 <ItemRow key={it.source} item={it} />
               ))}
@@ -396,7 +403,7 @@ function Detail({
           )}
           {items.length > shown && (
             <button type="button" className="btn quiet" onClick={() => setShown((n) => n + PAGE)}>
-              Show more ({(items.length - shown).toLocaleString("en-US")})
+              {t("show_more", { n: items.length - shown })}
             </button>
           )}
         </>
@@ -405,7 +412,7 @@ function Detail({
       {confirm === "undo" && detail && (
         <Confirm
           {...undoConfirmLines(entry, detail.undo)}
-          action="Undo"
+          action={t("undo")}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             setConfirm(null);
@@ -415,9 +422,9 @@ function Detail({
       )}
       {confirm === "retry" && (
         <Confirm
-          title="Retry the failed files?"
+          title={t("history_retry_title")}
           lines={retryConfirmLines(entry)}
-          action="Prepare retry"
+          action={t("history_prepare_retry")}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {
             setConfirm(null);
@@ -430,14 +437,15 @@ function Detail({
 }
 
 function UndoProgressView({ history }: { history: HistoryState }) {
+  const { t } = useTranslation();
   const u = history.undo!;
   const p = u.progress;
   const frac = p.total > 0 ? Math.min(1, p.done / p.total) : 0;
   return (
-    <div className="run-progress" role="status" aria-label="Undo: progress">
+    <div className="run-progress" role="status" aria-label={t("history_undo_progress")}>
       <div className="run-progress-head">
         <span>
-          Undo: {p.done.toLocaleString("en-US")} of {p.total.toLocaleString("en-US")}
+          {t("history_undo_count", { done: p.done, total: p.total })}
         </span>
       </div>
       <div className="run-bar" aria-hidden>
@@ -445,18 +453,19 @@ function UndoProgressView({ history }: { history: HistoryState }) {
       </div>
       <div className="scan-current">
         <span className="path" title={p.current ?? ""}>
-          <bdi>{p.current ?? "Getting ready…"}</bdi>
+          <bdi>{p.current ?? t("getting_ready")}</bdi>
         </span>
         <button type="button" className="btn" disabled={u.cancelling} onClick={history.cancelUndo}>
-          {u.cancelling ? "Stopping…" : "Cancel"}
+          {u.cancelling ? t("stopping") : t("cancel")}
         </button>
       </div>
-      {u.cancelling && <p className="muted small">No new files are started; the one in progress is finished.</p>}
+      {u.cancelling && <p className="muted small">{t("history_cancelling")}</p>}
     </div>
   );
 }
 
 function ItemRow({ item }: { item: ItemView }) {
+  const { t } = useTranslation();
   const problem = item.status === "failed" || item.status === "stale" || item.status === "missing";
   const errors = item.outputs.filter((o) => o.error);
   const warnings = item.outputs.flatMap((o) => o.warnings);
@@ -470,7 +479,7 @@ function ItemRow({ item }: { item: ItemView }) {
             <bdi>{item.source}</bdi>
           </span>
           <span className={problem && !item.undone ? `item-status ${item.status}` : "item-status muted"}>
-            {item.undone ? "undone" : item.renamed ? "renamed" : STATUS_LABEL[item.status]}
+            {item.undone ? t("chip_undone") : item.renamed ? t("item_renamed") : t(STATUS_LABEL[item.status])}
           </span>
           {why && <span className="item-why bad-text">{why}</span>}
         </summary>
@@ -484,13 +493,13 @@ function ItemRow({ item }: { item: ItemView }) {
           {item.outputs
             .filter((o) => o.actual)
             .map((o) => (
-              <Line key={o.actual!} label={o.renamed_from ? "renamed to" : "copy"}>
+              <Line key={o.actual!} label={o.renamed_from ? t("item_renamed_to") : t("item_copy")}>
                 <span className="code">{o.actual}</span>
-                <Copy text={folderOf(o.actual!)} label="Folder" />
+                <Copy text={folderOf(o.actual!)} label={t("folder")} />
               </Line>
             ))}
           {item.trashed && (
-            <Line label="in the trash">
+            <Line label={t("item_in_trash")}>
               <span className="code">{item.trashed}</span>
             </Line>
           )}
@@ -499,9 +508,9 @@ function ItemRow({ item }: { item: ItemView }) {
               {w}
             </p>
           ))}
-          <Line label="source">
+          <Line label={t("item_source")}>
             <Copy text={item.source} />
-            <Copy text={folderOf(item.source)} label="Folder" />
+            <Copy text={folderOf(item.source)} label={t("folder")} />
           </Line>
         </div>
       </details>
@@ -530,6 +539,7 @@ function Confirm({
   onCancel: () => void;
   onConfirm: () => void;
 }) {
+  const { t } = useTranslation();
   const cancelRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
     cancelRef.current?.focus();
@@ -550,7 +560,7 @@ function Confirm({
         </ul>
         <div className="modal-actions">
           <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
-            Cancel
+            {t("cancel")}
           </button>
           <button type="button" className="btn primary" onClick={onConfirm}>
             {action}

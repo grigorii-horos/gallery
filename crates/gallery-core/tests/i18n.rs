@@ -112,6 +112,13 @@ fn plural_categories_follow_cldr() {
     assert_eq!(cat("fr", 0), "one");
     assert_eq!(cat("pt-BR", 0), "one");
     assert_eq!(cat("es", 0), "other");
+    // The Romance languages have "many" for a round million.
+    for l in ["es", "fr", "it", "pt-BR"] {
+        assert_eq!(cat(l, 1_000_000), "many", "{l}");
+        assert_eq!(cat(l, 2_000_000), "many", "{l}");
+        assert_eq!(cat(l, 1_000_001), "other", "{l}");
+    }
+    assert_eq!(cat("de", 1_000_000), "other");
 }
 
 #[test]

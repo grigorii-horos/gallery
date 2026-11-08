@@ -1,6 +1,7 @@
 // Presets screen: the typed fields of each content kind, form checks with
 // the encoders' bounds (served by Rust: config_edit/limits.rs) and the
 // little helpers around them. What an edit does to the file is Rust's.
+import { t, type MessageKey } from "../i18n";
 import { BUNDLE_KIND, type ContentKind, type ContentPresetDraft, type NamePresetDraft, type PresetKind, type StepDraft } from "./model";
 
 export interface Limit {
@@ -23,18 +24,18 @@ type Key = Exclude<keyof ContentPresetDraft, "name" | "kind" | "mask" | "steps">
 
 export interface FieldSpec {
   key: Key;
-  label: string;
+  label: MessageKey;
   type: "bool" | "int" | "choice";
-  choices?: { value: string; label: string }[];
-  hint?: string;
+  choices?: { value: string; label: MessageKey }[];
+  hint?: MessageKey;
 }
 
-export const KINDS: { id: ContentKind; title: string }[] = [
-  { id: "photo", title: "Photo" },
-  { id: "video", title: "Video" },
-  { id: "audio", title: "Audio" },
-  { id: "png", title: "PNG" },
-  { id: "metadata", title: "Metadata" },
+export const KINDS: { id: ContentKind; title: MessageKey }[] = [
+  { id: "photo", title: "kind_photo" },
+  { id: "video", title: "kind_video" },
+  { id: "audio", title: "kind_audio" },
+  { id: "png", title: "kind_png" },
+  { id: "metadata", title: "kind_metadata" },
 ];
 
 /** The mask a preset of the kind runs on when it has none. */
@@ -50,63 +51,63 @@ const FIELDS: Record<ContentKind, FieldSpec[]> = {
   photo: [
     {
       key: "format",
-      label: "Format",
+      label: "fld_format",
       type: "choice",
       choices: [
-        { value: "avif", label: "AVIF" },
-        { value: "webp", label: "WebP" },
+        { value: "avif", label: "fld_avif" },
+        { value: "webp", label: "fld_webp" },
       ],
     },
-    { key: "quality", label: "Quality", type: "int", hint: "higher — better and larger" },
-    { key: "speed", label: "Speed", type: "int", hint: "AVIF: speed, higher — faster and worse; WebP: method, higher — slower and better" },
-    { key: "max_short_side", label: "Short side", type: "int", hint: "downscale to, px; empty — no downscaling" },
-    { key: "ladder", label: "Ladder", type: "bool", hint: "if the file did not get smaller, try a lower quality" },
-    { key: "min_saving_pct", label: "Min. saving", type: "int", hint: "%: less — keep the source" },
+    { key: "quality", label: "fld_quality", type: "int", hint: "hint_higher_better_and_larger" },
+    { key: "speed", label: "fld_speed", type: "int", hint: "hint_avif_speed_higher_faster_and_worse_webp_" },
+    { key: "max_short_side", label: "fld_short_side", type: "int", hint: "hint_downscale_to_px_empty_no_downscaling" },
+    { key: "ladder", label: "fld_ladder", type: "bool", hint: "hint_if_the_file_did_not_get_smaller_try_a_lo" },
+    { key: "min_saving_pct", label: "fld_min_saving", type: "int", hint: "hint_less_keep_the_source" },
   ],
   video: [
-    { key: "crf", label: "CRF", type: "int", hint: "lower — better and larger" },
-    { key: "preset", label: "SVT preset", type: "int", hint: "lower — slower and better" },
-    { key: "gop", label: "GOP", type: "int", hint: "frames between keyframes" },
-    { key: "max_short_side", label: "Short side", type: "int", hint: "downscale to, px; 0 — no downscaling" },
-    { key: "audio_kbps", label: "Audio", type: "int", hint: "Opus, kbit/s" },
+    { key: "crf", label: "fld_crf", type: "int", hint: "hint_lower_better_and_larger" },
+    { key: "preset", label: "fld_svt_preset", type: "int", hint: "hint_lower_slower_and_better" },
+    { key: "gop", label: "fld_gop", type: "int", hint: "hint_frames_between_keyframes" },
+    { key: "max_short_side", label: "fld_short_side", type: "int", hint: "hint_downscale_to_px_0_no_downscaling" },
+    { key: "audio_kbps", label: "fld_audio", type: "int", hint: "hint_opus_kbit_s" },
     {
       key: "denoise",
-      label: "Denoise",
+      label: "fld_denoise",
       type: "choice",
       choices: [
-        { value: "", label: "none" },
-        { value: "verylow", label: "very light" },
-        { value: "low", label: "light" },
-        { value: "medium", label: "medium" },
-        { value: "high", label: "strong" },
+        { value: "", label: "fld_none" },
+        { value: "verylow", label: "fld_very_light" },
+        { value: "low", label: "fld_light" },
+        { value: "medium", label: "fld_medium" },
+        { value: "high", label: "fld_strong" },
       ],
     },
-    { key: "stabilize", label: "Stabilization", type: "bool" },
-    { key: "ladder", label: "Ladder", type: "bool", hint: "if the file did not get smaller, try lower levels" },
+    { key: "stabilize", label: "fld_stabilization", type: "bool" },
+    { key: "ladder", label: "fld_ladder", type: "bool", hint: "hint_if_the_file_did_not_get_smaller_try_lowe" },
   ],
   audio: [
     {
       key: "codec",
-      label: "Codec",
+      label: "fld_codec",
       type: "choice",
       choices: [
-        { value: "opus", label: "Opus" },
-        { value: "mp3", label: "MP3" },
-        { value: "aac", label: "AAC" },
-        { value: "flac", label: "FLAC (lossless)" },
+        { value: "opus", label: "fld_opus" },
+        { value: "mp3", label: "fld_mp3" },
+        { value: "aac", label: "fld_aac" },
+        { value: "flac", label: "fld_flac_lossless" },
       ],
     },
-    { key: "kbps", label: "Bitrate", type: "int", hint: "kbit/s; not needed for FLAC" },
+    { key: "kbps", label: "fld_bitrate", type: "int", hint: "hint_kbit_s_not_needed_for_flac" },
   ],
-  png: [{ key: "level", label: "Level", type: "int", hint: "optipng -oN: higher — slower and smaller" }],
+  png: [{ key: "level", label: "fld_level", type: "int", hint: "hint_optipng_on_higher_slower_and_smaller" }],
   metadata: [
-    { key: "write_capture_date", label: "Capture date", type: "bool", hint: "write to the file" },
-    { key: "fix_gcam_make_model", label: "Make/Model GCam", type: "bool" },
-    { key: "strip_gcamera_xmp", label: "XMP-GCamera", type: "bool", hint: "remove" },
-    { key: "strip_gain_map_xmp_for_avif", label: "Gain map XMP", type: "bool", hint: "remove for AVIF" },
-    { key: "fill_offset_time", label: "OffsetTime", type: "bool", hint: "fill in the time zone" },
-    { key: "video_make_model", label: "Video Make/Model", type: "bool" },
-    { key: "video_restore_gps", label: "Video GPS", type: "bool", hint: "restore" },
+    { key: "write_capture_date", label: "fld_capture_date", type: "bool", hint: "hint_write_to_the_file" },
+    { key: "fix_gcam_make_model", label: "fld_make_model_gcam", type: "bool" },
+    { key: "strip_gcamera_xmp", label: "fld_xmp_gcamera", type: "bool", hint: "hint_remove" },
+    { key: "strip_gain_map_xmp_for_avif", label: "fld_gain_map_xmp", type: "bool", hint: "hint_remove_for_avif" },
+    { key: "fill_offset_time", label: "fld_offsettime", type: "bool", hint: "hint_fill_in_the_time_zone" },
+    { key: "video_make_model", label: "fld_video_make_model", type: "bool" },
+    { key: "video_restore_gps", label: "fld_video_gps", type: "bool", hint: "hint_restore" },
   ],
 };
 
@@ -161,15 +162,15 @@ export const isBundle = (p: { kind: string }): boolean => p.kind === BUNDLE_KIND
 export function validateBundle(p: ContentPresetDraft, known: string[]): Record<string, string> {
   const out: Record<string, string> = {};
   const steps: StepDraft[] = p.steps ?? [];
-  if (steps.length === 0) out.steps = "the set has no steps: add at least one";
-  else if (steps.some((s) => s.preset === p.name)) out.steps = "a set cannot include itself";
+  if (steps.length === 0) out.steps = t("val_set_no_steps");
+  else if (steps.some((s) => s.preset === p.name)) out.steps = t("val_set_self");
   else {
     const unknown = steps.find((s) => !known.includes(s.preset));
-    if (unknown) out.steps = `no preset “${unknown.preset}”`;
+    if (unknown) out.steps = t("val_no_preset", { name: unknown.preset });
     const bad = steps.find((s) => s.mask && validateMask(s.mask));
-    if (bad) out.steps = `mask of step “${bad.preset}”: ${validateMask(bad.mask!)}`;
+    if (bad) out.steps = t("val_step_mask", { preset: bad.preset, error: validateMask(bad.mask!) ?? "" });
   }
-  if (p.mask) out.mask = "a set has no mask of its own: its steps define the masks";
+  if (p.mask) out.mask = t("val_set_mask");
   return out;
 }
 
@@ -197,14 +198,14 @@ export function validateContent(p: ContentPresetDraft, limits: Limit[]): Record<
     if (f.type === "int") {
       const n = v as number;
       if (!Number.isInteger(n)) {
-        out[f.key] = "an integer is required";
+        out[f.key] = t("val_integer");
         continue;
       }
       const l = limitFor(limits, p, f.key);
-      if (l && (n < l.min || n > l.max)) out[f.key] = `from ${l.min} to ${l.max}`;
+      if (l && (n < l.min || n > l.max)) out[f.key] = t("val_range", { min: l.min, max: l.max });
     } else if (f.type === "choice") {
       const ok = f.choices!.some((c) => c.value === v && c.value !== "");
-      if (!ok) out[f.key] = `one of:  ${f.choices!.filter((c) => c.value).map((c) => c.value).join(", ")}`;
+      if (!ok) out[f.key] = t("val_one_of", { choices: f.choices!.filter((c) => c.value).map((c) => c.value).join(", ") });
     }
   }
   if (p.mask) {
@@ -219,11 +220,11 @@ const DATES = ["capture", "file_created", "none"];
 /** Field errors of a name preset, by key. */
 export function validateName(p: NamePresetDraft): Record<string, string> {
   const out: Record<string, string> = {};
-  if (!p.template.trim()) out.template = "a template is required, e.g. {date:YYYYMMDD_HHMMSS}.{ext}";
-  else if (p.template.includes("\\")) out.template = "folders are separated by “/”, not “\\”";
+  if (!p.template.trim()) out.template = t("val_template_required");
+  else if (p.template.includes("\\")) out.template = t("val_template_backslash");
   else if (p.date === "none" && p.template.includes("{date"))
-    out.template = "the template has a date but the date source is “none”: the step will change nothing";
-  if (p.date !== null && !DATES.includes(p.date)) out.date = "capture, file_created or none";
+    out.template = t("val_template_no_date");
+  if (p.date !== null && !DATES.includes(p.date)) out.date = t("val_date");
   for (const k of ["mask", "skip_if"] as const) {
     const m = p[k];
     if (m) {
@@ -235,18 +236,18 @@ export function validateName(p: NamePresetDraft): Record<string, string> {
 }
 
 export function validateMask(items: string[]): string | null {
-  if (items.length === 0) return "empty mask: add at least one";
-  if (items.some((i) => i === "@")) return "a mask name is required after “@”";
+  if (items.length === 0) return t("val_mask_empty");
+  if (items.some((i) => i === "@")) return t("val_mask_ref");
   return null;
 }
 
 /** Why `name` cannot be the name of a new (or renamed) item; null if it can. */
 export function newNameError(kind: PresetKind, name: string, taken: string[], builtin: string[]): string | null {
-  if (!name.trim()) return "a name is required";
-  if (name.trim() !== name) return "no leading or trailing spaces";
-  if (kind === "mask" && /[@\s]/.test(name)) return "a mask name has no “@” and no spaces";
-  if (builtin.includes(name)) return kind === "mask" ? "this is a built-in mask name" : "this is a built-in preset name";
-  if (taken.includes(name)) return "this name is already in the config";
+  if (!name.trim()) return t("val_name_required");
+  if (name.trim() !== name) return t("val_name_spaces");
+  if (kind === "mask" && /[@\s]/.test(name)) return t("val_mask_name_chars");
+  if (builtin.includes(name)) return kind === "mask" ? t("val_builtin_mask") : t("val_builtin_preset");
+  if (taken.includes(name)) return t("val_name_taken");
   return null;
 }
 

@@ -1,24 +1,27 @@
 import { useState } from "react";
+import { useTranslation } from "react-i18next";
 import type { AppStatus } from "../api";
+import type { MessageKey } from "../i18n";
 
-const KEY_TEXT: Record<AppStatus["api_key_source"], string> = {
-  env: "AI key from the environment",
-  file: "AI key from a file",
-  none: "No AI key",
+const KEY_TEXT: Record<AppStatus["api_key_source"], MessageKey> = {
+  env: "status_key_env",
+  file: "status_key_file",
+  none: "status_key_none",
 };
 
 /// Bottom bar: config health, tools, AI key, config path.
 export function StatusBar({ status, loading }: { status: AppStatus | null; loading: boolean }) {
+  const { t } = useTranslation();
   const [toolsOpen, setToolsOpen] = useState(false);
   if (!status) {
     return (
       <footer className="statusbar">
-        <span className="st muted">{loading ? "Checking config and tools…" : "Status unavailable"}</span>
+        <span className="st muted">{loading ? t("status_checking") : t("status_unavailable")}</span>
       </footer>
     );
   }
-  const required = status.tools.items.filter((t) => t.required);
-  const found = required.filter((t) => t.path).length;
+  const required = status.tools.items.filter((x) => x.required);
+  const found = required.filter((x) => x.path).length;
   const warnings = status.config_warnings.length;
   const caps = status.tools.capabilities;
 
@@ -31,9 +34,9 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
         <i className="dot" />
         {status.config_ok
           ? warnings
-            ? `Config OK, warnings: ${warnings}`
-            : "Config OK"
-          : "Config has an error"}
+            ? t("status_config_warnings", { count: warnings })
+            : t("status_config_ok")
+          : t("status_config_error")}
       </span>
       <span className="st-wrap">
         <button
@@ -43,21 +46,21 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
           onClick={() => setToolsOpen((o) => !o)}
         >
           <i className="dot" />
-          {`Tools ${found} of ${required.length}`}
+          {t("status_tools", { found, total: required.length })}
         </button>
         {toolsOpen && (
-          <div className="popover" role="dialog" aria-label="Tools">
+          <div className="popover" role="dialog" aria-label={t("status_tools_aria")}>
             <table className="grid compact">
               <tbody>
-                {status.tools.items.map((t) => (
-                  <tr key={t.name}>
-                    <th scope="row">{t.name}</th>
-                    <td className={t.path ? "" : t.required ? "bad-text" : "muted"}>
-                      {t.path
-                        ? (t.version ?? t.path)
-                        : t.required
-                          ? "not found, required"
-                          : "not found, needed for PNG"}
+                {status.tools.items.map((tool) => (
+                  <tr key={tool.name}>
+                    <th scope="row">{tool.name}</th>
+                    <td className={tool.path ? "" : tool.required ? "bad-text" : "muted"}>
+                      {tool.path
+                        ? (tool.version ?? tool.path)
+                        : tool.required
+                          ? t("status_tool_required")
+                          : t("status_tool_png")}
                     </td>
                   </tr>
                 ))}
@@ -65,9 +68,9 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
             </table>
             {caps && (
               <ul className="caps">
-                <Cap ok={caps.svtav1} text="AV1 video (libsvtav1)" />
-                <Cap ok={caps.opus} text="Opus audio (libopus)" />
-                <Cap ok={caps.vidstab} text="Stabilization (vidstab)" />
+                <Cap ok={caps.svtav1} text={t("status_cap_av1")} />
+                <Cap ok={caps.opus} text={t("status_cap_opus")} />
+                <Cap ok={caps.vidstab} text={t("status_cap_vidstab")} />
               </ul>
             )}
           </div>
@@ -75,7 +78,7 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
       </span>
       <span className={`st ${status.api_key_source === "none" ? "warn" : "ok"}`}>
         <i className="dot" />
-        {KEY_TEXT[status.api_key_source]}
+        {t(KEY_TEXT[status.api_key_source])}
       </span>
       <span className="st path grow" title={status.config_path}>
         <bdi>{status.config_path}</bdi>
@@ -85,10 +88,11 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
 }
 
 function Cap({ ok, text }: { ok: boolean; text: string }) {
+  const { t } = useTranslation();
   return (
     <li className={ok ? "ok" : "bad"}>
       <i className="dot" />
-      {text}: {ok ? "yes" : "no"}
+      {text}: {ok ? t("yes") : t("no")}
     </li>
   );
 }

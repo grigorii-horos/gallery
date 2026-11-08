@@ -1,5 +1,8 @@
 // Display logic of the Plan screen: grouping, summary and trace of a plan
 // the core built. Nothing here decides anything about files.
+import { t as translate, type MessageKey } from "../i18n";
+import type { TFunction } from "i18next";
+import { dateTimeLong, num, usd } from "../i18n/format";
 import type {
   OutputOp,
   OverrideAction,
@@ -49,7 +52,7 @@ export function sameGroup(a: GroupId | null, b: GroupId | null): boolean {
  * lists them), targets the config no longer has at the end; then review,
  * unmatched and unchanged; warnings as text.
  */
-export function summarize(plan: Plan, order: string[] = []): PlanSummary {
+export function summarize(plan: Plan, order: string[] = [], t: TFunction = translate): PlanSummary {
   const counts = new Map<string, number>();
   for (const it of plan.items) counts.set(it.target, (counts.get(it.target) ?? 0) + 1);
   const known = order.filter((n) => counts.has(n));
@@ -65,9 +68,9 @@ export function summarize(plan: Plan, order: string[] = []): PlanSummary {
   ];
   const unchanged = plan.unchanged ?? [];
   const others: GroupRow[] = [
-    { id: { kind: "review" }, label: "To decide", count: plan.review.length },
-    { id: { kind: "unmatched" }, label: "Unmatched", count: plan.unmatched.length },
-    { id: { kind: "unchanged" }, label: "Unchanged", count: unchanged.length },
+    { id: { kind: "review" }, label: t("group_review"), count: plan.review.length },
+    { id: { kind: "unmatched" }, label: t("group_unmatched"), count: plan.unmatched.length },
+    { id: { kind: "unchanged" }, label: t("group_unchanged"), count: unchanged.length },
   ];
   return {
     total: plan.items.length + plan.review.length + plan.unmatched.length + unchanged.length,
@@ -80,11 +83,11 @@ export function summarize(plan: Plan, order: string[] = []): PlanSummary {
 export function warningText(w: PlanWarning): string {
   switch (w.kind) {
     case "series_split":
-      return `A series was split across targets: ${baseName(w.a)} and ${baseName(w.b)}`;
+      return translate("warn_series_split", { a: baseName(w.a), b: baseName(w.b) });
     case "double_encode":
-      return `Double re-encoding: ${baseName(w.source)} → ${w.dest}`;
+      return translate("warn_double_encode", { source: baseName(w.source), dest: w.dest });
     case "missing_server_path":
-      return `No server path: ${w.what}`;
+      return translate("warn_server_path", { what: w.what });
   }
 }
 
@@ -107,11 +110,11 @@ export function groupLabel(g: GroupId): string {
     case "target":
       return g.name;
     case "review":
-      return "To decide";
+      return translate("group_review");
     case "unmatched":
-      return "Unmatched";
+      return translate("group_unmatched");
     case "unchanged":
-      return "Unchanged";
+      return translate("group_unchanged");
   }
 }
 
@@ -148,10 +151,10 @@ export interface Trace {
   override: OverrideAction | null;
 }
 
-export const OP_LABEL: Record<OutputOp, string> = {
-  write: "Write a new file",
-  rename: "Move the source",
-  keep: "Left as is",
+export const OP_LABEL: Record<OutputOp, MessageKey> = {
+  write: "op_write",
+  rename: "op_rename",
+  keep: "op_keep",
 };
 
 /**
@@ -176,7 +179,7 @@ function outputView(o: PlannedOutput): OutputView {
   const op = o.op ?? "write";
   const { content, rename } = splitTrace(o);
   const step = (s: TraceStep): StepView => ({ preset: s.preset, matched: s.matched, after: s.after, bundle: s.bundle });
-  return { op, opLabel: OP_LABEL[op], dest: o.dest, content: content.map(step), rename: rename.map(step) };
+  return { op, opLabel: translate(OP_LABEL[op]), dest: o.dest, content: content.map(step), rename: rename.map(step) };
 }
 
 function itemDecision(it: PlanItem): Decision {
@@ -252,31 +255,27 @@ export function traceOf(ix: PlanIndex, source: string): Trace | null {
 export function decisionText(d: Decision): string {
   switch (d.kind) {
     case "mask":
-      return `Target mask “${d.target}”`;
+      return translate("decision_mask", { target: d.target });
     case "ai":
-      return d.low ? `AI: “${d.target}”, low confidence (accepted)` : `AI: “${d.target}”`;
+      return d.low ? translate("decision_ai_low", { target: d.target }) : translate("decision_ai", { target: d.target });
     case "manual":
-      return `Manual decision: “${d.target}”`;
+      return translate("decision_manual", { target: d.target });
     case "review":
-      return d.suggested === "—"
-        ? "AI is unsure and suggested no target"
-        : `AI is unsure, suggests “${d.suggested}”`;
+      return d.suggested === "—" ? translate("decision_review_none") : translate("decision_review", { target: d.suggested });
     case "unmatched":
-      return "No target fit";
+      return translate("decision_unmatched");
     case "unchanged":
-      return d.manualKeep
-        ? "Manual decision: keep in source"
-        : "Already in place or filtered out by an exclude mask";
+      return d.manualKeep ? translate("decision_keep") : translate("decision_unchanged");
   }
 }
 
 // ---------- scan progress ----------
 
-export const SCAN_STAGES: { id: ScanStage; label: string }[] = [
-  { id: "scan", label: "Finding files" },
-  { id: "exif", label: "EXIF" },
-  { id: "ai", label: "AI" },
-  { id: "plan", label: "Plan" },
+export const SCAN_STAGES: { id: ScanStage; label: MessageKey }[] = [
+  { id: "scan", label: "stage_scan" },
+  { id: "exif", label: "stage_exif" },
+  { id: "ai", label: "stage_ai" },
+  { id: "plan", label: "stage_plan" },
 ];
 
 export interface StageState {
@@ -295,13 +294,12 @@ export function stageFraction(s: StageState | undefined): number | null {
 /** `done`/`total` as shown under a stage. */
 export function stageCount(s: StageState | undefined): string {
   if (!s) return "";
-  return s.total > 0 ? `${s.done} of ${s.total}` : `${s.done}`;
+  return s.total > 0 ? translate("stage_count", { done: s.done, total: s.total }) : num(s.done);
 }
 
 export function formatCost(ai: { input: number; output: number; usd: number | null }): string {
-  const tokens = `${ai.input.toLocaleString("en-US")} in, ${ai.output.toLocaleString("en-US")} out`;
-  if (ai.usd === null) return `AI: ${tokens} tokens`;
-  return `AI: $${ai.usd.toFixed(ai.usd < 1 ? 4 : 2)} (${tokens})`;
+  if (ai.usd === null) return translate("cost_tokens", { input: ai.input, output: ai.output });
+  return translate("cost_usd", { usd: usd(ai.usd, ai.usd < 1 ? 4 : 2), input: ai.input, output: ai.output });
 }
 
 // ---------- paths ----------
@@ -320,12 +318,9 @@ export function dirName(p: string): string {
 export function planTime(path: string): string | null {
   const m = /(\d{4})(\d{2})(\d{2})-(\d{2})(\d{2})(\d{2})(?:-\d+)?(-retry(?:-\d+)?)?\.plan\.json$/.exec(path);
   if (!m) return null;
-  const months = [
-    "January", "February", "March", "April", "May", "June",
-    "July", "August", "September", "October", "November", "December",
-  ];
-  const when = `${months[Number(m[2]) - 1]} ${Number(m[3])}, ${m[1]}, ${m[4]}:${m[5]}`;
-  return m[7] ? `${when} (retry of failed)` : when;
+  const at = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]), Number(m[4]), Number(m[5]));
+  const when = dateTimeLong(at);
+  return m[7] ? translate("plan_time_retry", { when }) : when;
 }
 
 // ---------- virtual grid ----------

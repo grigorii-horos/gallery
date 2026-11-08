@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { num } from "../i18n/format";
 import { errorText, pickFolder, runApi, syncApi, type ApplyPreview, type ExportDone, type PilotSplit, type SyncCheck } from "../api";
 import { formatCost, SCAN_STAGES, stageCount, stageFraction } from "../plan/model";
 import { SyncBanner } from "../components/SyncBanner";
@@ -38,6 +40,7 @@ type Mode = "pilot" | "all";
 /// "Run": how much to run (a pilot by default), the estimate, the
 /// confirmation, the progress and the result with before → after.
 export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: Props) {
+  const { t } = useTranslation();
   // The confirmation that is open: the whole plan, the pilot, or what the pilot left.
   // `planId`: the plan the dialog was opened for; once the plan is another one, the dialog is void.
   const [dialog, setDialog] = useState<{ kind: ConfirmKind; preview: ApplyPreview; planId: string; split?: PilotSplit } | null>(null);
@@ -61,13 +64,13 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
     <div className="run-card">
       {run.previewError ? (
         <div className="notice bad">
-          <p className="notice-title">The plan could not be read</p>
+          <p className="notice-title">{t("run_plan_unreadable")}</p>
           <pre className="notice-text">{run.previewError}</pre>
         </div>
       ) : p ? (
         <>
           <p className="run-plan">
-            <span className="muted">{filesWord(p.files)} to process</span>
+            <span className="muted">{t("run_to_process", { count: p.files })}</span>
           </p>
           <FateLedger preview={p} />
           {!run.run && p.files > 0 && (
@@ -75,7 +78,7 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
           )}
         </>
       ) : (
-        <p className="empty small">{plan.loading ? "Opening the plan…" : "No plan."}</p>
+        <p className="empty small">{plan.loading ? t("flow_opening_short") : t("run_no_plan")}</p>
       )}
 
       {run.run ? (
@@ -89,21 +92,21 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
                 <>
                   {" "}
                   <button type="button" className="link" onClick={onOpenHistory}>
-                    Open History
+                    {t("run_open_history")}
                   </button>
                 </>
               )}
             </p>
           )}
           <fieldset className="run-mode">
-            <legend className="muted small">How much to run</legend>
+            <legend className="muted small">{t("run_how_much")}</legend>
             <label className="check">
               <input type="radio" name="run-mode" checked={mode === "pilot"} onChange={() => setMode("pilot")} />
-              Pilot: {PILOT_PER_TARGET} files per target
+              {t("run_mode_pilot", { count: PILOT_PER_TARGET })}
             </label>
             <label className="check">
               <input type="radio" name="run-mode" checked={mode === "all"} onChange={() => setMode("all")} />
-              Everything at once
+              {t("run_mode_all")}
             </label>
           </fieldset>
           <div className="run-actions">
@@ -111,19 +114,17 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
               type="button"
               className="btn"
               disabled={!!dryBlock}
-              title="Check the plan without changing anything"
+              title={t("run_check_title")}
               onClick={() => planId && void run.startCurrent({ dryRun: true, planId })}
             >
-              Check (dry-run)
+              {t("run_check")}
             </button>
             <button
               type="button"
               className="btn primary"
               disabled={!!block || run.splitting || (mode === "all" && previewStale)}
               title={
-                mode === "pilot"
-                  ? "A small part of the plan first: you can check the result and undo it"
-                  : "The whole plan; you will be asked to confirm before it runs"
+                mode === "pilot" ? t("run_pilot_title") : t("run_all_title")
               }
               onClick={async () => {
                 if (mode === "all") {
@@ -134,7 +135,7 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
                 if (split) setDialog({ kind: "pilot", preview: split.preview, planId: split.plan_id, split });
               }}
             >
-              {mode === "pilot" ? `Run pilot (${PILOT_PER_TARGET} per target)…` : "Run everything…"}
+              {mode === "pilot" ? t("run_pilot_button", { count: PILOT_PER_TARGET }) : t("run_all_button")}
             </button>
           </div>
         </>
@@ -154,7 +155,7 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
 
       {run.error && (
         <div className="notice bad">
-          <p className="notice-title">Not run</p>
+          <p className="notice-title">{t("run_not_run")}</p>
           <pre className="notice-text">{run.error}</pre>
         </div>
       )}
@@ -163,10 +164,10 @@ export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: P
 
       {outdated && (
         <div className="notice warn" role="alert">
-          <p className="notice-title">The plan was refreshed — check it again</p>
-          <p className="notice-text">Files, config or decisions changed while the confirmation was open. Nothing was run.</p>
+          <p className="notice-title">{t("run_refreshed")}</p>
+          <p className="notice-text">{t("run_refreshed_note")}</p>
           <button type="button" className="btn" onClick={() => setDialog(null)}>
-            Got it
+            {t("got_it")}
           </button>
         </div>
       )}
@@ -202,6 +203,7 @@ export function RetryCard({
   busy: string | null;
   onDone?: () => void;
 }) {
+  const { t } = useTranslation();
   const [preview, setPreview] = useState<ApplyPreview | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [dialog, setDialog] = useState(false);
@@ -216,18 +218,18 @@ export function RetryCard({
     };
   }, [path]);
   return (
-    <section className="retry-card" aria-label="Retry of failed files">
-      <h3 className="estimate-title">Retry of failed files</h3>
+    <section className="retry-card" aria-label={t("retry_aria")}>
+      <h3 className="estimate-title">{t("retry_aria")}</h3>
       {error && <pre className="notice-text">{error}</pre>}
       {preview && (
         <>
-          <p className="muted small">{filesWord(preview.files)} from the previous run.</p>
+          <p className="muted small">{t("retry_from_previous", { files: filesWord(preview.files) })}</p>
           <div className="run-actions">
             <button type="button" className="btn primary" disabled={!!busy} onClick={() => setDialog(true)}>
-              Run retry…
+              {t("retry_run")}
             </button>
             <button type="button" className="btn" onClick={onDone}>
-              Not needed
+              {t("retry_not_needed")}
             </button>
           </div>
         </>
@@ -249,6 +251,7 @@ export function RetryCard({
 
 /// Where the sources end up: one bar split by fate, then the counts.
 function FateLedger({ preview, note = true }: { preview: ApplyPreview; note?: boolean }) {
+  const { t } = useTranslation();
   const rows = fates(preview);
   const total = Math.max(preview.files, 1);
   const outside = preview.review + preview.unmatched + preview.unchanged;
@@ -259,19 +262,20 @@ function FateLedger({ preview, note = true }: { preview: ApplyPreview; note?: bo
           f.count > 0 ? <span key={f.id} className={`fate-${f.id}`} style={{ flexGrow: f.count / total }} /> : null,
         )}
       </div>
-      <ul className="fate-rows" aria-label="What happens to the sources">
+      <ul className="fate-rows" aria-label={t("fate_aria")}>
         {rows.map((f: Fate) => (
           <li key={f.id} className={f.count === 0 ? "zero" : undefined}>
             <span className={`fate-swatch fate-${f.id}`} aria-hidden />
-            <span className="fate-count">{f.count.toLocaleString("en-US")}</span>
+            <span className="fate-count">{num(f.count)}</span>
             <span>{f.label}</span>
           </li>
         ))}
       </ul>
       {note && (
         <p className="muted small">
-          New files in targets: {preview.writes.toLocaleString("en-US")}. Outside the plan: {outside.toLocaleString("en-US")}
-          {outside > 0 && " — left untouched"}.
+          {outside > 0
+            ? t("fate_note_untouched", { writes: preview.writes, outside })
+            : t("fate_note", { writes: preview.writes, outside })}
         </p>
       )}
     </div>
@@ -279,38 +283,40 @@ function FateLedger({ preview, note = true }: { preview: ApplyPreview; note?: bo
 }
 
 function Progress({ run }: { run: RunState }) {
+  const { t } = useTranslation();
   const r = run.run!;
   const p = r.progress;
   const frac = progressFraction(p);
-  const what = r.request.dry_run ? "Check" : "Run";
+  const what = r.request.dry_run ? t("run_what_check") : t("run_what_run");
   return (
-    <div className="run-progress" role="status" aria-label={`${what}: progress`}>
+    <div className="run-progress" role="status" aria-label={t("run_progress_aria", { what })}>
       <div className="run-progress-head">
         <span>
-          {what}: {p.done.toLocaleString("en-US")} of {p.total.toLocaleString("en-US")}
+          {t("run_progress", { what, done: p.done, total: p.total })}
         </span>
-        <span className={p.failed > 0 ? "bad-text" : "muted"}>errors: {p.failed}</span>
-        {p.skipped > 0 && <span className="warn-text">skipped: {p.skipped}</span>}
+        <span className={p.failed > 0 ? "bad-text" : "muted"}>{t("run_errors", { n: p.failed })}</span>
+        {p.skipped > 0 && <span className="warn-text">{t("run_skipped", { n: p.skipped })}</span>}
       </div>
       <div className="run-bar" aria-hidden>
         <span style={{ width: `${frac * 100}%` }} />
       </div>
       <div className="scan-current">
         <span className="path" title={p.current ?? ""}>
-          <bdi>{p.current ?? "Getting ready…"}</bdi>
+          <bdi>{p.current ?? t("getting_ready")}</bdi>
         </span>
         <button type="button" className="btn" disabled={r.cancelling} onClick={run.cancel}>
-          {r.cancelling ? "Stopping…" : "Cancel"}
+          {r.cancelling ? t("stopping") : t("cancel")}
         </button>
       </div>
       {r.cancelling && (
-        <p className="muted small">No new files are started; those in progress are finished so that nothing is left half-done.</p>
+        <p className="muted small">{t("run_cancelling")}</p>
       )}
     </div>
   );
 }
 
 function Result({ run, onOpenHistory }: { run: RunState; onOpenHistory: () => void }) {
+  const { t } = useTranslation();
   const d = run.result!;
   const head = resultHeadline(d);
   const rows = resultRows(d.summary, d.dry_run);
@@ -320,13 +326,13 @@ function Result({ run, onOpenHistory }: { run: RunState; onOpenHistory: () => vo
       <ul className="run-result-rows">
         {rows.map((r) => (
           <li key={r.label} className={r.tone}>
-            <span className="fate-count">{r.count.toLocaleString("en-US")}</span> {r.label}
+            <span className="fate-count">{num(r.count)}</span> {r.label}
           </li>
         ))}
       </ul>
       {d.failures.length > 0 && (
         <details className="run-failures">
-          <summary>Files with problems ({d.failures.length})</summary>
+          <summary>{t("run_problems", { n: d.failures.length })}</summary>
           <ul>
             {d.failures.map((f) => (
               <li key={f.source}>
@@ -344,13 +350,13 @@ function Result({ run, onOpenHistory }: { run: RunState; onOpenHistory: () => vo
       ))}
       {d.report_path ? (
         <p className="run-report">
-          <span className="muted">Report:</span> <span className="code">{d.report_path}</span>
+          <span className="muted">{t("history_report")}:</span> <span className="code">{d.report_path}</span>
           <button type="button" className="link" onClick={onOpenHistory}>
-            Open in History
+            {t("run_open_in_history")}
           </button>
         </p>
       ) : (
-        <p className="muted small">The check changed nothing and wrote no report.</p>
+        <p className="muted small">{t("run_check_no_report")}</p>
       )}
     </div>
   );
@@ -372,6 +378,7 @@ function ConfirmDialog({
   /** `allow`: place results that differ from their source; `pause`: pause Syncthing meanwhile. */
   onConfirm: (allow: boolean, pause: boolean) => void;
 }) {
+  const { t } = useTranslation();
   const { title, lines } = confirmLines(preview, kind);
   const [allow, setAllow] = useState(false);
   const [check, setCheck] = useState<SyncCheck | null>(null);
@@ -411,7 +418,7 @@ function ConfirmDialog({
         </ul>
         <label className="modal-check">
           <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} />
-          Allow results with mismatches (date, mtime, GPS, size, duration)
+          {t("confirm_allow")}
         </label>
         <label className="modal-check">
           <input
@@ -420,15 +427,15 @@ function ConfirmDialog({
             disabled={sync.disabled}
             onChange={(e) => setPauseChoice(e.target.checked)}
           />
-          Pause Syncthing during the run
+          {t("confirm_pause")}
         </label>
         <p className="muted small modal-note">{sync.note}</p>
         <div className="modal-actions">
           <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
-            Cancel
+            {t("cancel")}
           </button>
           <button type="button" className="btn primary" onClick={() => onConfirm(allow, pause)}>
-            Run
+            {t("confirm_run")}
           </button>
         </div>
       </div>
@@ -440,6 +447,7 @@ function ConfirmDialog({
 
 /// "For server": the current plan with the server's paths, saved to the export folder.
 export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: PlanState; run: RunState; busy: string | null }) {
+  const { t } = useTranslation();
   const x = run.exporting;
   const canExport = !!data.summary?.valid && !!run.exportDir && !x && !run.run && !plan.scan && !busy;
   const choose = async () => {
@@ -449,13 +457,11 @@ export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: Pla
   return (
     <section className="run-card" aria-labelledby="run-server">
       <header className="run-card-head">
-        <h2 id="run-server">On the server</h2>
-        <span className="muted">export plan</span>
+        <h2 id="run-server">{t("server_title")}</h2>
+        <span className="muted">{t("flow_export_plan")}</span>
       </header>
       <p className="run-text">
-        The plan is rebuilt with the server paths from the current state (same manual decisions, AI answers from
-        the cache; files waiting for AI are not included) and saved to a folder that Syncthing usually
-        syncs.
+        {t("server_text")}
       </p>
       <div className="run-folder">
         {run.exportDir ? (
@@ -463,10 +469,10 @@ export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: Pla
             <bdi>{run.exportDir}</bdi>
           </span>
         ) : (
-          <span className="run-folder-empty muted">No folder chosen</span>
+          <span className="run-folder-empty muted">{t("server_no_folder")}</span>
         )}
         <button type="button" className="btn" disabled={!!x} onClick={choose}>
-          Choose folder…
+          {t("server_choose")}
         </button>
       </div>
       <div className="run-actions">
@@ -476,14 +482,14 @@ export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: Pla
           disabled={!canExport}
           onClick={() => run.startExport(data.configPath)}
         >
-          Export plan
+          {t("server_export")}
         </button>
       </div>
       {x && (
-        <div className="run-progress" role="status" aria-label="Export progress">
+        <div className="run-progress" role="status" aria-label={t("server_progress_aria")}>
           <div className="run-progress-head">
             <span>
-              {SCAN_STAGES.find((s) => s.id === x.progress?.stage)?.label ?? "Reading config"}
+              {t(SCAN_STAGES.find((s) => s.id === x.progress?.stage)?.label ?? "server_reading_config")}
               {x.progress ? `: ${stageCount(x.progress)}` : "…"}
             </span>
           </div>
@@ -498,26 +504,27 @@ export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: Pla
               <bdi>{x.progress?.current ?? ""}</bdi>
             </span>
             <button type="button" className="btn" disabled={x.cancelling} onClick={run.cancelExport}>
-              {x.cancelling ? "Stopping…" : "Cancel"}
+              {x.cancelling ? t("stopping") : t("cancel")}
             </button>
           </div>
         </div>
       )}
       {run.exportError && (
         <div className="notice bad">
-          <p className="notice-title">The server plan was not saved</p>
+          <p className="notice-title">{t("server_not_saved")}</p>
           <pre className="notice-text">{run.exportError}</pre>
         </div>
       )}
       {run.exported && <Exported done={run.exported} />}
       <p className="run-foot muted small">
-        The GUI never touches the server: you run the command yourself, on the server. Its report comes back to this folder through Syncthing.
+        {t("server_foot")}
       </p>
     </section>
   );
 }
 
 function Exported({ done }: { done: ExportDone }) {
+  const { t } = useTranslation();
   const [copied, setCopied] = useState(false);
   const copy = async () => {
     try {
@@ -531,15 +538,15 @@ function Exported({ done }: { done: ExportDone }) {
   return (
     <div className="run-exported">
       <p>
-        Plan saved: {filesWord(done.summary.files)}
+        {t("server_saved", { files: filesWord(done.summary.files) })}
         {done.summary.ai && <span className="cost"> {formatCost(done.summary.ai)}</span>}
       </p>
       <p className="code">{done.plan_path}</p>
-      <p className="muted small">Run this on the server, putting in the path to the plan folder there:</p>
+      <p className="muted small">{t("server_run_this")}</p>
       <div className="command">
         <code>{done.command}</code>
         <button type="button" className="btn" onClick={copy}>
-          {copied ? "Copied" : "Copy"}
+          {copied ? t("copied") : t("copy")}
         </button>
       </div>
     </div>

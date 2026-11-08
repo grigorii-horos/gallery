@@ -1,13 +1,14 @@
 // Presentation of the estimate (the figures come from the core).
 import type { Estimate, Range, TargetEstimate } from "../api";
+import { t } from "../i18n";
 import { formatSize } from "../plan/triage";
 
 /** `45 s`, `12 min`, `2 h 05 min`. */
 export function formatDuration(secs: number): string {
   const s = Math.max(0, Math.round(secs));
-  if (s < 60) return `${s} s`;
-  if (s < 3600) return `${Math.floor((s + 30) / 60)} min`;
-  return `${Math.floor(s / 3600)} h ${String(Math.floor((s % 3600) / 60)).padStart(2, "0")} min`;
+  if (s < 60) return t("duration_s", { n: s });
+  if (s < 3600) return t("duration_min", { n: Math.floor((s + 30) / 60) });
+  return t("duration_h_min", { h: Math.floor(s / 3600), min: String(Math.floor((s % 3600) / 60)).padStart(2, "0") });
 }
 
 /** `−1.2 MB` for a negative size. */
@@ -38,11 +39,11 @@ export interface EstimateView {
   rows: EstimateRow[];
 }
 
-const row = (t: TargetEstimate): EstimateRow => ({
-  name: t.name || "total",
-  files: t.files,
-  saving: rangeText(t.saving_bytes, signedSize),
-  time: rangeText(t.seconds, formatDuration),
+const row = (x: TargetEstimate): EstimateRow => ({
+  name: x.name || t("total"),
+  files: x.files,
+  saving: rangeText(x.saving_bytes, signedSize),
+  time: rangeText(x.seconds, formatDuration),
 });
 
 export function estimateView(e: Estimate): EstimateView {

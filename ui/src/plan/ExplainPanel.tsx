@@ -1,19 +1,22 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { t, type MessageKey } from "../i18n";
+import { num } from "../i18n/format";
 import { errorText, planApi, type Explanation,
   type ItemCheck, type FilterCheck, type OutputCheck, type StepCheck, type TargetCheck } from "../api";
 import { Code } from "../components/ConfigGate";
 import { baseName, dirName } from "./model";
 
-const STAGE: Record<TargetCheck["stage"], string> = {
-  before_ai: "Before AI",
-  ai: "AI",
-  after_ai: "After AI",
+const STAGE: Record<TargetCheck["stage"], MessageKey> = {
+  before_ai: "explain_stage_before_ai",
+  ai: "stage_ai",
+  after_ai: "explain_stage_after_ai",
 };
 
-const OP: Record<OutputCheck["op"], string> = {
-  write: "Writing a new file",
-  rename: "Renaming in place",
-  keep: "Unchanged",
+const OP: Record<OutputCheck["op"], MessageKey> = {
+  write: "explain_op_write",
+  rename: "explain_op_rename",
+  keep: "explain_op_keep",
 };
 
 /// Loads the explanation of `path` (the core reads, nothing is changed).
@@ -29,6 +32,7 @@ export function ExplainPanel({
   /** Back to the file's trace, when the file is in the plan. */
   onTrace?: () => void;
 }) {
+  useTranslation();
   const [state, setState] = useState<{ path: string; ex?: Explanation; error?: string } | null>(null);
   useEffect(() => {
     let live = true;
@@ -42,20 +46,20 @@ export function ExplainPanel({
   }, [path, configPath]);
   const cur = state?.path === path ? state : null;
   return (
-    <aside className="trace explain" aria-label="Why this file">
+    <aside className="trace explain" aria-label={t("explain_aria")}>
       <header className="trace-head">
         <h2 title={path}>{baseName(path)}</h2>
         {onTrace && (
           <button type="button" className="btn quiet" onClick={onTrace}>
-            Trace
+            {t("explain_trace")}
           </button>
         )}
-        <button type="button" className="btn quiet icon" aria-label="Close" onClick={onClose}>
+        <button type="button" className="btn quiet icon" aria-label={t("close")} onClick={onClose}>
           ×
         </button>
       </header>
       <div className="trace-scroll">
-        {!cur && <p className="muted">Working it out…</p>}
+        {!cur && <p className="muted">{t("explain_working")}</p>}
         {cur?.error && <p className="bad-text">{cur.error}</p>}
         {cur?.ex && <ExplainView ex={cur.ex} />}
       </div>
@@ -67,27 +71,26 @@ function scopeText(ex: Explanation): string {
   const s = ex.scope;
   switch (s.kind) {
     case "scanned":
-      return `source “${s.source}”, the scan sees it`;
+      return t("explain_scope_scanned", { source: s.source });
     case "missing":
-      return "the file does not exist";
+      return t("explain_scope_missing");
     case "not_file":
-      return "not a regular file";
+      return t("explain_scope_not_file");
     case "no_source":
-      return "no source of the config contains the file";
+      return t("explain_scope_no_source");
     case "hidden":
-      return `source “${s.source}”, hidden element “${s.part}”`;
+      return t("explain_scope_hidden", { source: s.source, part: s.part });
     case "skip":
-      return `source “${s.source}”, “${s.part}” is under skip “${s.glob}”`;
+      return t("explain_scope_skip", { source: s.source, part: s.part, glob: s.glob });
     case "not_recursive":
-      return `source “${s.source}” is not recursive`;
+      return t("explain_scope_not_recursive", { source: s.source });
   }
 }
 
 function otherTargetsText(ex: Explanation): string {
   const n = ex.other_targets.length;
-  const word = n === 1 ? "target" : "targets";
   const source = ex.scope.kind === "scanned" ? ex.scope.source : "";
-  return `${n} more ${word} not for source ${source}`;
+  return t("explain_other_targets", { count: n, source });
 }
 
 /// Per item why it did or did not take the name, as the core words it.
@@ -110,16 +113,21 @@ function maskText(m: { items: { item: string }[] }): string {
 }
 
 function filterText(stage: TargetCheck["stage"], f: FilterCheck): string {
-  const what = stage === "ai" ? "prefilter" : `filter ${f.index + 1}`;
-  if (!f.source_ok) return `${what}: the source is not in the list [${f.sources.join(", ")}]`;
-  const m = f.matches ? `match ${maskText(f.matches)} ${f.matches.matched ? "took it" : "did not take it"}` : "match: any file";
-  const x = f.exclude ? `; exclude ${maskText(f.exclude)} ${f.exclude.matched ? "fired" : "did not fire"}` : "";
-  return `${what}: ${m}${x}`;
+  const what = stage === "ai" ? t("explain_prefilter") : t("explain_filter_n", { n: f.index + 1 });
+  if (!f.source_ok) return t("explain_filter_source", { what, sources: f.sources.join(", ") });
+  const m = f.matches
+    ? t(f.matches.matched ? "explain_match_took" : "explain_match_not_took", { items: maskText(f.matches) })
+    : t("explain_match_any");
+  const x = f.exclude
+    ? t(f.exclude.matched ? "explain_exclude_fired" : "explain_exclude_not_fired", { items: maskText(f.exclude) })
+    : "";
+  return t("explain_filter_line", { what, m, x });
 }
 
 /// The core's explanation as a panel: the verdict first, then the checks in
 /// the order the scan makes them. Display only.
 export function ExplainView({ ex }: { ex: Explanation }) {
+  useTranslation();
   const d = ex.decision;
   return (
     <>
@@ -131,24 +139,24 @@ export function ExplainView({ ex }: { ex: Explanation }) {
       </p>
 
       <section>
-        <h3>Source</h3>
+        <h3>{t("explain_source")}</h3>
         <p>{scopeText(ex)}</p>
       </section>
 
       {ex.stages.length > 0 && (
         <section>
-          <h3>Targets in order</h3>
+          <h3>{t("explain_targets")}</h3>
           <ol className="explain-targets">
-            {ex.stages.map((t, i) => (
-              <li key={i} className={t.taken ? "taken" : t.candidate ? "cand" : "no"}>
+            {ex.stages.map((tg, i) => (
+              <li key={i} className={tg.taken ? "taken" : tg.candidate ? "cand" : "no"}>
                 <p>
-                  <span className="muted small">{STAGE[t.stage]}</span> <strong>{t.name}</strong>{" "}
-                  <span className="small">{t.taken ? "took the file" : t.candidate ? "fits" : "does not fit"}</span>
+                  <span className="muted small">{t(STAGE[tg.stage])}</span> <strong>{tg.name}</strong>{" "}
+                  <span className="small">{tg.taken ? t("explain_took") : tg.candidate ? t("explain_fits") : t("explain_no_fit")}</span>
                 </p>
                 <ul className="explain-filters">
-                  {t.filters.map((f) => (
+                  {tg.filters.map((f) => (
                     <li key={f.index} className={f.fit}>
-                      {filterText(t.stage, f)}
+                      {filterText(tg.stage, f)}
                       {[f.matches, f.exclude].map(
                         (m, k) => m && <ItemList key={k} items={m.items} />,
                       )}
@@ -169,16 +177,16 @@ export function ExplainView({ ex }: { ex: Explanation }) {
 
       {ex.ai.kind === "not_asked" && (
         <section>
-          <h3>AI</h3>
-          <p>AI was not asked: no saved answer (candidates: {ex.ai.candidates.join(", ")}).</p>
+          <h3>{t("stage_ai")}</h3>
+          <p>{t("explain_ai_not_asked", { candidates: ex.ai.candidates.join(", ") })}</p>
         </section>
       )}
       {ex.ai.kind === "cached" && (
         <section>
-          <h3>AI (from cache)</h3>
+          <h3>{t("explain_ai_cached")}</h3>
           <p>
-            {ex.ai.category ?? "no category"}
-            {ex.ai.low ? ", unsure" : ""}
+            {ex.ai.category ?? t("explain_no_category")}
+            {ex.ai.low ? `, ${t("explain_unsure")}` : ""}
           </p>
           {ex.ai.reason && <blockquote className="reason">{ex.ai.reason}</blockquote>}
         </section>
@@ -186,7 +194,7 @@ export function ExplainView({ ex }: { ex: Explanation }) {
 
       {d && (
         <section>
-          <h3>Decision</h3>
+          <h3>{t("trace_decision")}</h3>
           <p className={`decision ${d.kind}`}>{decisionLine(d)}</p>
         </section>
       )}
@@ -194,14 +202,14 @@ export function ExplainView({ ex }: { ex: Explanation }) {
       {ex.outputs.length > 0 && (
         <section>
           <h3>
-            Outputs <span className="count">{ex.outputs.length}</span>
+            {t("trace_outputs")} <span className="count">{num(ex.outputs.length)}</span>
           </h3>
           <ol className="outputs">
             {ex.outputs.map((o, i) => (
               <li key={i} className="output-block">
-                <p className={`op op-${o.op}`}>{OP[o.op]}</p>
-                <StepList title="Content" steps={o.content} empty="no steps, byte-for-byte copy" />
-                <StepList title="Name" steps={o.rename} empty="no steps" />
+                <p className={`op op-${o.op}`}>{t(OP[o.op])}</p>
+                <StepList title={t("pipe_content")} steps={o.content} empty={t("explain_no_steps_copy")} />
+                <StepList title={t("pipe_name")} steps={o.rename} empty={t("explain_no_steps")} />
                 <p className="dest">
                   <Code title={o.dest}>{o.dest}</Code>
                 </p>
@@ -217,17 +225,17 @@ export function ExplainView({ ex }: { ex: Explanation }) {
 function decisionLine(d: NonNullable<Explanation["decision"]>): string {
   switch (d.kind) {
     case "target": {
-      const via = d.via?.kind === "ai" ? "AI" : d.via?.kind === "manual" ? "manual decision" : "mask";
-      return `Target “${d.target}” (${via})`;
+      const via = d.via?.kind === "ai" ? t("explain_via_ai") : d.via?.kind === "manual" ? t("explain_via_manual") : t("explain_via_mask");
+      return t("explain_d_target", { target: d.target, via });
     }
     case "review":
-      return `To decide, AI suggests “${d.target}”`;
+      return t("explain_d_review", { target: d.target });
     case "excluded":
-      return "Excluded by an exclude mask";
+      return t("explain_d_excluded");
     case "kept":
-      return "Keep in source (manual decision)";
+      return t("explain_d_kept");
     case "unmatched":
-      return "No target took the file";
+      return t("explain_d_unmatched");
   }
 }
 
@@ -244,15 +252,15 @@ function StepList({ title, steps, empty }: { title: string; steps: StepCheck[]; 
               <span className="step-name">{s.bundle ? `${s.bundle} › ${s.preset}` : s.preset}</span>{" "}
               <span className="small">
                 {s.skipped
-                  ? `skipped: ${s.skipped}`
+                  ? t("explain_skipped", { why: s.skipped })
                   : s.matched
                     ? s.before === s.after
-                      ? "applied, same name"
-                      : "applied"
-                    : "mask did not match"}
+                      ? t("explain_applied_same")
+                      : t("explain_applied")
+                    : t("explain_mask_no_match")}
               </span>
               <span className="muted small step-mask">
-                mask {s.mask_expanded && s.mask_expanded !== s.mask ? `${s.mask} = ${s.mask_expanded}` : s.mask}
+                {t("explain_mask", { mask: s.mask_expanded && s.mask_expanded !== s.mask ? `${s.mask} = ${s.mask_expanded}` : s.mask })}
               </span>
               <span className="muted small step-names">
                 {s.before} → {s.after}

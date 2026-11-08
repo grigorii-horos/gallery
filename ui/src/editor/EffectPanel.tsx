@@ -1,52 +1,56 @@
 import { useState } from "react";
-import { plural } from "./fields";
-import { OUTCOME_TITLE, breakdown, targetLine, total, type EffectDiff, type ExampleGroup } from "./effect";
+import { useTranslation } from "react-i18next";
+import { t } from "../i18n";
+import { num } from "../i18n/format";
+import { outcomeTitle, breakdown, targetLine, total, type EffectDiff, type ExampleGroup } from "./effect";
 import type { EffectState } from "./useEffectPreview";
 
 const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 
 /// "Effect" under the save bar: what the unsaved edits do to the files.
 export function EffectPanel({ state }: { state: EffectState }) {
+  useTranslation();
   const { diff, loading, error } = state;
   return (
-    <section className="effect" aria-label="Effect" aria-busy={loading}>
+    <section className="effect" aria-label={t("effect_title")} aria-busy={loading}>
       <header className="effect-head">
-        <h3>Effect</h3>
-        {loading && <span className="muted">calculating…</span>}
+        <h3>{t("effect_title")}</h3>
+        {loading && <span className="muted">{t("effect_calculating")}</span>}
       </header>
       {error && <p className="effect-error">{error}</p>}
-      {diff ? <EffectView diff={diff} /> : !error && <p className="muted">Working out what will change…</p>}
+      {diff ? <EffectView diff={diff} /> : !error && <p className="muted">{t("effect_working")}</p>}
     </section>
   );
 }
 
 export function EffectView({ diff }: { diff: EffectDiff }) {
+  useTranslation();
   const n = diff.changed;
   return (
     <div className="effect-body">
       <p className="effect-total">
         {n === 0 ? (
-          <>The changes affect none of the {diff.files} {plural(diff.files, "file", "files")}.</>
+          <>{t("effect_none", { count: diff.files })}</>
         ) : (
           <>
-            {n} of {diff.files} {plural(diff.files, "file", "files")} will change. Now: {breakdown(diff.before) || "—"}. After: {breakdown(diff.after) || "—"}.
+            {t("effect_some", { changed: n, count: diff.files, before: breakdown(diff.before) || "—", after: breakdown(diff.after) || "—" })}
           </>
         )}
         {diff.after.unmatched !== diff.before.unmatched && (
           <>
             {" "}
-            Unmatched: {diff.before.unmatched} → {diff.after.unmatched}.
+            {t("effect_unmatched", { before: diff.before.unmatched, after: diff.after.unmatched })}
           </>
         )}
-        {diff.after.waiting_ai > 0 && <> Waiting for AI: {diff.after.waiting_ai}.</>}
+        {diff.after.waiting_ai > 0 && <> {t("effect_waiting", { n: diff.after.waiting_ai })}</>}
       </p>
-      {diff.targets.some((t) => total(t.after) > 0 || total(t.before) > 0) && (
+      {diff.targets.some((x) => total(x.after) > 0 || total(x.before) > 0) && (
         <ul className="effect-targets">
           {diff.targets
-            .filter((t) => t.changed > 0 || total(t.after) > 0)
-            .map((t) => (
-              <li key={t.name} className={t.changed > 0 ? "changed" : ""}>
-                <strong>{t.name}</strong> {targetLine(t)}
+            .filter((x) => x.changed > 0 || total(x.after) > 0)
+            .map((x) => (
+              <li key={x.name} className={x.changed > 0 ? "changed" : ""}>
+                <strong>{x.name}</strong> {targetLine(x)}
               </li>
             ))}
         </ul>
@@ -59,11 +63,12 @@ export function EffectView({ diff }: { diff: EffectDiff }) {
 }
 
 function Examples({ group }: { group: ExampleGroup }) {
+  useTranslation();
   const [open, setOpen] = useState(false);
   return (
     <div className="effect-group">
       <button type="button" className="btn quiet" aria-expanded={open} onClick={() => setOpen(!open)}>
-        {OUTCOME_TITLE[group.outcome]}: {group.count} {open ? "▾" : "▸"}
+        {outcomeTitle(group.outcome)}: {num(group.count)} {open ? "▾" : "▸"}
       </button>
       {open && (
         <ul className="effect-files">
@@ -72,7 +77,7 @@ function Examples({ group }: { group: ExampleGroup }) {
               <code>{base(f.path)}</code>: {f.before.label} → {f.after.label}
             </li>
           ))}
-          {group.count > group.files.length && <li className="muted">…and {group.count - group.files.length} more</li>}
+          {group.count > group.files.length && <li className="muted">{t("triage_and_more", { n: group.count - group.files.length })}</li>}
         </ul>
       )}
     </div>

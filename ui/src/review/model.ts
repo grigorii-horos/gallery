@@ -1,6 +1,7 @@
 // Display logic of the Review screen: series of review items, checkbox
 // selection, keyboard focus and target shortcuts. Decisions themselves are
 // recorded by the core (`set_overrides`); nothing here touches files.
+import { t } from "../i18n";
 import type { OverrideResult, OverrideView, ReviewItem } from "../api";
 
 /** Neighbouring captures at most this far apart form one series. */
@@ -38,11 +39,13 @@ export function decisionState(it: ReviewItem, o: OverrideView | undefined): Deci
 export function failureText(results: OverrideResult[]): string | null {
   const bad = results.filter((r) => r.error);
   if (bad.length === 0) return null;
-  const more = bad.length > 2 ? ` and ${bad.length - 2} more` : "";
-  return `Not accepted ${bad.length} of ${results.length}: ${bad
+  const head = bad
     .slice(0, 2)
     .map((r) => r.error)
-    .join("; ")}${more}`;
+    .join("; ");
+  return bad.length > 2
+    ? t("review_failures_more", { bad: bad.length, total: results.length, errors: head, more: bad.length - 2 })
+    : t("review_failures", { bad: bad.length, total: results.length, errors: head });
 }
 
 /** Seconds since an arbitrary epoch of a `YYYY-MM-DDTHH:MM:SS` local time. */

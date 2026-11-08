@@ -1,5 +1,6 @@
 // Typed wrappers over the Tauri commands of crates/gallery-gui.
 import { invoke } from "@tauri-apps/api/core";
+import { t } from "./i18n";
 
 export type ApiKeySource = "env" | "file" | "none";
 
@@ -107,11 +108,11 @@ export const api = {
 export async function pickConfig(current: string | null): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({
-    title: "Open config",
+    title: t("dialog_open_config"),
     multiple: false,
     directory: false,
     defaultPath: current ?? undefined,
-    filters: [{ name: "Gallery config", extensions: ["toml"] }],
+    filters: [{ name: t("dialog_config_filter"), extensions: ["toml"] }],
   });
   return typeof picked === "string" ? picked : null;
 }
@@ -636,7 +637,7 @@ export const runApi = {
 export async function pickFolder(current: string | null): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({
-    title: "Folder for the server plan",
+    title: t("server_pick_title"),
     multiple: false,
     directory: true,
     defaultPath: current ?? undefined,
@@ -777,6 +778,8 @@ export const examplesApi = {
 
 /** Tray and notification settings (crates/gallery-gui `settings`). */
 export interface TraySettings {
+  /** `"system"` or a supported language code; changed through `localeApi`. */
+  language: string;
   check_interval_min: number;
   notify_threshold: number;
   hide_to_tray: boolean;
@@ -797,6 +800,22 @@ export interface PendingSnapshot {
   checked_at: string;
   error: string | null;
 }
+
+/** The interface language as the backend holds it. */
+export interface LocaleView {
+  /** `"system"` or a supported code. */
+  setting: string;
+  /** The supported code in force. */
+  locale: string;
+  /** The supported code the system language maps to. */
+  system: string;
+}
+
+export const localeApi = {
+  get: () => invoke<LocaleView>("get_locale"),
+  /** Switches the backend (messages, tray, notifications) and stores the choice. */
+  set: (language: string) => invoke<LocaleView>("set_locale", { language }),
+};
 
 export const trayApi = {
   settings: () => invoke<TrayView>("tray_settings"),

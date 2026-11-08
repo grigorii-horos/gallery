@@ -425,7 +425,11 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
         .warnings()
         .into_iter()
         .map(|message| FieldWarning {
-            path: String::new(),
+            // A warning about a name preset belongs to it; the name is read
+            // back out of the (translated) message through the catalog.
+            path: gallery_core::i18n::extract("config.warn_folders_skip_if", "name", &message)
+                .map(|n| format!("name_presets.{n}"))
+                .unwrap_or_default(),
             message,
         })
         .collect();

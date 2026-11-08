@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
 import { planApi, type AiEstimate } from "../api";
 import { SCAN_STAGES, formatCost, stageCount, stageFraction } from "../plan/model";
 import type { PlanState } from "../plan/usePlan";
@@ -15,6 +16,7 @@ interface Props {
 /// answer. The price comes from the core before anything is sent; above $1
 /// the click asks once more. While the scan runs: its stages and "Cancel".
 export function AiAsk({ plan, configPath, canScan }: Props) {
+  const { t } = useTranslation();
   const { scan, view, lastScan } = plan;
   const waiting = view?.waiting_ai ?? 0;
   const version = view?.built_at ?? null;
@@ -51,30 +53,28 @@ export function AiAsk({ plan, configPath, canScan }: Props) {
           <button type="button" className="btn primary" disabled={!canScan || confirm} onClick={ask}>
             {aiAskText(waiting, est)}
           </button>
-          <span className="muted small">
-            Without AI these files do not make it into the plan. Only files without a cached answer cost money.
-          </span>
+          <span className="muted small">{t("ask_note")}</span>
         </div>
       )}
       {confirm && est && (
-        <div className="notice warn" role="alertdialog" aria-label="Confirm AI cost">
-          <p className="notice-title">This AI request will cost more than $1</p>
+        <div className="notice warn" role="alertdialog" aria-label={t("ask_confirm_aria")}>
+          <p className="notice-title">{t("ask_costly")}</p>
           <p className="notice-text">
-            {est.label} · {est.source_label}. This is an estimate: no API calls, based on the number of files without a cached answer.
+            {est.label} · {est.source_label}. {t("ask_estimate_note")}
           </p>
           <div className="run-actions">
             <button type="button" className="btn primary" onClick={ask}>
-              Ask AI
+              {t("ask_ai_button")}
             </button>
             <button type="button" className="btn" onClick={() => setConfirm(false)}>
-              Cancel
+              {t("cancel")}
             </button>
           </div>
         </div>
       )}
-      {lastScan?.summary.ai && !scan && <p className="muted small cost">Previous AI request: {formatCost(lastScan.summary.ai)}</p>}
+      {lastScan?.summary.ai && !scan && <p className="muted small cost">{t("ask_previous", { cost: formatCost(lastScan.summary.ai) })}</p>}
       {scan && (
-        <div className="scan-progress" role="status" aria-label="AI request progress">
+        <div className="scan-progress" role="status" aria-label={t("ask_progress_aria")}>
           <ol className="stages">
             {SCAN_STAGES.map((st) => {
               const s = scan.progress[st.id];
@@ -84,7 +84,7 @@ export function AiAsk({ plan, configPath, canScan }: Props) {
               return (
                 <li key={st.id} className={`stage-step ${state}`}>
                   <span className="stage-dot" aria-hidden />
-                  <span className="stage-label">{st.label}</span>
+                  <span className="stage-label">{t(st.label)}</span>
                   <span className="stage-count">{stageCount(s)}</span>
                   <span className="stage-bar" aria-hidden>
                     <span
@@ -98,10 +98,10 @@ export function AiAsk({ plan, configPath, canScan }: Props) {
           </ol>
           <div className="scan-current">
             <span className="path" title={scan.current ?? ""}>
-              <bdi>{scan.current ?? "Reading config…"}</bdi>
+              <bdi>{scan.current ?? t("gate_reading")}</bdi>
             </span>
             <button type="button" className="btn" disabled={scan.cancelling} onClick={plan.cancelScan}>
-              {scan.cancelling ? "Stopping…" : "Cancel"}
+              {scan.cancelling ? t("stopping") : t("cancel")}
             </button>
           </div>
         </div>

@@ -1,5 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
-import { pickConfig } from "./api";
+import { useTranslation } from "react-i18next";
+import { localeApi, pickConfig } from "./api";
+import { applyLanguageSetting } from "./i18n";
 import { useAppData } from "./store";
 import { Nav, SCREENS, type ScreenId } from "./components/Nav";
 import { SyncBanner } from "./components/SyncBanner";
@@ -20,6 +22,14 @@ import { useHistory, type HistoryState } from "./history/useHistory";
 import { useConfigEditor, type ConfigEditor } from "./editor/useConfigEditor";
 
 export default function App() {
+  const { t } = useTranslation();
+  // The stored language is the backend's: follow it (the picker changes both).
+  useEffect(() => {
+    localeApi.get().then(
+      (v) => void applyLanguageSetting(v.setting),
+      () => {},
+    );
+  }, []);
   const data = useAppData();
   const plan = usePlan(data.configPath);
   const run = useRun(plan.view?.path ?? null, data.configPath, plan.view?.built_at ?? null);
@@ -54,7 +64,7 @@ export default function App() {
       <Nav current={screen} onSelect={setScreen} />
       <main className="main" aria-busy={data.loading}>
         <header className="topbar">
-          <h1>{title}</h1>
+          <h1>{t(title)}</h1>
           <div className="topbar-config">
             <span className="path" title={shownPath}>
               <bdi>{shownPath}</bdi>
@@ -62,25 +72,25 @@ export default function App() {
             <button
               type="button"
               className="btn quiet"
-              title={editor.dirty ? "Unsaved editor changes are kept; saving checks whether the file changed" : undefined}
+              title={editor.dirty ? t("app_reload_dirty_hint") : undefined}
               onClick={() => {
                 data.reload();
                 if (!editor.dirty) editor.reload();
               }}
             >
-              Reload
+              {t("app_reload")}
             </button>
             <button type="button" className="btn" onClick={openConfig}>
-              Open config…
+              {t("app_open_config")}
             </button>
             {data.configPath && (
               <button
                 type="button"
                 className="btn quiet"
-                title="Go back to ~/.config/gallery/gallery.toml"
+                title={t("app_default_hint")}
                 onClick={() => data.setConfigPath(null)}
               >
-                Default
+                {t("app_default")}
               </button>
             )}
           </div>
@@ -140,16 +150,17 @@ function ScreenBody({
   setRetryPath: (path: string | null) => void;
   onScreen: (id: ScreenId) => void;
 }) {
+  const { t } = useTranslation();
   const busyText = plan.scan
-    ? "A scan is running — wait for it to finish."
+    ? t("busy_scan")
     : run.run
-      ? "A plan run is in progress — wait for it to finish."
+      ? t("busy_run")
       : run.exporting
-        ? "A server plan export is running — wait for it to finish."
+        ? t("busy_export")
         : history.undo
-          ? "An undo is running — wait for it to finish."
+          ? t("busy_undo")
           : history.retrying
-            ? "A retry of the failed files is being prepared — wait for it to finish."
+            ? t("busy_retry")
             : null;
   switch (screen) {
     case "sources":

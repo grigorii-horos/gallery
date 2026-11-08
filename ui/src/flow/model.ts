@@ -2,7 +2,8 @@
 // line over the current plan and the text of the AI button. Counts come from
 // the plan the core built; nothing here touches files.
 import type { AiEstimate, CurrentView } from "../api";
-import { plural } from "../run/model";
+import { t } from "../i18n";
+import { usd } from "../i18n/format";
 
 export type StepId = "check" | "decide" | "run";
 export type StepState = "locked" | "open" | "done";
@@ -38,10 +39,10 @@ export function stepStates(i: FlowInput): Record<StepId, StepState> {
 
 /** Why Run is closed, for the step header; null when it is open. */
 export function runLockedText(i: FlowInput): string | null {
-  if (!i.hasPlan) return "No plan yet.";
-  if (i.files === 0) return "The plan has no files to run.";
-  if (!i.checked) return "Check the plan first.";
-  if (i.review > 0 && !i.decided) return "Decide the uncertain files first.";
+  if (!i.hasPlan) return t("run_locked_no_plan");
+  if (i.files === 0) return t("run_locked_no_files");
+  if (!i.checked) return t("run_locked_check");
+  if (i.review > 0 && !i.decided) return t("run_locked_decide");
   return null;
 }
 
@@ -51,16 +52,14 @@ export interface StatusPart {
   text: string;
 }
 
-const files = (n: number) => plural(n, "file", "files");
-
 /** The status line: "N to sort", "waiting for AI", "unchanged", "unmatched". */
 export function statusParts(v: CurrentView): StatusPart[] {
   const p = v.plan;
   const parts: StatusPart[] = [
-    { id: "run", count: p.items.length, text: `${p.items.length.toLocaleString("en-US")} to sort` },
-    { id: "waiting", count: v.waiting_ai, text: `${v.waiting_ai.toLocaleString("en-US")} waiting for AI` },
-    { id: "unchanged", count: (p.unchanged ?? []).length, text: `${(p.unchanged ?? []).length.toLocaleString("en-US")} unchanged` },
-    { id: "unmatched", count: p.unmatched.length, text: `${p.unmatched.length.toLocaleString("en-US")} unmatched` },
+    { id: "run", count: p.items.length, text: t("status_to_sort", { n: p.items.length }) },
+    { id: "waiting", count: v.waiting_ai, text: t("status_waiting_ai", { n: v.waiting_ai }) },
+    { id: "unchanged", count: (p.unchanged ?? []).length, text: t("status_unchanged", { n: (p.unchanged ?? []).length }) },
+    { id: "unmatched", count: p.unmatched.length, text: t("status_unmatched", { n: p.unmatched.length }) },
   ];
   // Zero is worth saying only for the main figure.
   return parts.filter((x) => x.id === "run" || x.count > 0);
@@ -69,6 +68,8 @@ export function statusParts(v: CurrentView): StatusPart[] {
 /** "Ask AI (12 files, ≈$0.34)"; the price is the core's estimate, the count its own or the plan's. */
 export function aiAskText(waiting: number, est: AiEstimate | null): string {
   const n = est ? est.to_send : waiting;
-  const price = !est ? "" : est.usd ? `, ≈$${est.usd.mid.toFixed(2)}` : ", price unknown";
-  return `Ask AI (${n.toLocaleString("en-US")} ${files(n)}${price})`;
+  if (!est) return t("ask_ai", { count: n });
+  return est.usd
+    ? t("ask_ai_price", { count: n, price: usd(est.usd.mid) })
+    : t("ask_ai_unknown", { count: n });
 }

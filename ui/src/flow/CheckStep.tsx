@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { num } from "../i18n/format";
 import {
   groupFiles,
   groupKey,
@@ -37,11 +39,12 @@ export function CheckStep({
   plan: PlanState;
   onConfigSaved: () => void;
 }) {
+  const { t } = useTranslation();
   const view = plan.view!;
   const configPath = data.configPath;
-  const targets: TargetChoice[] = useMemo(() => targetChoices(data.summary), [data.summary]);
-  const order = useMemo(() => targets.map((t) => t.name), [targets]);
-  const summary = useMemo(() => summarize(view.plan, order), [view.plan, order]);
+  const targets: TargetChoice[] = useMemo(() => targetChoices(data.summary, t), [data.summary, t]);
+  const order = useMemo(() => targets.map((x) => x.name), [targets]);
+  const summary = useMemo(() => summarize(view.plan, order, t), [view.plan, order, t]);
   const index = useMemo(() => indexPlan(view), [view]);
   // "Unmatched" opens the triage by default; the plain file grid is a tab away.
   const [flat, setFlat] = useState(false);
@@ -54,9 +57,9 @@ export function CheckStep({
   const planFiles = useMemo(() => allPlanFiles(view.plan), [view.plan]);
 
   const mark = (p: string) => {
-    if (index.overrides.has(p)) return { text: "M", title: "Manual decision" };
+    if (index.overrides.has(p)) return { text: t("mark_manual_short"), title: t("mark_manual") };
     const it = index.items.get(p);
-    if (it?.via.kind === "ai" && it.via.low) return { text: "?", title: "AI unsure, accepted" };
+    if (it?.via.kind === "ai" && it.via.low) return { text: "?", title: t("mark_ai_unsure") };
     return null;
   };
 
@@ -72,21 +75,21 @@ export function CheckStep({
           setExplain(null);
         }}
       />
-      <section className="plan-files" aria-label={group ? groupLabel(group) : "Files"}>
+      <section className="plan-files" aria-label={group ? groupLabel(group) : t("check_files")}>
         {group ? (
           <>
             <header className="files-head">
               <h2>{groupLabel(group)}</h2>
-              <span className="count">{files.length.toLocaleString("en-US")}</span>
+              <span className="count">{num(files.length)}</span>
               <FileSearch files={planFiles} onPick={setExplain} />
             </header>
             {group.kind === "unmatched" && (
-              <div className="triage-tabs" role="group" aria-label="List view">
+              <div className="triage-tabs" role="group" aria-label={t("check_list_view")}>
                 <button type="button" className="btn quiet" aria-pressed={!flat} onClick={() => setFlat(false)}>
-                  Triage
+                  {t("check_triage")}
                 </button>
                 <button type="button" className="btn quiet" aria-pressed={flat} onClick={() => setFlat(true)}>
-                  All files
+                  {t("check_all_files")}
                 </button>
               </div>
             )}
@@ -113,7 +116,7 @@ export function CheckStep({
             )}
           </>
         ) : (
-          <p className="empty">The plan has no files.</p>
+          <p className="empty">{t("check_no_files")}</p>
         )}
       </section>
       {explain && (

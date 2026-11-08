@@ -1,5 +1,6 @@
 // The config editor's state, shared by the Sources and Targets screens:
 // the saved file, the pending operations and the checked draft after them.
+import { t } from "../i18n";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { asFailure, editorApi } from "./api";
 import { isDirty, pushOp, type EditFailure, type EditOp, type EditOutcome, type TargetRename } from "./model";
@@ -110,7 +111,7 @@ export function useConfigEditor(configPath: string | null, onSaved: () => void):
         if (f.kind === "op" && f.op !== null && opsRef.current[f.op] === sent[f.op]) {
           // The operation does not fit the file: drop it, check the rest.
           setOps(opsRef.current.filter((_, i) => i !== f.op));
-          setNotice({ tone: "bad", text: `Change not applied: ${f.message}` });
+          setNotice({ tone: "bad", text: t("editor_not_applied", { error: f.message }) });
           continue;
         }
         if (my === seq.current) {
@@ -161,7 +162,7 @@ export function useConfigEditor(configPath: string | null, onSaved: () => void):
         setFormGen((g) => g + 1);
         if (o.saved) {
           setRetargetable(o.renames.filter((r) => r.overrides > 0));
-          setNotice({ tone: "ok", text: "Saved. The previous version is next to it as gallery.toml.bak." });
+          setNotice({ tone: "ok", text: t("editor_saved") });
           onSaved();
         }
       }
@@ -195,9 +196,9 @@ export function useConfigEditor(configPath: string | null, onSaved: () => void):
         baseRef.current?.version ?? "",
         retargetable.map((r): [string, string] => [r.from, r.to]),
       );
-      setNotice({ tone: "ok", text: `Manual decisions moved to the new target name: ${moved}.` });
+      setNotice({ tone: "ok", text: t("editor_moved", { n: moved }) });
     } catch (e) {
-      setNotice({ tone: "bad", text: `Decisions were not moved: ${asFailure(e).message}` });
+      setNotice({ tone: "bad", text: t("editor_not_moved", { error: asFailure(e).message }) });
     }
     setRetargetable([]);
   }, [retargetable, configPath]);

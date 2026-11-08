@@ -2,6 +2,7 @@
 // a restart or a crash) and again whenever a run ends.
 import { useCallback, useEffect, useState } from "react";
 import { errorText, syncApi, type PauseState } from "../api";
+import { t } from "../i18n";
 
 export interface SyncPauseState {
   paused: PauseState | null;
@@ -32,7 +33,7 @@ export function useSyncPause(): SyncPauseState {
         setPaused(p);
         setLoadError(null);
       },
-      (e) => setLoadError(`Could not tell whether Syncthing is paused: ${errorText(e)}`),
+      (e) => setLoadError(t("syncpause_load_failed", { error: errorText(e) })),
     );
   }, []);
 
@@ -49,7 +50,7 @@ export function useSyncPause(): SyncPauseState {
     setResumeError(null);
     try {
       const out = await syncApi.resume();
-      if (out.failed.length > 0) setResumeError(`Could not resume: ${out.failed.join(", ")}`);
+      if (out.failed.length > 0) setResumeError(t("syncpause_resume_failed", { folders: out.failed.join(", ") }));
     } catch (e) {
       setResumeError(errorText(e));
     } finally {

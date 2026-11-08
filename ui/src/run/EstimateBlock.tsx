@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { num } from "../i18n/format";
 import { errorText, runApi, type Estimate } from "../api";
 import { estimateView } from "./estimate";
 
@@ -8,13 +10,15 @@ import { estimateView } from "./estimate";
 export function EstimateBlock({
   planPath,
   pilot,
-  title = "Estimate",
+  title,
 }: {
   planPath: string;
   /** Files per target when only a pilot slice of the plan runs. */
   pilot?: number;
   title?: string;
 }) {
+  const { t } = useTranslation();
+  const heading = title ?? t("estimate_title");
   // Keyed by the plan it was read for: another plan reads as "loading" again.
   const key = `${planPath}|${pilot ?? ""}`;
   const [loaded, setLoaded] = useState<{ key: string; est?: Estimate; error?: string } | null>(null);
@@ -30,23 +34,23 @@ export function EstimateBlock({
   }, [planPath, pilot, key]);
   const state = loaded?.key === key ? loaded : null;
 
-  if (!state) return <p className="muted small">Estimating…</p>;
-  if (!state.est) return <p className="muted small">Estimate unavailable: {state.error}</p>;
+  if (!state) return <p className="muted small">{t("estimate_loading")}</p>;
+  if (!state.est) return <p className="muted small">{t("estimate_unavailable", { error: state.error })}</p>;
   const v = estimateView(state.est);
   return (
-    <section className="estimate" aria-label={title}>
-      <h3 className="estimate-title">{title}</h3>
+    <section className="estimate" aria-label={heading}>
+      <h3 className="estimate-title">{heading}</h3>
       <dl className="estimate-facts">
         <div>
-          <dt>Files</dt>
-          <dd>{v.files.toLocaleString("en-US")}</dd>
+          <dt>{t("estimate_files")}</dt>
+          <dd>{num(v.files)}</dd>
         </div>
         <div>
-          <dt>Saving</dt>
+          <dt>{t("estimate_saving")}</dt>
           <dd>{v.saving}</dd>
         </div>
         <div>
-          <dt>Time</dt>
+          <dt>{t("estimate_time")}</dt>
           <dd>{v.time}</dd>
         </div>
       </dl>
@@ -54,12 +58,12 @@ export function EstimateBlock({
         <ul className="estimate-rows small muted">
           {v.rows.map((r) => (
             <li key={r.name}>
-              {r.name}: {r.files.toLocaleString("en-US")} files, {r.saving}, {r.time}
+              {t("estimate_row", { name: r.name, files: t("files", { count: r.files }), saving: r.saving, time: r.time })}
             </li>
           ))}
         </ul>
       )}
-      <p className="muted small">Estimate: {v.source}; it is a range, not a promise.</p>
+      <p className="muted small">{t("estimate_note", { source: v.source })}</p>
     </section>
   );
 }

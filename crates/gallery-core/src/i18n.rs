@@ -216,10 +216,18 @@ pub fn plural_category(code: &str, n: u64) -> &'static str {
             }
         }
         "zh" => "other",
+        // The Romance languages: "many" is a round million ("1 000 000 de fichiers");
         // French and Portuguese count 0 as singular too.
-        "fr" | "pt" => {
-            if n <= 1 {
+        "fr" | "pt" | "es" | "it" => {
+            let single = if matches!(lang, "fr" | "pt") {
+                n <= 1
+            } else {
+                n == 1
+            };
+            if single {
                 "one"
+            } else if n != 0 && n % 1_000_000 == 0 {
+                "many"
             } else {
                 "other"
             }
@@ -239,6 +247,7 @@ pub fn plural_categories(code: &str) -> &'static [&'static str] {
     match code.split('-').next().unwrap_or("") {
         "ru" | "uk" | "pl" => &["one", "few", "many", "other"],
         "zh" => &["other"],
+        "es" | "fr" | "it" | "pt" => &["one", "many", "other"],
         _ => &["one", "other"],
     }
 }

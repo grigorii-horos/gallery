@@ -1,5 +1,6 @@
 // Form pieces of the config editor.
 import { useId, useState, type KeyboardEvent, type ReactNode } from "react";
+import { useTranslation } from "react-i18next";
 import { errorText } from "../api";
 import { editorApi, pickFolder } from "./api";
 import type { ConfigEditor } from "./useConfigEditor";
@@ -75,6 +76,7 @@ export function FolderInput({
   placeholder?: string;
   invalid?: boolean;
 }) {
+  const { t } = useTranslation();
   return (
     <div className="input-row">
       <TextInput value={value} onChange={onChange} label={label} placeholder={placeholder} mono invalid={invalid} />
@@ -86,7 +88,7 @@ export function FolderInput({
           if (picked) onChange(picked);
         }}
       >
-        Choose…
+        {t("choose")}
       </button>
     </div>
   );
@@ -104,6 +106,7 @@ export function SourceToggles({
   onChange: (v: string[]) => void;
   label: string;
 }) {
+  const { t } = useTranslation();
   const unknown = value.filter((v) => !all.includes(v));
   return (
     <div className="toggles" role="group" aria-label={label}>
@@ -115,14 +118,14 @@ export function SourceToggles({
             type="button"
             className={`toggle${unknown.includes(id) ? " unknown" : ""}`}
             aria-pressed={on}
-            title={unknown.includes(id) ? "no such source" : undefined}
+            title={unknown.includes(id) ? t("toggles_no_source") : undefined}
             onClick={() => onChange(on ? value.filter((v) => v !== id) : [...value, id])}
           >
             {id}
           </button>
         );
       })}
-      {all.length === 0 && <span className="muted">no sources</span>}
+      {all.length === 0 && <span className="muted">{t("toggles_none")}</span>}
     </div>
   );
 }
@@ -136,7 +139,7 @@ export function MaskChips({
   placeholder,
   invalid,
   allowNot = true,
-  exceptionField = "Matches",
+  exceptionField,
 }: {
   value: string[];
   onChange: (v: string[]) => void;
@@ -150,9 +153,11 @@ export function MaskChips({
   /// Where the exception belongs when `allowNot` is off.
   exceptionField?: string;
 }) {
+  const { t } = useTranslation();
+  const field = exceptionField ?? t("field_matches");
   const [text, setText] = useState("");
   const [refused, setRefused] = useState<string | null>(null);
-  const hint = placeholder ?? (allowNot ? "*.jpg, ^regex, @mask or !exception" : "*.jpg, ^regex or @mask");
+  const hint = placeholder ?? (allowNot ? t("chips_hint_not") : t("chips_hint"));
   const listId = useId();
   const add = (raw: string) => {
     let items = raw
@@ -162,7 +167,7 @@ export function MaskChips({
     const bad = allowNot ? [] : items.filter((s) => maskItemKind(s) === "not");
     setRefused(
       bad.length
-        ? `“${bad[0]}” does not belong here: this list only filters files out, and “!” would bring them back. Write the exception in the “${exceptionField}” field.`
+        ? t("chips_refused", { item: bad[0], field })
         : null,
     );
     items = items.filter((s) => !bad.includes(s) && !value.includes(s));
@@ -175,8 +180,8 @@ export function MaskChips({
     maskItemKind(m) !== "not"
       ? undefined
       : allowNot
-        ? "exception: a name with this mask does not match"
-        : `“!” is not allowed here: remove it and write the exception in the “${exceptionField}” field`;
+        ? t("chips_exception")
+        : t("chips_not_allowed", { field });
   const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" || (e.key === "," && text.trim())) {
       e.preventDefault();
@@ -193,7 +198,7 @@ export function MaskChips({
           <button
             type="button"
             className="chip-x"
-            aria-label={`Remove ${m}`}
+            aria-label={t("remove_item", { item: m })}
             onClick={() => onChange(value.filter((_, j) => j !== i))}
           >
             ×
@@ -244,6 +249,7 @@ export function MaskTester({
   match: string[] | null;
   exclude: string[];
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const [names, setNames] = useState("IMG_20261105_101500.jpg\nScreenshot_20261105-101500.png\nVID_20261105_101500.mp4");
   const [result, setResult] = useState<MaskTestResult[] | null>(null);
@@ -262,14 +268,14 @@ export function MaskTester({
   if (!open)
     return (
       <button type="button" className="link small" onClick={() => setOpen(true)}>
-        Test on a name
+        {t("tester_open")}
       </button>
     );
   return (
     <div className="tester">
       <textarea
         className="input mono"
-        aria-label="File names to test, one per line"
+        aria-label={t("tester_names")}
         rows={3}
         value={names}
         spellCheck={false}
@@ -277,10 +283,10 @@ export function MaskTester({
       />
       <div className="tester-actions">
         <button type="button" className="btn" onClick={run}>
-          Test
+          {t("tester_test")}
         </button>
         <button type="button" className="btn quiet" onClick={() => setOpen(false)}>
-          Hide
+          {t("tester_hide")}
         </button>
       </div>
       {error && <p className="bad-text small">{error}</p>}
@@ -293,7 +299,7 @@ export function MaskTester({
               </span>
               <code>{r.name}</code>
               <span className="muted">
-                {r.taken ? "matches" : r.excluded ? "excluded" : "does not match"}
+                {r.taken ? t("tester_matches") : r.excluded ? t("tester_excluded") : t("tester_no_match")}
               </span>
             </li>
           ))}
@@ -330,6 +336,7 @@ export function PipeEditor({
   label: string;
   empty: string;
 }) {
+  const { t } = useTranslation();
   const [open, setOpen] = useState<number | null>(null);
   const [drag, setDrag] = useState<number | null>(null);
   const choiceOf = (name: string) => presets.find((p) => p.name === name);
@@ -376,7 +383,7 @@ export function PipeEditor({
                 type="button"
                 className="pchip-main"
                 aria-expanded={open === i}
-                title={known ? undefined : "no such preset"}
+                title={known ? undefined : t("pipe_no_preset")}
                 onClick={() => setOpen(open === i ? null : i)}
               >
                 <span className="pchip-name">{l.preset}</span>
@@ -394,10 +401,10 @@ export function PipeEditor({
         <div className="pchip-panel">
           <div className="pchip-panel-head">
             <strong>{steps[open].preset}</strong>
-            <span className="muted">step {open + 1} of {steps.length}</span>
+            <span className="muted">{t("pipe_step_of", { n: open + 1, total: steps.length })}</span>
             <span className="spacer" />
             <button type="button" className="btn quiet" disabled={open === 0} onClick={() => move(open, open - 1)}>
-              ‹ Earlier
+              ‹ {t("pipe_earlier")}
             </button>
             <button
               type="button"
@@ -405,7 +412,7 @@ export function PipeEditor({
               disabled={open === steps.length - 1}
               onClick={() => move(open, open + 1)}
             >
-              Later ›
+              {t("pipe_later")} ›
             </button>
             <button
               type="button"
@@ -415,13 +422,11 @@ export function PipeEditor({
                 setOpen(null);
               }}
             >
-              Remove step
+              {t("pipe_remove_step")}
             </button>
           </div>
           {choiceOf(steps[open].preset)?.bundle ? (
-            <p className="field-hint">
-              The set expands in place: the masks are set on its steps (they can be overridden in the set itself).
-            </p>
+            <p className="field-hint">{t("pipe_set_hint")}</p>
           ) : (
           <label className="check">
             <input
@@ -435,7 +440,7 @@ export function PipeEditor({
               }
             />
             <span>
-              Own mask instead of the preset's mask
+              {t("pipe_own_mask")}
               {maskOf(steps[open].preset) && (
                 <>
                   {" "}
@@ -450,24 +455,24 @@ export function PipeEditor({
               value={steps[open].mask ?? []}
               onChange={(m) => set(open, { ...steps[open], mask: m })}
               suggestions={maskSuggestions}
-              label={`Mask of step ${steps[open].preset}`}
+              label={t("pipe_mask_of", { preset: steps[open].preset })}
             />
           )}
         </div>
       )}
       <select
         className="select"
-        aria-label={`Add step: ${label}`}
+        aria-label={t("pipe_add_aria", { label })}
         value=""
         onChange={(e) => {
           if (e.target.value) onChange([...steps, { preset: e.target.value, mask: null }]);
         }}
       >
-        <option value="">+ step…</option>
+        <option value="">{t("pipe_add")}</option>
         {([
-          ["bundle", "Sets", (p: PresetChoice) => !!p.bundle],
-          ["own", "Own", (p: PresetChoice) => !p.bundle && p.own],
-          ["system", "Built-in", (p: PresetChoice) => !p.bundle && !p.own],
+          ["bundle", t("pipe_group_sets"), (p: PresetChoice) => !!p.bundle],
+          ["own", t("pipe_group_own"), (p: PresetChoice) => !p.bundle && p.own],
+          ["system", t("pipe_group_builtin"), (p: PresetChoice) => !p.bundle && !p.own],
         ] as const).map(([key, title, pick]) => {
           const list = presets.filter(pick);
           if (!list.length) return null;
@@ -488,45 +493,46 @@ export function PipeEditor({
 
 /// The bottom bar of the editor screens: what is unsaved, save, discard.
 export function EditorBar({ editor }: { editor: ConfigEditor }) {
+  const { t } = useTranslation();
   const v = editor.view;
   const err = v?.error;
   const n = editor.ops.length;
   let state: ReactNode;
   let tone = "";
-  if (editor.saving) state = "Saving…";
+  if (editor.saving) state = t("saving");
   else if (err) {
     tone = "bad";
     state = (
       <>
-        <strong>Cannot save:</strong> {err.message}
+        <strong>{t("bar_cannot_save")}</strong> {err.message}
       </>
     );
   } else if (editor.dirty) {
     tone = "dirty";
-    state = `Unsaved: ${n} ${plural(n, "change", "changes")}${editor.checking ? ", checking…" : ""}`;
+    state = t(editor.checking ? "bar_unsaved_checking" : "bar_unsaved", { count: n });
   } else if (editor.retargetable.length > 0) {
     tone = "ok";
     const total = editor.retargetable.reduce((n, r) => n + r.overrides, 0);
     state = (
       <>
-        Saved. Manual decisions with the old target name: {total}.{" "}
+        {t("bar_saved_retarget", { total })}{" "}
         <button type="button" className="btn" onClick={() => void editor.retarget()}>
-          Move to the new name
+          {t("bar_move")}
         </button>{" "}
         <button type="button" className="btn quiet" onClick={editor.dismissRetarget}>
-          Keep
+          {t("bar_keep")}
         </button>
       </>
     );
   } else if (editor.notice?.tone === "ok") {
     tone = "ok";
     state = editor.notice.text;
-  } else state = <span className="muted">No changes — the config matches the file</span>;
+  } else state = <span className="muted">{t("bar_clean")}</span>;
   return (
     <div className={`editor-bar ${tone}`} role="status">
       <span className="editor-bar-state">{state}</span>
       <button type="button" className="btn quiet" disabled={!n || editor.saving} onClick={editor.discard}>
-        Discard changes
+        {t("bar_discard")}
       </button>
       <button
         type="button"
@@ -534,7 +540,7 @@ export function EditorBar({ editor }: { editor: ConfigEditor }) {
         disabled={!editor.dirty || !!err || editor.saving || editor.checking}
         onClick={() => void editor.save()}
       >
-        Save
+        {t("save")}
       </button>
     </div>
   );
@@ -542,16 +548,17 @@ export function EditorBar({ editor }: { editor: ConfigEditor }) {
 
 /// The editor cannot work on the file, or it changed outside.
 export function EditorFailure({ editor }: { editor: ConfigEditor }) {
+  const { t } = useTranslation();
   const f = editor.failure;
   const notice = editor.notice?.tone === "bad" ? editor.notice.text : null;
   if (!f && !notice) return null;
   if (!f) return <div className="notice bad">{notice}</div>;
   const title =
     f.kind === "changed"
-      ? "The file was changed outside the editor"
+      ? t("failure_changed")
       : f.kind === "read"
-        ? "The editor cannot open this config"
-        : "Could not write the config";
+        ? t("failure_read")
+        : t("failure_write");
   return (
     <div className="notice bad">
       <p className="notice-title">{title}</p>
@@ -559,15 +566,12 @@ export function EditorFailure({ editor }: { editor: ConfigEditor }) {
       {f.kind !== "read" && (
         <p>
           <button type="button" className="btn" onClick={editor.reload}>
-            Reload file
+            {t("failure_reload")}
           </button>{" "}
-          <span className="muted">unsaved changes will be lost</span>
+          <span className="muted">{t("failure_lost")}</span>
         </p>
       )}
     </div>
   );
 }
 
-export function plural(n: number, one: string, other: string): string {
-  return n === 1 ? one : other;
-}

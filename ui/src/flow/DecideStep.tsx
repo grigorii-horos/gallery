@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useTranslation } from "react-i18next";
+import { t } from "../i18n";
+import { date as formatDate } from "../i18n/format";
 import { errorText, type OverrideAction, type ReviewItem } from "../api";
 import type { AppData } from "../store";
 import { baseName } from "../plan/model";
@@ -40,18 +43,20 @@ const toAction = (choice: string): OverrideAction =>
   choice === KEEP ? { kind: "keep" } : { kind: "target", name: choice };
 
 function actionText(a: OverrideAction): string {
-  return a.kind === "keep" ? "in source" : a.name;
+  return a.kind === "keep" ? t("decide_in_source") : a.name;
 }
 
 /// Decide: the files the scan was not sure about (low-confidence AI
 /// answers, names that did not fit), in series, with a target or "keep"
 /// for each. A decision is saved as a manual decision and the plan follows it.
 export function DecideStep({ data, plan }: { data: AppData; plan: PlanState }) {
-  const targets = useMemo(() => targetChoices(data.summary), [data.summary]);
+  const { t } = useTranslation();
+  const targets = useMemo(() => targetChoices(data.summary, t), [data.summary, t]);
   return <ReviewBody plan={plan} targets={targets} />;
 }
 
 function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[] }) {
+  useTranslation();
   const view = plan.view!;
   const series = useMemo(() => groupSeries(view.plan.review), [view.plan.review]);
   const overrides = useMemo(() => new Map(view.overrides.map((o) => [o.path, o])), [view.overrides]);
@@ -72,7 +77,7 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
     [view.plan.review, overrides],
   );
   const decided = resolved;
-  const names = useMemo(() => targets.map((t) => t.name), [targets]);
+  const names = useMemo(() => targets.map((x) => x.name), [targets]);
   const [selected, setSelected] = useState(() => initialSelection(series, new Set(decided.keys())));
   const [focus, setFocus] = useState<string | null>(null);
   const [recent, setRecent] = useState(readRecent);
@@ -161,23 +166,23 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
     <>
       <div className="review-head">
         <p>
-          <strong>{total.toLocaleString("en-US")}</strong> {plural(total, "file", "files")} in{" "}
-          {series.length.toLocaleString("en-US")} series
-          {done > 0 && <span className="muted">, {done.toLocaleString("en-US")} decided</span>}
+          {t("decide_head", { files: t("files", { count: total }), series: t("decide_series", { count: series.length }) })}
+          {done > 0 && <span className="muted">, {t("decide_done", { n: done })}</span>}
         </p>
-        <ul className="keys" aria-label="Keys">
-          {shortcuts.map((t, i) => (
-            <li key={t}>
-              <kbd>{i + 1}</kbd> {t}
+        <ul className="keys" aria-label={t("decide_keys")}>
+          {shortcuts.map((name, i) => (
+            <li key={name}>
+              <kbd>{i + 1}</kbd> {name}
             </li>
           ))}
           <li>
-            <kbd>0</kbd> keep in source
+            <kbd>0</kbd> {t("decide_keep")}
           </li>
           <li className="muted">
             <kbd>←</kbd>
-            <kbd>→</kbd> file <kbd>↑</kbd>
-            <kbd>↓</kbd> series <kbd>Space</kbd> check <kbd>Enter</kbd> apply
+            <kbd>→</kbd> {t("decide_key_file")} <kbd>↑</kbd>
+            <kbd>↓</kbd> {t("decide_key_series")} <kbd>{t("key_space")}</kbd> {t("decide_key_check")} <kbd>{t("key_enter")}</kbd>{" "}
+            {t("decide_key_apply")}
           </li>
         </ul>
       </div>
@@ -208,15 +213,11 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
   );
 }
 
-function plural(n: number, one: string, other: string): string {
-  return n === 1 ? one : other;
-}
-
 function spanText(seconds: number): string {
-  if (seconds < 60) return `${seconds} s`;
+  if (seconds < 60) return t("duration_s", { n: seconds });
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return s ? `${m} min ${s} s` : `${m} min`;
+  return s ? t("duration_min_s", { min: m, s }) : t("duration_min", { n: m });
 }
 
 interface SeriesProps {
@@ -240,6 +241,7 @@ interface SeriesProps {
 }
 
 function SeriesBlock(p: SeriesProps) {
+  useTranslation();
   const s = p.series;
   const paths = s.items.map((i) => i.source);
   const state = groupState(p.selected, paths);
@@ -257,16 +259,16 @@ function SeriesBlock(p: SeriesProps) {
   const canApply = !!p.choice && checked > 0 && !p.busy && (!isName || p.choice === KEEP);
 
   return (
-    <section className={`series${isName ? " name-error" : ""}${allDone ? " done" : ""}`} aria-label={`Series ${baseName(head.source)}`}>
+    <section className={`series${isName ? " name-error" : ""}${allDone ? " done" : ""}`} aria-label={t("decide_series_aria", { name: baseName(head.source) })}>
       <div className="series-time">
         {span ? (
           <>
             <span className="series-clock">{span.start.slice(11, 19)}</span>
-            <span className="series-date">{`${span.start.slice(8, 10)}.${span.start.slice(5, 7)}.${span.start.slice(0, 4)}`}</span>
-            {s.items.length > 1 && <span className="series-span">over {spanText(span.seconds)}</span>}
+            <span className="series-date">{formatDate(span.start)}</span>
+            {s.items.length > 1 && <span className="series-span">{t("decide_over", { span: spanText(span.seconds) })}</span>}
           </>
         ) : (
-          <span className="series-date">time unknown</span>
+          <span className="series-date">{t("decide_time_unknown")}</span>
         )}
       </div>
       <div className="series-main">
@@ -274,17 +276,17 @@ function SeriesBlock(p: SeriesProps) {
           <label className="check">
             <input ref={groupBox} type="checkbox" checked={state === "all"} onChange={p.onToggleAll} />
             <span>
-              {s.items.length} {plural(s.items.length, "file", "files")}
+              {t("files", { count: s.items.length })}
             </span>
           </label>
           <span className="series-source" title={s.source ?? undefined}>
-            {s.source ? baseName(s.source) : "source not recorded"}
+            {s.source ? baseName(s.source) : t("decide_source_unknown")}
           </span>
-          {allDone && <span className="series-done">decided</span>}
+          {allDone && <span className="series-done">{t("decide_decided")}</span>}
         </header>
         {isName ? (
           <div className="series-why">
-            <p className="series-suggest">The name could not be built for target “{suggestions.join("”, “")}”</p>
+            <p className="series-suggest">{t("decide_name_error", { targets: suggestions.join("”, “") })}</p>
             {reasons.map((r) => (
               <blockquote key={r} className="reason">
                 {r}
@@ -294,17 +296,17 @@ function SeriesBlock(p: SeriesProps) {
         ) : (
           <div className="series-why">
             <p className="series-suggest">
-              AI suggests: <strong>{suggestions.join(", ")}</strong>
+              {t("decide_ai_suggests")} <strong>{suggestions.join(", ")}</strong>
             </p>
             {reasons.slice(0, 2).map((r) => (
               <blockquote key={r} className="reason">
                 {r}
               </blockquote>
             ))}
-            {reasons.length > 2 && <p className="muted small">and {reasons.length - 2} more explanations on files of the series</p>}
+            {reasons.length > 2 && <p className="muted small">{t("decide_more_reasons", { count: reasons.length - 2 })}</p>}
           </div>
         )}
-        <ul className="series-strip" role="group" aria-label="Files of the series">
+        <ul className="series-strip" role="group" aria-label={t("decide_series_files")}>
           {s.items.map((it, i) => (
             <li key={it.source}>
               <ReviewCell
@@ -324,39 +326,37 @@ function SeriesBlock(p: SeriesProps) {
           {isName ? (
             <>
               <button type="button" className="btn primary" disabled={!canApply} onClick={p.onApply}>
-                {p.busy ? "Saving…" : `Keep in source${checked ? ` (${checked})` : ""}`}
+                {p.busy ? t("saving") : checked ? t("decide_keep_n", { n: checked }) : t("trace_keep")}
               </button>
-              <span className="muted small">
-                Another target will not help here: fix the name preset template in the config; the plan refreshes by itself.
-              </span>
+              <span className="muted small">{t("decide_name_hint")}</span>
             </>
           ) : (
             <>
               <select
                 className="picker"
-                aria-label="Target for the checked files"
+                aria-label={t("decide_target_for")}
                 value={p.choice}
                 onChange={(e) => p.onChoice(e.target.value)}
               >
                 <option value="" disabled>
-                  Choose a target…
+                  {t("decide_choose")}
                 </option>
                 {groupByStage(p.targets).map(([stage, ts]) => (
                   <optgroup key={stage} label={stage}>
-                    {ts.map((t) => (
-                      <option key={t.name} value={t.name}>
-                        {t.name}
+                    {ts.map((x) => (
+                      <option key={x.name} value={x.name}>
+                        {x.name}
                       </option>
                     ))}
                   </optgroup>
                 ))}
-                <option value={KEEP}>Keep in source</option>
+                <option value={KEEP}>{t("trace_keep")}</option>
               </select>
               <button type="button" className="btn primary" disabled={!canApply} onClick={p.onApply}>
-                {p.busy ? "Saving…" : `Apply to checked${checked ? ` (${checked})` : ""}`}
+                {p.busy ? t("saving") : checked ? t("decide_apply_n", { n: checked }) : t("decide_apply")}
               </button>
-              {head.suggested && !p.targets.some((t) => t.name === head.suggested) && (
-                <span className="muted small">The suggested target “{head.suggested}” is not in the config.</span>
+              {head.suggested && !p.targets.some((x) => x.name === head.suggested) && (
+                <span className="muted small">{t("decide_suggested_missing", { name: head.suggested })}</span>
               )}
             </>
           )}
@@ -369,7 +369,7 @@ function SeriesBlock(p: SeriesProps) {
 
 function groupByStage(targets: TargetChoice[]): [string, TargetChoice[]][] {
   const m = new Map<string, TargetChoice[]>();
-  targets.forEach((t) => m.set(t.stage, [...(m.get(t.stage) ?? []), t]));
+  targets.forEach((x) => m.set(x.stage, [...(m.get(x.stage) ?? []), x]));
   return [...m.entries()];
 }
 
@@ -392,6 +392,7 @@ function ReviewCell({
   onFocus: () => void;
   onToggle: () => void;
 }) {
+  useTranslation();
   const name = baseName(item.source);
   return (
     <button
@@ -405,7 +406,7 @@ function ReviewCell({
         error
           ? `${item.source}\n${error}`
           : stale
-            ? `${item.source}\nthe file changed after the scan: the earlier decision no longer applies`
+            ? `${item.source}\n${t("decide_stale_title")}`
             : `${item.source}\n${item.reason}`
       }
       onFocus={onFocus}
@@ -415,7 +416,7 @@ function ReviewCell({
         <Thumb path={item.source} queue={queue} />
         <span className="rcell-box" aria-hidden />
         {decided && <span className="rcell-decided">→ {actionText(decided)}</span>}
-        {stale && !decided && <span className="rcell-decided stale">file changed, plan will refresh</span>}
+        {stale && !decided && <span className="rcell-decided stale">{t("decide_stale")}</span>}
       </span>
       <span className="rcell-name">{name}</span>
     </button>
