@@ -1,0 +1,1276 @@
+//! "Why this file?": a read-only account of what a scan does with one
+//! file. Routing and planning are the real ones (`route_with_overrides`,
+//! `build_plan` on this single file), so the account cannot drift from what
+//! a scan does; the per-filter and per-step detail is read off the same
+//! helpers. The AI is never called: a cached answer is used when present.
+
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::path::{Path, PathBuf};
+
+use serde::Serialize;
+use serde_json::Value;
+
+use crate::Result;
+use crate::ai::AiClassifier;
+use crate::ai::cache::{self, Cache};
+use crate::ai::client::{system_prompt, to_answer};
+use crate::config::{Config, InputFilter, Output, expand_tilde};
+use crate::datetime::{capture_date, file_created};
+use crate::mask::{ItemCheck, MaskCheck, MaskExpr};
+use crate::media::{kind_of, split_name};
+use crate::name::{NameCtx, NameSkip, name_skip};
+use crate::overrides::Overrides;
+use crate::plan::{OutputOp, Plan, Side, build_plan, local_zone, run_content_pipe};
+use crate::progress::{Cancel, NoProgress};
+use crate::route::{
+    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, Via, filter_fit, prefilter_fit,
+    route_with_overrides,
+};
+use crate::scan::{FileEntry, Rejection, mtime_ns, rejection};
+use crate::tools::Tools;
+
+/// Inputs of [`explain`] besides the config and the file.
+#[derive(Default)]
+pub struct ExplainOptions<'a> {
+    /// Reads the file's EXIF for its capture date; without it the date comes
+    /// from the file name and the file times only.
+    pub tools: Option<&'a Tools>,
+    /// The AI answer cache; `None` means the default one.
+    pub ai_cache: Option<PathBuf>,
+}
+
+/// Where the file stands against the sources.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum Scope {
+    /// Under source `source`, and a scan lists it.
+    Scanned {
+        source: String,
+    },
+    Missing,
+    NotFile,
+    NoSource,
+    Hidden {
+        source: String,
+        part: String,
+    },
+    Skip {
+        source: String,
+        part: String,
+        glob: String,
+    },
+    NotRecursive {
+        source: String,
+    },
+}
+
+/// One filter (or an AI target's prefilter) against the file.
+#[derive(Debug, Clone, Serialize)]
+pub struct FilterCheck {
+    /// Position among the target's filters; 0 for a prefilter.
+    pub index: usize,
+    /// The sources the filter covers; empty means none (a filter lists them).
+    pub sources: Vec<String>,
+    pub source_ok: bool,
+    /// `match`; absent means any file.
+    pub matches: Option<MaskCheck>,
+    pub exclude: Option<MaskCheck>,
+    pub fit: Fit,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum StageKind {
+    BeforeAi,
+    Ai,
+    AfterAi,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct TargetCheck {
+    pub stage: StageKind,
+    pub name: String,
+    /// Mask filters; for an AI target the sources and prefilter as one.
+    pub filters: Vec<FilterCheck>,
+    /// The target's sources include the file's (AI targets) or some filter
+    /// fits (mask targets): the target would take or consider the file.
+    pub candidate: bool,
+    /// The decision names this target.
+    pub taken: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DecisionKind {
+    Target,
+    Review,
+    Excluded,
+    Kept,
+    Unmatched,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct DecisionInfo {
+    pub kind: DecisionKind,
+    pub target: Option<String>,
+    pub via: Option<Via>,
+    /// Review: the AI's reason.
+    pub detail: Option<String>,
+}
+
+/// What the AI stage knows about the file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum AiState {
+    /// No AI target takes the file.
+    NoCandidates,
+    /// Decided before the AI stage (an override or a mask target).
+    NotReached { candidates: Vec<String> },
+    /// The file is a candidate but there is no cached answer.
+    NotAsked { candidates: Vec<String> },
+    Cached {
+        category: Option<String>,
+        reason: String,
+        low: bool,
+    },
+}
+
+/// One content or name step of an output.
+#[derive(Debug, Clone, Serialize)]
+pub struct StepCheck {
+    pub index: usize,
+    pub preset: String,
+    /// The effective mask as written and with `@refs` expanded.
+    pub mask: String,
+    pub mask_expanded: String,
+    pub matched: bool,
+    /// Content steps: the bundle this step was expanded from.
+    pub bundle: Option<String>,
+    /// The name the step saw, and what it left.
+    pub before: String,
+    pub after: String,
+    /// Name steps: why a matching step changed nothing.
+    pub skipped: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct OutputCheck {
+    pub content: Vec<StepCheck>,
+    pub rename: Vec<StepCheck>,
+    pub dest: PathBuf,
+    pub op: OutputOp,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Outcome {
+    /// The plan has an item for the file (something is written or moved).
+    Process,
+    /// Routed, but every output leaves the file as it is.
+    Unchanged,
+    Review,
+    Unmatched,
+    NotScanned,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct Explanation {
+    pub path: PathBuf,
+    pub scope: Scope,
+    /// Targets that list the file's source (and any that took it).
+    pub stages: Vec<TargetCheck>,
+    /// Names of the other targets, which do not concern the file's source.
+    pub other_targets: Vec<String>,
+    pub ai: AiState,
+    pub decision: Option<DecisionInfo>,
+    pub outcome: Outcome,
+    /// Outputs of the target that took the file.
+    pub outputs: Vec<OutputCheck>,
+    /// One Russian line: what happens and, when nothing does, what to change.
+    pub verdict: String,
+}
+
+/// Answers from the cache only; a miss answers "none" and is recorded.
+struct CachedAi {
+    model: String,
+    cache: Cache,
+    seen: RefCell<Vec<Option<AiAnswer>>>,
+}
+
+impl Classifier for CachedAi {
+    fn classify(&self, batch: Vec<AiRequest>) -> Result<Vec<AiAnswer>> {
+        Ok(batch
+            .iter()
+            .map(|r| {
+                let system = system_prompt(&r.categories, &r.prompt);
+                let key = cache::key(&r.entry, &self.model, &cache::prompt_hash(&system));
+                let hit = self
+                    .cache
+                    .get(&key)
+                    .and_then(|s| to_answer(s, &r.categories).ok());
+                self.seen.borrow_mut().push(hit.clone());
+                hit.unwrap_or(AiAnswer {
+                    category: None,
+                    reason: String::new(),
+                    confidence: Confidence::Ok,
+                })
+            })
+            .collect())
+    }
+}
+
+fn file_name_of(p: &Path) -> &str {
+    p.file_name().and_then(|n| n.to_str()).unwrap_or_default()
+}
+
+/// `.ext` of a name, for messages.
+fn ext_text(name: &str) -> String {
+    let (_, ext) = split_name(name);
+    if ext.is_empty() {
+        "file without an extension".to_string()
+    } else {
+        format!(".{ext}")
+    }
+}
+
+/// The source a path lies under and its path relative to the root.
+fn locate(cfg: &Config, path: &Path) -> Vec<(usize, PathBuf, PathBuf)> {
+    let canon = std::fs::canonicalize(path).ok();
+    cfg.sources
+        .iter()
+        .enumerate()
+        .filter_map(|(i, s)| {
+            let root = expand_tilde(&s.path);
+            if let Ok(rel) = path.strip_prefix(&root) {
+                return Some((i, root.clone(), rel.to_path_buf()));
+            }
+            let (c, r) = (canon.as_ref()?, std::fs::canonicalize(&root).ok()?);
+            let rel = c.strip_prefix(&r).ok()?.to_path_buf();
+            Some((i, root, rel))
+        })
+        .collect()
+}
+
+fn filter_check(cfg: &Config, index: usize, f: &InputFilter, e: &FileEntry) -> FilterCheck {
+    let name = file_name_of(&e.path);
+    FilterCheck {
+        index,
+        sources: f.sources.clone(),
+        source_ok: f.sources.contains(&e.source_id),
+        matches: f.matches.as_ref().map(|m| m.check(name, cfg, false)),
+        exclude: (!f.exclude.is_empty()).then(|| f.exclude.check(name, cfg, true)),
+        fit: filter_fit(cfg, f, e),
+    }
+}
+
+fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
+    let name = file_name_of(&e.path);
+    let mask_stage = |kind, targets: &[crate::config::MaskTarget]| {
+        targets
+            .iter()
+            .map(|t| {
+                let filters: Vec<_> = t
+                    .filters
+                    .iter()
+                    .enumerate()
+                    .map(|(i, f)| filter_check(cfg, i, f, e))
+                    .collect();
+                TargetCheck {
+                    stage: kind,
+                    name: t.name.clone(),
+                    candidate: filters.iter().any(|f| f.fit == Fit::Match),
+                    filters,
+                    taken: false,
+                }
+            })
+            .collect::<Vec<_>>()
+    };
+    let mut out = mask_stage(StageKind::BeforeAi, &cfg.targets.before_ai);
+    out.extend(cfg.targets.ai.iter().map(|t| {
+        let source_ok = t.sources.contains(&e.source_id);
+        let fit = if source_ok {
+            prefilter_fit(cfg, &t.prefilter, e)
+        } else {
+            Fit::No
+        };
+        let (m, x) = t
+            .prefilter
+            .as_ref()
+            .map_or((None, None), |p| (p.matches.as_ref(), Some(&p.exclude)));
+        TargetCheck {
+            stage: StageKind::Ai,
+            name: t.name.clone(),
+            filters: vec![FilterCheck {
+                index: 0,
+                sources: t.sources.clone(),
+                source_ok,
+                matches: m.map(|m| m.check(name, cfg, false)),
+                exclude: x
+                    .filter(|x| !x.is_empty())
+                    .map(|x| x.check(name, cfg, true)),
+                fit,
+            }],
+            candidate: fit == Fit::Match,
+            taken: false,
+        }
+    }));
+    out.extend(mask_stage(StageKind::AfterAi, &cfg.targets.after_ai));
+    out
+}
+
+fn outputs_cfg<'a>(cfg: &'a Config, target: &str) -> &'a [Output] {
+    let t = &cfg.targets;
+    t.before_ai
+        .iter()
+        .chain(&t.after_ai)
+        .find(|m| m.name == target)
+        .map(|m| m.outputs.as_slice())
+        .or_else(|| {
+            t.ai.iter()
+                .find(|a| a.name == target)
+                .map(|a| a.outputs.as_slice())
+        })
+        .unwrap_or(&[])
+}
+
+fn mask_texts(m: &MaskExpr, cfg: &Config) -> (String, String) {
+    (m.source(), m.expand(cfg))
+}
+
+/// The steps of the output the plan made, matched to the config's output by
+/// its pipes (an output whose byte copy already exists is left out of the
+/// plan, so positions can shift).
+fn output_checks(
+    cfg: &Config,
+    target: &str,
+    plan_outputs: &[crate::plan::PlannedOutput],
+    file_name: &str,
+    ctx: &NameCtx,
+) -> Vec<OutputCheck> {
+    use crate::name::Pipe;
+    let cfg_outs = outputs_cfg(cfg, target);
+    let mut cursor = 0;
+    let mut result = Vec::new();
+    for po in plan_outputs {
+        let content_tr: Vec<_> = po
+            .trace
+            .iter()
+            .filter(|t| t.pipe == Some(Pipe::Content))
+            .collect();
+        let name_tr: Vec<_> = po
+            .trace
+            .iter()
+            .filter(|t| t.pipe == Some(Pipe::Name))
+            .collect();
+        let same = |o: &Output| {
+            let Ok(ex) = cfg.expand_content(target, &o.content) else {
+                return false;
+            };
+            ex.len() == content_tr.len()
+                && o.rename.len() == name_tr.len()
+                && ex
+                    .iter()
+                    .zip(&content_tr)
+                    .all(|(s, t)| s.step.preset == t.preset)
+                && o.rename
+                    .iter()
+                    .zip(&name_tr)
+                    .all(|(s, t)| s.preset == t.preset)
+        };
+        let Some(pos) = cfg_outs[cursor.min(cfg_outs.len())..].iter().position(same) else {
+            continue;
+        };
+        let o = &cfg_outs[cursor + pos];
+        cursor += pos + 1;
+
+        let mut before = file_name.to_string();
+        let mut content = Vec::new();
+        let expanded = cfg.expand_content(target, &o.content).unwrap_or_default();
+        for (ex, t) in expanded.iter().zip(&content_tr) {
+            let st = &ex.step;
+            let mask = cfg
+                .content_preset(&st.preset)
+                .map(|p| st.mask.clone().unwrap_or_else(|| p.mask_or_default()));
+            let (m, x) = mask.map_or_else(Default::default, |m| mask_texts(&m, cfg));
+            content.push(StepCheck {
+                index: t.index,
+                preset: t.preset.clone(),
+                mask: m,
+                mask_expanded: x,
+                matched: t.matched,
+                bundle: t.bundle.clone(),
+                before: before.clone(),
+                after: t.after.clone(),
+                skipped: None,
+            });
+            before = t.after.clone();
+        }
+        let mut rename = Vec::new();
+        for (st, t) in o.rename.iter().zip(&name_tr) {
+            let preset = cfg.name_preset(&st.preset);
+            let mask = preset.map(|p| st.mask.clone().unwrap_or_else(|| p.mask_or_default()));
+            let (m, x) = mask.map_or_else(Default::default, |m| mask_texts(&m, cfg));
+            let cur = before.rsplit('/').next().unwrap_or(&before).to_string();
+            let skipped = preset
+                .filter(|_| t.matched)
+                .and_then(|p| name_skip(cfg, p, &cur, ctx))
+                .map(|s| {
+                    match s {
+                        NameSkip::SkipIf => "skip_if fired",
+                        NameSkip::NoDate => "no date for the template",
+                    }
+                    .to_string()
+                });
+            rename.push(StepCheck {
+                index: t.index,
+                preset: t.preset.clone(),
+                mask: m,
+                mask_expanded: x,
+                matched: t.matched,
+                bundle: None,
+                before: before.clone(),
+                after: t.after.clone(),
+                skipped,
+            });
+            before = t.after.clone();
+        }
+        result.push(OutputCheck {
+            content,
+            rename,
+            dest: po.dest.clone(),
+            op: po.op,
+        });
+    }
+    result
+}
+
+/// "File not found", with a hint when the folder holds the same name under
+/// another extension (a converted file).
+fn missing_text(path: &Path) -> String {
+    let stem = |p: &Path| {
+        file_name_of(p)
+            .split('.')
+            .next()
+            .unwrap_or_default()
+            .to_string()
+    };
+    let want = stem(path);
+    let own = file_name_of(path).to_string();
+    let sibling = path
+        .parent()
+        .and_then(|d| std::fs::read_dir(d).ok())
+        .into_iter()
+        .flatten()
+        .flatten()
+        .map(|e| e.file_name().to_string_lossy().into_owned())
+        .filter(|n| !want.is_empty() && *n != own && n.split('.').next() == Some(want.as_str()))
+        .min();
+    match sibling {
+        Some(n) => format!(
+            "File not found: {}; {n} is nearby — maybe already processed",
+            path.display()
+        ),
+        None => format!("File not found: {}", path.display()),
+    }
+}
+
+fn base(path: &Path, scope: Scope, verdict: String) -> Explanation {
+    Explanation {
+        path: path.to_path_buf(),
+        scope,
+        stages: Vec::new(),
+        other_targets: Vec::new(),
+        ai: AiState::NoCandidates,
+        decision: None,
+        outcome: Outcome::NotScanned,
+        outputs: Vec::new(),
+        verdict,
+    }
+}
+
+/// Explain what a scan of `cfg` does with the file at `path`. Read-only; no
+/// AI call (a cached answer is used). An error only for an unreadable config
+/// part (a bad skip glob) or a failed planning of this very file.
+pub fn explain(
+    cfg: &Config,
+    path: &Path,
+    overrides: &Overrides,
+    opts: &ExplainOptions,
+) -> Result<Explanation> {
+    let path = expand_tilde(path);
+    let path = if path.is_absolute() {
+        path
+    } else {
+        std::env::current_dir().map_or(path.clone(), |d| d.join(&path))
+    };
+    let meta = match std::fs::symlink_metadata(&path) {
+        Ok(m) => m,
+        Err(_) => {
+            return Ok(base(&path, Scope::Missing, missing_text(&path)));
+        }
+    };
+    if !meta.is_file() {
+        return Ok(base(
+            &path,
+            Scope::NotFile,
+            "This is not a regular file (a folder or a link): Gallery does not take such".into(),
+        ));
+    }
+    let found = locate(cfg, &path);
+    if found.is_empty() {
+        return Ok(base(
+            &path,
+            Scope::NoSource,
+            "The file is in none of the config's sources: add its folder to [[sources]]".into(),
+        ));
+    }
+    // The first source that lists the file; else the first rejection.
+    let mut first_reject = None;
+    let mut chosen = None;
+    for (i, root, rel) in found {
+        let src = &cfg.sources[i];
+        match rejection(src, &rel)? {
+            None => {
+                chosen = Some((i, root, rel));
+                break;
+            }
+            Some(r) => {
+                first_reject.get_or_insert((i, r));
+            }
+        }
+    }
+    let Some((si, root, rel)) = chosen else {
+        let (i, r) = first_reject.expect("a rejection when nothing is chosen");
+        let id = cfg.sources[i].id.clone();
+        let (scope, verdict) = match r {
+            Rejection::Hidden(part) => {
+                let v = format!(
+                    "Hidden path element `{part}`: the scan skips files and folders whose name starts with a dot"
+                );
+                (Scope::Hidden { source: id, part }, v)
+            }
+            Rejection::Skip { part, glob } => {
+                let v = format!(
+                    "`{part}` matches the skip `{glob}` of source {id}: such files and folders are not scanned. Remove the mask from skip"
+                );
+                (
+                    Scope::Skip {
+                        source: id,
+                        part,
+                        glob,
+                    },
+                    v,
+                )
+            }
+            Rejection::NotRecursive => {
+                let v = format!(
+                    "Source {id} is not recursive: files in nested folders are not scanned. Set recursive = true"
+                );
+                (Scope::NotRecursive { source: id }, v)
+            }
+        };
+        return Ok(base(&path, scope, verdict));
+    };
+    let source_id = cfg.sources[si].id.clone();
+    let entry = FileEntry {
+        source_id: source_id.clone(),
+        path: root.join(&rel),
+        rel,
+        size: meta.len(),
+        mtime_ns: mtime_ns(&meta)?,
+    };
+
+    // Routing exactly as a scan does, with the AI answered from the cache.
+    let model = cfg.ai.model.clone();
+    let cache_path = opts
+        .ai_cache
+        .clone()
+        .or_else(AiClassifier::default_cache_path);
+    let ai = CachedAi {
+        model,
+        cache: cache_path.map_or_else(|| Cache::load(Path::new("")), |p| Cache::load(&p)),
+        seen: RefCell::new(Vec::new()),
+    };
+    let routed = route_with_overrides(
+        cfg,
+        std::slice::from_ref(&entry),
+        &ai,
+        false,
+        overrides,
+        &NoProgress,
+        &Cancel::new(),
+    )?;
+    let decision = routed.decisions.into_iter().next().map(|(_, d)| d);
+    let decision = decision.expect("one file routed gives one decision");
+
+    let mut stages = stages(cfg, &entry);
+    let candidates: Vec<String> = stages
+        .iter()
+        .filter(|t| t.stage == StageKind::Ai && t.candidate)
+        .map(|t| t.name.clone())
+        .collect();
+    let seen = ai.seen.borrow();
+    let ai_state = if candidates.is_empty() {
+        AiState::NoCandidates
+    } else {
+        match seen.first() {
+            None => AiState::NotReached { candidates },
+            Some(None) => AiState::NotAsked { candidates },
+            Some(Some(a)) => AiState::Cached {
+                category: a.category.clone(),
+                reason: a.reason.clone(),
+                low: a.confidence == Confidence::Low,
+            },
+        }
+    };
+
+    let info = match &decision {
+        Decision::Target { name, via } => DecisionInfo {
+            kind: DecisionKind::Target,
+            target: Some(name.clone()),
+            via: Some(via.clone()),
+            detail: None,
+        },
+        Decision::Review { suggested, reason } => DecisionInfo {
+            kind: DecisionKind::Review,
+            target: Some(suggested.clone()),
+            via: None,
+            detail: Some(reason.clone()),
+        },
+        Decision::Excluded => none_decision(DecisionKind::Excluded),
+        Decision::Kept => none_decision(DecisionKind::Kept),
+        Decision::Unmatched => none_decision(DecisionKind::Unmatched),
+    };
+    if let Some(t) = &info.target
+        && info.kind == DecisionKind::Target
+    {
+        // The first target of that name in stage order is the one routing took.
+        if let Some(c) = stages.iter_mut().find(|c| &c.name == t) {
+            c.taken = true;
+        }
+    }
+
+    // Targets for other sources are noise: name them once.
+    let mut other_targets = Vec::new();
+    let mut stages: Vec<TargetCheck> = stages
+        .into_iter()
+        .filter_map(|mut t| {
+            if t.taken || t.filters.iter().any(|f| f.source_ok) {
+                t.filters.retain(|f| f.source_ok);
+                Some(t)
+            } else {
+                other_targets.push(t.name);
+                None
+            }
+        })
+        .collect();
+    stages.shrink_to_fit();
+
+    // Plan this one file as a scan would.
+    let file_name = file_name_of(&entry.path).to_string();
+    let exif: HashMap<PathBuf, Value> = match opts.tools {
+        Some(t) => crate::exif::read(t, std::slice::from_ref(&entry.path)).unwrap_or_default(),
+        None => HashMap::new(),
+    };
+    let plan: Plan = build_plan(
+        cfg,
+        vec![(entry.clone(), decision.clone())],
+        &exif,
+        Side::Local,
+    )?;
+    let zone = local_zone();
+    let tz = zone
+        .as_deref()
+        .and_then(|z| z.parse::<chrono_tz::Tz>().ok());
+    let capture = capture_date(
+        &file_name,
+        kind_of(&entry.path),
+        exif.get(&entry.path).unwrap_or(&Value::Null),
+        tz,
+    );
+    let ctx = NameCtx {
+        capture,
+        created: file_created(&entry.path),
+        source_id,
+    };
+    let item = plan.items.first();
+    let (outcome, outputs) = if let Some(it) = item {
+        (
+            Outcome::Process,
+            output_checks(cfg, &it.target, &it.outputs, &file_name, &ctx),
+        )
+    } else if !plan.review.is_empty() {
+        (Outcome::Review, Vec::new())
+    } else if !plan.unmatched.is_empty() {
+        (Outcome::Unmatched, Vec::new())
+    } else {
+        (Outcome::Unchanged, Vec::new())
+    };
+    // An all-Keep target has no plan item; show its outputs from a plan of
+    // the same file without dropping the Keep ones.
+    let outputs = if outcome == Outcome::Unchanged && info.kind == DecisionKind::Target {
+        keep_outputs(cfg, &entry, &decision, &ctx)
+    } else {
+        outputs
+    };
+
+    let mut ex = Explanation {
+        path: entry.path.clone(),
+        scope: Scope::Scanned {
+            source: entry.source_id.clone(),
+        },
+        stages,
+        other_targets,
+        ai: ai_state,
+        decision: Some(info),
+        outcome,
+        outputs,
+        verdict: String::new(),
+    };
+    ex.verdict = verdict(cfg, &ex, &entry, &plan, overrides);
+    Ok(ex)
+}
+
+fn none_decision(kind: DecisionKind) -> DecisionInfo {
+    DecisionInfo {
+        kind,
+        target: None,
+        via: None,
+        detail: None,
+    }
+}
+
+/// Step detail for a target whose every output keeps the file: `build_plan`
+/// lists such a file as unchanged and drops its item, so the pipes are run
+/// again with the same helpers the planner uses.
+fn keep_outputs(
+    cfg: &Config,
+    entry: &FileEntry,
+    decision: &Decision,
+    ctx: &NameCtx,
+) -> Vec<OutputCheck> {
+    let Decision::Target { name, .. } = decision else {
+        return Vec::new();
+    };
+    let file_name = file_name_of(&entry.path);
+    outputs_cfg(cfg, name)
+        .iter()
+        .map(|o| replay_output(cfg, name, o, file_name, ctx, &entry.path))
+        .collect()
+}
+
+/// The content and name pipes of one output on `file_name`, as `build_plan`
+/// runs them (same mask, extension and name-pipe code).
+fn replay_output(
+    cfg: &Config,
+    target: &str,
+    o: &Output,
+    file_name: &str,
+    ctx: &NameCtx,
+    src: &Path,
+) -> OutputCheck {
+    let Ok(run) = run_content_pipe(cfg, target, o, file_name) else {
+        return OutputCheck {
+            content: Vec::new(),
+            rename: Vec::new(),
+            dest: PathBuf::from(file_name),
+            op: OutputOp::Keep,
+        };
+    };
+    let name = run.name;
+    let mut before = file_name.to_string();
+    let mut content = Vec::new();
+    let expanded = cfg.expand_content(target, &o.content).unwrap_or_default();
+    for (ex, t) in expanded.iter().zip(&run.trace) {
+        let st = &ex.step;
+        let mask = cfg
+            .content_preset(&st.preset)
+            .map(|p| st.mask.clone().unwrap_or_else(|| p.mask_or_default()));
+        let (m, x) = mask.map_or_else(Default::default, |m| mask_texts(&m, cfg));
+        content.push(StepCheck {
+            index: t.index,
+            preset: t.preset.clone(),
+            mask: m,
+            mask_expanded: x,
+            matched: t.matched,
+            bundle: t.bundle.clone(),
+            before: before.clone(),
+            after: t.after.clone(),
+            skipped: None,
+        });
+        before = t.after.clone();
+    }
+    let steps: Vec<_> = o
+        .rename
+        .iter()
+        .filter_map(|st| {
+            cfg.name_preset(&st.preset).map(|p| {
+                (
+                    st.mask.clone().unwrap_or_else(|| p.mask_or_default()),
+                    st.preset.as_str(),
+                    p,
+                )
+            })
+        })
+        .collect();
+    let mut rename = Vec::new();
+    let mut final_name = name.clone();
+    if let Ok(named) = crate::name::apply_name_pipe(cfg, &steps, &name, ctx) {
+        let mut before = name.clone();
+        for ((mask, preset_name, preset), t) in steps.iter().zip(&named.steps) {
+            let cur = before.rsplit('/').next().unwrap_or(&before).to_string();
+            let skipped = t
+                .matched
+                .then(|| name_skip(cfg, preset, &cur, ctx))
+                .flatten()
+                .map(|s| {
+                    match s {
+                        NameSkip::SkipIf => "skip_if fired",
+                        NameSkip::NoDate => "no date for the template",
+                    }
+                    .to_string()
+                });
+            let (m, x) = mask_texts(mask, cfg);
+            rename.push(StepCheck {
+                index: t.index,
+                preset: (*preset_name).to_string(),
+                mask: m,
+                mask_expanded: x,
+                matched: t.matched,
+                bundle: None,
+                before: before.clone(),
+                after: t.after.clone(),
+                skipped,
+            });
+            before = t.after.clone();
+        }
+        final_name = named.rel_path().to_string_lossy().into_owned();
+    }
+    OutputCheck {
+        content,
+        rename,
+        dest: PathBuf::from(final_name),
+        op: if src.file_name().and_then(|n| n.to_str()) == Some(name.as_str()) {
+            OutputOp::Keep
+        } else {
+            OutputOp::Rename
+        },
+    }
+}
+
+/// `[a, b]` list of a mask's items, as the user wrote them.
+fn items_text(m: &MaskCheck) -> String {
+    let parts: Vec<&str> = m.items.iter().map(|i| i.item.as_str()).collect();
+    format!("[{}]", parts.join(", "))
+}
+
+/// A preset of the same kind as `like` (user's first, then built-in) whose
+/// default mask takes `name`, that the output does not already list.
+fn suggest_preset(cfg: &Config, like: &str, name: &str, used: &[&str]) -> Option<String> {
+    let kind = std::mem::discriminant(cfg.content_preset(like)?);
+    let mut cands: Vec<(String, crate::config::ContentPreset)> = cfg
+        .content_presets
+        .iter()
+        .map(|(n, p)| (n.clone(), p.clone()))
+        .collect();
+    cands.extend(crate::presets::builtin_content_presets());
+    cands
+        .into_iter()
+        .find(|(n, p)| {
+            std::mem::discriminant(p) == kind
+                && !used.contains(&n.as_str())
+                && p.mask_or_default().matches(name, cfg)
+        })
+        .map(|(n, _)| n)
+}
+
+/// The positive item that took the name and the `!` item that then threw it
+/// out, searched through references: `(taker, excluder, owner)`.
+fn excluded_by(items: &[ItemCheck]) -> Option<(String, String, String)> {
+    for i in items {
+        if i.negated {
+            continue;
+        }
+        let pos = i.children.iter().find(|c| !c.negated && c.hit);
+        let neg = i.children.iter().find(|c| c.negated && c.hit);
+        if let (Some(p), Some(n)) = (pos, neg) {
+            return Some((p.item.clone(), n.item.clone(), i.item.clone()));
+        }
+        if let Some(found) = excluded_by(&i.children) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+fn why_filter_misses(t: &TargetCheck, name: &str) -> Option<String> {
+    let f = t.filters.iter().find(|f| f.source_ok)?;
+    let ext = ext_text(name);
+    if let Some(m) = &f.matches
+        && !m.matched
+    {
+        if let Some(neg) = m.items.iter().find(|i| i.negated && i.hit) {
+            return Some(format!(
+                "Name `{name}` cuts off item {} in the match of target {}: {}",
+                neg.item,
+                t.name,
+                items_text(m)
+            ));
+        }
+        if let Some((taker, neg, owner)) = excluded_by(&m.items) {
+            let pattern = neg.trim_start_matches('!');
+            let lead = if pattern == "*.av1.mp4" {
+                format!(
+                    "The file is already compressed to AV1 (.av1.mp4): {owner} excludes it on purpose."
+                )
+            } else {
+                format!("The file fits {taker}, but {owner} excludes it ({neg}).")
+            };
+            return Some(format!(
+                "{lead} If you want it, add \"{pattern}\" to the match of target {}",
+                t.name
+            ));
+        }
+        return Some(format!(
+            "{} is not in the match {} of target {}",
+            if ext.starts_with('.') {
+                format!("Extension {ext}")
+            } else {
+                "File without an extension".to_string()
+            },
+            items_text(m),
+            t.name
+        ));
+    }
+    None
+}
+
+fn verdict(
+    cfg: &Config,
+    ex: &Explanation,
+    entry: &FileEntry,
+    plan: &Plan,
+    overrides: &Overrides,
+) -> String {
+    let name = file_name_of(&entry.path);
+    let d = ex.decision.as_ref().expect("scanned file has a decision");
+    let target = d.target.clone().unwrap_or_default();
+    match d.kind {
+        DecisionKind::Kept => {
+            return "Manual decision: leave the file as it is. Reset it in Triage to let the file be sorted again".into();
+        }
+        DecisionKind::Review => {
+            let r = d.detail.clone().unwrap_or_default();
+            if let Some(it) = plan.review.first().filter(|r| r.name_error) {
+                return format!(
+                    "The name could not be built for target {target}: {}",
+                    it.reason
+                );
+            }
+            return format!(
+                "The AI is unsure: suggests {target} ({r}). The file waits for a decision in the review screen"
+            );
+        }
+        DecisionKind::Excluded => {
+            let hit = ex.stages.iter().find_map(|t| {
+                t.filters.iter().find_map(|f| {
+                    (f.fit == Fit::Excluded)
+                        .then_some(f.exclude.as_ref())
+                        .flatten()
+                        .map(|x| (t.name.clone(), x.clone()))
+                })
+            });
+            return match hit {
+                Some((t, x)) => {
+                    let by = x
+                        .items
+                        .iter()
+                        .find(|i| i.hit && !i.negated)
+                        .map_or_else(|| x.source.clone(), |i| i.item.clone());
+                    format!(
+                        "The file fits target {t}, but is excluded by the exclude mask ({by}): by design, nothing is done"
+                    )
+                }
+                None => "The file is excluded by the exclude mask: nothing is done".into(),
+            };
+        }
+        DecisionKind::Unmatched => {
+            match &ex.ai {
+                AiState::NotAsked { candidates } => {
+                    return format!(
+                        "The file fits the AI targets [{}], but the AI was not asked (no cached answer): run a scan with AI. The file is not sorted yet",
+                        candidates.join(", ")
+                    );
+                }
+                AiState::Cached {
+                    category: None,
+                    reason,
+                    ..
+                } => {
+                    return format!(
+                        "The AI answered \"no category fits\" ({reason}), and no filter took the file after the AI. Add a target or widen its match"
+                    );
+                }
+                _ => {}
+            }
+            let mut why: Vec<String> = ex
+                .stages
+                .iter()
+                .filter(|t| t.stage != StageKind::Ai)
+                .filter_map(|t| why_filter_misses(t, name))
+                .collect();
+            if why.is_empty() {
+                let srcs = &entry.source_id;
+                return format!(
+                    "No target filter takes source {srcs}: add it to the sources of the filter you need"
+                );
+            }
+            // A name cut by a `!` item is the most telling miss.
+            if let Some(i) = why.iter().position(|w| w.contains("cuts off")) {
+                why.swap(0, i);
+            }
+            let first = why.remove(0);
+            return if why.is_empty() {
+                first
+            } else {
+                format!("{first} (and {} more targets)", why.len())
+            };
+        }
+        DecisionKind::Target => {}
+    }
+
+    let via = match &d.via {
+        Some(Via::Manual) => "manual decision",
+        Some(Via::Ai { .. }) => "AI",
+        _ => "mask",
+    };
+    if ex.outcome == Outcome::Process {
+        let dest = ex
+            .outputs
+            .first()
+            .map_or_else(String::new, |o| o.dest.display().to_string());
+        return format!("Will be processed: target {target} ({via}) → {dest}");
+    }
+    // Routed, nothing to do. Did any output's content steps all miss?
+    let _ = overrides;
+    for o in &ex.outputs {
+        if let Some(first) = o.content.first()
+            && o.content.iter().all(|s| !s.matched)
+        {
+            let used: Vec<&str> = o.content.iter().map(|s| s.preset.as_str()).collect();
+            let tip = match suggest_preset(cfg, &first.preset, name, &used) {
+                Some(p) => format!("Add {p}."),
+                None => format!("Add a content step whose mask takes {}.", ext_text(name)),
+            };
+            return format!(
+                "The file passes the filter of target {target}, but no content step fits: mask {} = {} does not take {}. {tip}",
+                first.preset,
+                if first.mask_expanded.is_empty() || first.mask_expanded == first.mask {
+                    first.mask.clone()
+                } else {
+                    format!("{} ({})", first.mask, first.mask_expanded)
+                },
+                ext_text(name),
+            );
+        }
+    }
+    format!(
+        "Target {target} ({via}) changes nothing: the file already sits where it should under the right name. Nothing to do"
+    )
+}
+
+impl Explanation {
+    /// The explanation as a compact Russian tree, for the terminal.
+    pub fn to_text(&self) -> String {
+        use std::fmt::Write;
+        let mut o = String::new();
+        let _ = writeln!(o, "{}", self.path.display());
+        let _ = writeln!(o, "├─ Source: {}", scope_text(&self.scope));
+        let mut last_stage = None;
+        for t in &self.stages {
+            if last_stage != Some(t.stage) {
+                let title = match t.stage {
+                    StageKind::BeforeAi => "before AI",
+                    StageKind::Ai => "AI",
+                    StageKind::AfterAi => "after AI",
+                };
+                let _ = writeln!(o, "├─ Stage {title}");
+                last_stage = Some(t.stage);
+            }
+            let mark = if t.taken {
+                "took"
+            } else if t.candidate {
+                "fits"
+            } else {
+                "no"
+            };
+            let _ = writeln!(o, "│  ├─ {} — {mark}", t.name);
+            for f in &t.filters {
+                let _ = writeln!(o, "│  │  ├─ {}", filter_text(t.stage, f));
+                for m in [&f.matches, &f.exclude].into_iter().flatten() {
+                    for it in &m.items {
+                        item_lines(it, 0, &mut o);
+                    }
+                }
+            }
+        }
+        if !self.other_targets.is_empty() {
+            let _ = writeln!(o, "├─ {}", other_targets_text(self));
+        }
+        match &self.ai {
+            AiState::NoCandidates | AiState::NotReached { .. } => {}
+            AiState::NotAsked { candidates } => {
+                let _ = writeln!(
+                    o,
+                    "├─ AI: not asked (candidates: {})",
+                    candidates.join(", ")
+                );
+            }
+            AiState::Cached {
+                category,
+                reason,
+                low,
+            } => {
+                let _ = writeln!(
+                    o,
+                    "├─ AI (from cache): {}{} — {reason}",
+                    category.as_deref().unwrap_or("no category"),
+                    if *low { " (unsure)" } else { "" }
+                );
+            }
+        }
+        if let Some(d) = &self.decision {
+            let text = match d.kind {
+                DecisionKind::Target => format!("target {}", d.target.clone().unwrap_or_default()),
+                DecisionKind::Review => "for review".into(),
+                DecisionKind::Excluded => "excluded by the exclude mask".into(),
+                DecisionKind::Kept => "keep (manual decision)".into(),
+                DecisionKind::Unmatched => "not sorted".into(),
+            };
+            let _ = writeln!(o, "├─ Decision: {text}");
+        }
+        for (i, out) in self.outputs.iter().enumerate() {
+            let _ = writeln!(
+                o,
+                "├─ Output {}: {} [{}]",
+                i + 1,
+                out.dest.display(),
+                op_text(out.op)
+            );
+            for (kind, steps) in [("content", &out.content), ("name", &out.rename)] {
+                for s in steps {
+                    let state = match (&s.skipped, s.matched) {
+                        (Some(why), _) => format!("skipped ({why})"),
+                        (None, true) if s.before == s.after => "applied, same name".into(),
+                        (None, true) => "applied".into(),
+                        (None, false) => "mask did not match".into(),
+                    };
+                    let mask = if s.mask_expanded.is_empty() || s.mask_expanded == s.mask {
+                        s.mask.clone()
+                    } else {
+                        format!("{} = {}", s.mask, s.mask_expanded)
+                    };
+                    let preset = match &s.bundle {
+                        Some(b) => format!("{b} › {}", s.preset),
+                        None => s.preset.clone(),
+                    };
+                    let _ = writeln!(
+                        o,
+                        "│  ├─ {kind} {preset}: {state}; mask {mask}; {} → {}",
+                        s.before, s.after
+                    );
+                }
+            }
+        }
+        let _ = writeln!(o, "└─ {}", self.verdict);
+        o
+    }
+}
+
+/// `│  │  │  • item = expanded — reason`, children indented.
+fn item_lines(it: &ItemCheck, depth: usize, out: &mut String) {
+    use std::fmt::Write;
+    let ex = if it.expanded.is_empty() {
+        String::new()
+    } else {
+        format!(" = {}", it.expanded)
+    };
+    let _ = writeln!(
+        out,
+        "│  │  │  {}• {}{ex} — {}",
+        "  ".repeat(depth),
+        it.item,
+        it.reason
+    );
+    // The referenced mask's own items only when one of them did something.
+    if it.children.iter().any(|c| c.hit) {
+        for c in &it.children {
+            item_lines(c, depth + 1, out);
+        }
+    }
+}
+
+/// "23 more targets not for source screenshots".
+pub fn other_targets_text(ex: &Explanation) -> String {
+    let n = ex.other_targets.len();
+    let word = if n == 1 { "target" } else { "targets" };
+    let source = match &ex.scope {
+        Scope::Scanned { source } => source.as_str(),
+        _ => "",
+    };
+    format!("{n} more {word} not for source {source}")
+}
+
+fn op_text(op: OutputOp) -> &'static str {
+    match op {
+        OutputOp::Write => "write",
+        OutputOp::Rename => "rename",
+        OutputOp::Keep => "no change",
+    }
+}
+
+fn scope_text(s: &Scope) -> String {
+    match s {
+        Scope::Scanned { source } => format!("{source}, the scan sees it"),
+        Scope::Missing => "no such file".into(),
+        Scope::NotFile => "not a regular file".into(),
+        Scope::NoSource => "no source contains the file".into(),
+        Scope::Hidden { source, part } => format!("{source}, hidden element `{part}`"),
+        Scope::Skip { source, part, glob } => {
+            format!("{source}, `{part}` under skip `{glob}`")
+        }
+        Scope::NotRecursive { source } => format!("{source}, not recursive"),
+    }
+}
+
+fn filter_text(stage: StageKind, f: &FilterCheck) -> String {
+    let what = if stage == StageKind::Ai {
+        "prefilter".to_string()
+    } else {
+        format!("filter {}", f.index + 1)
+    };
+    if !f.source_ok {
+        return format!("{what}: source not in the list [{}]", f.sources.join(", "));
+    }
+    let m = match &f.matches {
+        None => "match: any file".to_string(),
+        Some(m) => format!(
+            "match {} {}",
+            items_text(m),
+            if m.matched { "took" } else { "did not take" }
+        ),
+    };
+    let x = match &f.exclude {
+        None => String::new(),
+        Some(x) => format!(
+            "; exclude {} {}",
+            items_text(x),
+            if x.matched { "fired" } else { "did not fire" }
+        ),
+    };
+    format!("{what}: {m}{x}")
+}
+
+#[cfg(test)]
+mod tests;

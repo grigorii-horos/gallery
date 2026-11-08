@@ -1,0 +1,32 @@
+[package]
+name = "gallery-gui"
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "gallery_gui_lib"
+path = "src/lib.rs"
+
+[[bin]]
+name = "gallery-gui"
+path = "src/main.rs"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+gallery-core = { path = "../gallery-core" }
+serde.workspace = true
+serde_json = "1"
+dirs = "7.0.0"
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
+chrono = "0.4.45"
+tauri-plugin-dialog = "2"
+toml_edit = "0.25"
+blake3 = "1.8.7"
+tempfile = "3"
+tauri-plugin-notification = "2"
+tauri-plugin-single-instance = "2"
+

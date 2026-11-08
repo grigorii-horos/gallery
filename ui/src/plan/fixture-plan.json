@@ -1,0 +1,192 @@
+{
+  "path": "/home/u/.local/share/gallery/current/9f2c1a7d3b4e5f60.plan.json",
+  "built_at": "2026-11-07T10:15:00+02:00",
+  "waiting_ai": 0,
+  "notes": [],
+  "plan": {
+    "version": 1,
+    "created": "2026-11-05T10:15:00+02:00",
+    "side": "local",
+    "tz": "Europe/Chisinau",
+    "content_presets": {},
+    "items": [
+      {
+        "source": "/media/cam/Screenshot_20260412.png",
+        "source_root": "/media/cam",
+        "size": 1000,
+        "mtime_ns": 1,
+        "target": "Screenshots",
+        "via": {
+          "kind": "mask"
+        },
+        "outputs": [
+          {
+            "dest": "/media/cam/2026-04-12 10.33.14.png",
+            "op": "rename",
+            "steps": [],
+            "trace": [
+              {
+                "index": 0,
+                "preset": "capture-date",
+                "matched": true,
+                "after": "2026-04-12 10.33.14.png",
+                "pipe": "name"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "/media/cam/IMG_20260412_103314.jpg",
+        "source_root": "/media/cam",
+        "size": 2000,
+        "mtime_ns": 2,
+        "target": "Documents",
+        "via": {
+          "kind": "ai",
+          "reason": "Passport photo on a table"
+        },
+        "outputs": [
+          {
+            "dest": "/lib/docs/2026/04/20260412_103314.avif",
+            "op": "write",
+            "steps": [
+              "metadata",
+              "avif-high"
+            ],
+            "trace": [
+              {
+                "index": 0,
+                "preset": "metadata",
+                "matched": true,
+                "after": "IMG_20260412_103314.jpg",
+                "pipe": "content"
+              },
+              {
+                "index": 1,
+                "preset": "avif-high",
+                "matched": true,
+                "after": "IMG_20260412_103314.avif",
+                "pipe": "content"
+              },
+              {
+                "index": 0,
+                "preset": "capture-date",
+                "matched": true,
+                "after": "20260412_103314.avif",
+                "pipe": "name"
+              },
+              {
+                "index": 1,
+                "preset": "Prefix",
+                "matched": false,
+                "after": "20260412_103314.avif",
+                "pipe": "name"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "/media/cam/IMG_20260413_090000.jpg",
+        "source_root": "/media/cam",
+        "size": 3000,
+        "mtime_ns": 3,
+        "target": "Documents",
+        "via": {
+          "kind": "ai",
+          "reason": "Looks like a receipt",
+          "low": true
+        },
+        "outputs": [
+          {
+            "dest": "/lib/docs/2026/04/20260413_090000.avif",
+            "steps": [
+              "avif-high"
+            ],
+            "trace": [
+              {
+                "index": 0,
+                "preset": "avif-high",
+                "matched": true,
+                "after": "IMG_20260413_090000.avif"
+              },
+              {
+                "index": 0,
+                "preset": "capture-date",
+                "matched": true,
+                "after": "20260413_090000.avif"
+              }
+            ]
+          }
+        ]
+      },
+      {
+        "source": "/media/cam/VID_20260414.mp4",
+        "source_root": "/media/cam",
+        "size": 4000,
+        "mtime_ns": 4,
+        "target": "Videos",
+        "via": {
+          "kind": "manual"
+        },
+        "outputs": [
+          {
+            "dest": "/lib/video/VID_20260414.mp4",
+            "op": "write",
+            "steps": [],
+            "trace": []
+          }
+        ]
+      }
+    ],
+    "review": [
+      {
+        "source": "/media/cam/IMG_20260415_120000.jpg",
+        "size": 5000,
+        "mtime_ns": 5,
+        "suggested": "Documents",
+        "reason": "Blurry, could be a document"
+      }
+    ],
+    "unmatched": [
+      "/media/cam/notes.bin"
+    ],
+    "warnings": [
+      {
+        "kind": "series_split",
+        "a": "/media/cam/IMG_1.jpg",
+        "b": "/media/cam/IMG_2.jpg"
+      },
+      {
+        "kind": "double_encode",
+        "source": "/media/cam/a.mp4",
+        "dest": "/lib/video/a.mp4"
+      }
+    ],
+    "unchanged": [
+      "/media/cam/kept.jpg",
+      "/media/cam/2026-01-01 10.00.00.jpg"
+    ]
+  },
+  "overrides": [
+    {
+      "path": "/media/cam/VID_20260414.mp4",
+      "action": {
+        "kind": "target",
+        "name": "Videos"
+      },
+      "size": 1,
+      "mtime_ns": 0
+    },
+    {
+      "path": "/media/cam/kept.jpg",
+      "action": {
+        "kind": "keep"
+      },
+      "size": 1,
+      "mtime_ns": 0
+    }
+  ],
+  "plan_id": "p1"
+}

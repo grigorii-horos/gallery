@@ -1,0 +1,12 @@
+{
+  "name": "gallery-workspace",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "scripts": {
+    "tauri": "tauri"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2.12.4"
+  }
+}

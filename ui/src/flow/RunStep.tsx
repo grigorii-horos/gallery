@@ -1,0 +1,547 @@
+import { useEffect, useRef, useState } from "react";
+import { errorText, pickFolder, runApi, syncApi, type ApplyPreview, type ExportDone, type PilotSplit, type SyncCheck } from "../api";
+import { formatCost, SCAN_STAGES, stageCount, stageFraction } from "../plan/model";
+import { SyncBanner } from "../components/SyncBanner";
+import type { SyncPauseState } from "../sync/useSyncPause";
+import type { PlanState } from "../plan/usePlan";
+import type { AppData } from "../store";
+import {
+  applyBlock,
+  confirmLines,
+  fates,
+  filesWord,
+  PILOT_PER_TARGET,
+  progressFraction,
+  type ConfirmKind,
+  resultHeadline,
+  resultRows,
+  syncOption,
+  type Fate,
+} from "../run/model";
+import type { RunState } from "../run/useRun";
+import { EstimateBlock } from "../run/EstimateBlock";
+import { PilotPanel } from "./PilotPanel";
+
+interface Props {
+  plan: PlanState;
+  run: RunState;
+  sync: SyncPauseState;
+  /** Another operation that holds the slot (AI scan, export, undo, retry), or null. */
+  busy: string | null;
+  onOpenHistory: () => void;
+  /** Undo the run of the report at this path (the pilot). */
+  onUndoPilot?: (reportPath: string) => void;
+}
+
+type Mode = "pilot" | "all";
+
+/// "Run": how much to run (a pilot by default), the estimate, the
+/// confirmation, the progress and the result with before → after.
+export function RunStep({ plan, run, sync, busy, onOpenHistory, onUndoPilot }: Props) {
+  // The confirmation that is open: the whole plan, the pilot, or what the pilot left.
+  // `planId`: the plan the dialog was opened for; once the plan is another one, the dialog is void.
+  const [dialog, setDialog] = useState<{ kind: ConfirmKind; preview: ApplyPreview; planId: string; split?: PilotSplit } | null>(null);
+  const planId = plan.view?.plan_id ?? null;
+  const outdated = !!dialog && dialog.planId !== planId;
+  const [mode, setMode] = useState<Mode>("pilot");
+  const p = run.preview;
+  // The counts are of the plan file read for the preview; until that is the plan the
+  // screen shows, a real run would confirm numbers of another plan.
+  const previewStale = !!p && !!planId && p.plan_id !== planId;
+  const input = {
+    preview: p,
+    busy,
+    updating: plan.updating,
+    pilotOpen: !!run.pilot,
+  };
+  const block = run.run ? null : applyBlock(input);
+  const dryBlock = run.run ? null : applyBlock(input, true);
+
+  return (
+    <div className="run-card">
+      {run.previewError ? (
+        <div className="notice bad">
+          <p className="notice-title">The plan could not be read</p>
+          <pre className="notice-text">{run.previewError}</pre>
+        </div>
+      ) : p ? (
+        <>
+          <p className="run-plan">
+            <span className="muted">{filesWord(p.files)} to process</span>
+          </p>
+          <FateLedger preview={p} />
+          {!run.run && p.files > 0 && (
+            <EstimateBlock planPath={p.plan_path} pilot={mode === "pilot" ? PILOT_PER_TARGET : undefined} />
+          )}
+        </>
+      ) : (
+        <p className="empty small">{plan.loading ? "Opening the plan…" : "No plan."}</p>
+      )}
+
+      {run.run ? (
+        <Progress run={run} />
+      ) : (
+        <>
+          {(dryBlock ?? block) && p && (
+            <p className="run-block">
+              {(dryBlock ?? block)!.text}
+              {(dryBlock ?? block)!.history && (
+                <>
+                  {" "}
+                  <button type="button" className="link" onClick={onOpenHistory}>
+                    Open History
+                  </button>
+                </>
+              )}
+            </p>
+          )}
+          <fieldset className="run-mode">
+            <legend className="muted small">How much to run</legend>
+            <label className="check">
+              <input type="radio" name="run-mode" checked={mode === "pilot"} onChange={() => setMode("pilot")} />
+              Pilot: {PILOT_PER_TARGET} files per target
+            </label>
+            <label className="check">
+              <input type="radio" name="run-mode" checked={mode === "all"} onChange={() => setMode("all")} />
+              Everything at once
+            </label>
+          </fieldset>
+          <div className="run-actions">
+            <button
+              type="button"
+              className="btn"
+              disabled={!!dryBlock}
+              title="Check the plan without changing anything"
+              onClick={() => planId && void run.startCurrent({ dryRun: true, planId })}
+            >
+              Check (dry-run)
+            </button>
+            <button
+              type="button"
+              className="btn primary"
+              disabled={!!block || run.splitting || (mode === "all" && previewStale)}
+              title={
+                mode === "pilot"
+                  ? "A small part of the plan first: you can check the result and undo it"
+                  : "The whole plan; you will be asked to confirm before it runs"
+              }
+              onClick={async () => {
+                if (mode === "all") {
+                  if (p) setDialog({ kind: "all", preview: p, planId: p.plan_id });
+                  return;
+                }
+                const split = await run.splitPilot();
+                if (split) setDialog({ kind: "pilot", preview: split.preview, planId: split.plan_id, split });
+              }}
+            >
+              {mode === "pilot" ? `Run pilot (${PILOT_PER_TARGET} per target)…` : "Run everything…"}
+            </button>
+          </div>
+        </>
+      )}
+      {run.pilot && !run.run && (
+        <PilotPanel
+          pilot={run.pilot}
+          planPath={p?.plan_path ?? null}
+          busy={busy}
+          onContinue={async () => {
+            const preview = await run.previewRest();
+            if (preview) setDialog({ kind: "rest", preview, planId: preview.plan_id });
+          }}
+          onRollback={() => run.pilot?.result && onUndoPilot?.(run.pilot.result.report_path)}
+        />
+      )}
+
+      {run.error && (
+        <div className="notice bad">
+          <p className="notice-title">Not run</p>
+          <pre className="notice-text">{run.error}</pre>
+        </div>
+      )}
+      {run.result && !run.run && <Result run={run} onOpenHistory={onOpenHistory} />}
+      <SyncBanner sync={sync} />
+
+      {outdated && (
+        <div className="notice warn" role="alert">
+          <p className="notice-title">The plan was refreshed — check it again</p>
+          <p className="notice-text">Files, config or decisions changed while the confirmation was open. Nothing was run.</p>
+          <button type="button" className="btn" onClick={() => setDialog(null)}>
+            Got it
+          </button>
+        </div>
+      )}
+      {dialog && !outdated && (
+        <ConfirmDialog
+          preview={dialog.preview}
+          kind={dialog.kind}
+          pilot={dialog.kind === "pilot" ? PILOT_PER_TARGET : undefined}
+          onCancel={() => setDialog(null)}
+          onConfirm={(allow, pause) => {
+            const d = dialog;
+            setDialog(null);
+            if (d.kind === "pilot" && d.split) void run.runPilot(d.split, allow, pause);
+            else if (d.kind === "rest") void run.runRest(d.planId, allow, pause);
+            else void run.startCurrent({ dryRun: false, planId: d.planId, allowAnomalies: allow, pauseSync: pause });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/// "Retry of failed files": the retry plan History made (a plan file of its
+/// own, not the current plan), run after the same confirmation as any run.
+export function RetryCard({
+  path,
+  run,
+  busy,
+  onDone,
+}: {
+  path: string;
+  run: RunState;
+  busy: string | null;
+  onDone?: () => void;
+}) {
+  const [preview, setPreview] = useState<ApplyPreview | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [dialog, setDialog] = useState(false);
+  useEffect(() => {
+    let live = true;
+    runApi.applyPreview(path).then(
+      (v) => live && setPreview(v),
+      (e) => live && setError(errorText(e)),
+    );
+    return () => {
+      live = false;
+    };
+  }, [path]);
+  return (
+    <section className="retry-card" aria-label="Retry of failed files">
+      <h3 className="estimate-title">Retry of failed files</h3>
+      {error && <pre className="notice-text">{error}</pre>}
+      {preview && (
+        <>
+          <p className="muted small">{filesWord(preview.files)} from the previous run.</p>
+          <div className="run-actions">
+            <button type="button" className="btn primary" disabled={!!busy} onClick={() => setDialog(true)}>
+              Run retry…
+            </button>
+            <button type="button" className="btn" onClick={onDone}>
+              Not needed
+            </button>
+          </div>
+        </>
+      )}
+      {dialog && preview && (
+        <ConfirmDialog
+          preview={preview}
+          kind="all"
+          onCancel={() => setDialog(false)}
+          onConfirm={(allow, pause) => {
+            setDialog(false);
+            void run.start(path, false, allow, pause).then(onDone);
+          }}
+        />
+      )}
+    </section>
+  );
+}
+
+/// Where the sources end up: one bar split by fate, then the counts.
+function FateLedger({ preview, note = true }: { preview: ApplyPreview; note?: boolean }) {
+  const rows = fates(preview);
+  const total = Math.max(preview.files, 1);
+  const outside = preview.review + preview.unmatched + preview.unchanged;
+  return (
+    <div className="fate">
+      <div className="fate-bar" aria-hidden>
+        {rows.map((f) =>
+          f.count > 0 ? <span key={f.id} className={`fate-${f.id}`} style={{ flexGrow: f.count / total }} /> : null,
+        )}
+      </div>
+      <ul className="fate-rows" aria-label="What happens to the sources">
+        {rows.map((f: Fate) => (
+          <li key={f.id} className={f.count === 0 ? "zero" : undefined}>
+            <span className={`fate-swatch fate-${f.id}`} aria-hidden />
+            <span className="fate-count">{f.count.toLocaleString("en-US")}</span>
+            <span>{f.label}</span>
+          </li>
+        ))}
+      </ul>
+      {note && (
+        <p className="muted small">
+          New files in targets: {preview.writes.toLocaleString("en-US")}. Outside the plan: {outside.toLocaleString("en-US")}
+          {outside > 0 && " — left untouched"}.
+        </p>
+      )}
+    </div>
+  );
+}
+
+function Progress({ run }: { run: RunState }) {
+  const r = run.run!;
+  const p = r.progress;
+  const frac = progressFraction(p);
+  const what = r.request.dry_run ? "Check" : "Run";
+  return (
+    <div className="run-progress" role="status" aria-label={`${what}: progress`}>
+      <div className="run-progress-head">
+        <span>
+          {what}: {p.done.toLocaleString("en-US")} of {p.total.toLocaleString("en-US")}
+        </span>
+        <span className={p.failed > 0 ? "bad-text" : "muted"}>errors: {p.failed}</span>
+        {p.skipped > 0 && <span className="warn-text">skipped: {p.skipped}</span>}
+      </div>
+      <div className="run-bar" aria-hidden>
+        <span style={{ width: `${frac * 100}%` }} />
+      </div>
+      <div className="scan-current">
+        <span className="path" title={p.current ?? ""}>
+          <bdi>{p.current ?? "Getting ready…"}</bdi>
+        </span>
+        <button type="button" className="btn" disabled={r.cancelling} onClick={run.cancel}>
+          {r.cancelling ? "Stopping…" : "Cancel"}
+        </button>
+      </div>
+      {r.cancelling && (
+        <p className="muted small">No new files are started; those in progress are finished so that nothing is left half-done.</p>
+      )}
+    </div>
+  );
+}
+
+function Result({ run, onOpenHistory }: { run: RunState; onOpenHistory: () => void }) {
+  const d = run.result!;
+  const head = resultHeadline(d);
+  const rows = resultRows(d.summary, d.dry_run);
+  return (
+    <div className={`run-result ${head.tone}`} role="status">
+      <p className="run-result-title">{head.title}</p>
+      <ul className="run-result-rows">
+        {rows.map((r) => (
+          <li key={r.label} className={r.tone}>
+            <span className="fate-count">{r.count.toLocaleString("en-US")}</span> {r.label}
+          </li>
+        ))}
+      </ul>
+      {d.failures.length > 0 && (
+        <details className="run-failures">
+          <summary>Files with problems ({d.failures.length})</summary>
+          <ul>
+            {d.failures.map((f) => (
+              <li key={f.source}>
+                <span className="code">{f.source}</span>
+                <span className="muted">{f.reason}</span>
+              </li>
+            ))}
+          </ul>
+        </details>
+      )}
+      {d.warnings.map((w) => (
+        <p key={w} className="muted small">
+          {w}
+        </p>
+      ))}
+      {d.report_path ? (
+        <p className="run-report">
+          <span className="muted">Report:</span> <span className="code">{d.report_path}</span>
+          <button type="button" className="link" onClick={onOpenHistory}>
+            Open in History
+          </button>
+        </p>
+      ) : (
+        <p className="muted small">The check changed nothing and wrote no report.</p>
+      )}
+    </div>
+  );
+}
+
+/// The last word before files move: what goes where, with "Cancel" focused.
+function ConfirmDialog({
+  preview,
+  kind,
+  pilot,
+  onCancel,
+  onConfirm,
+}: {
+  preview: ApplyPreview;
+  kind: ConfirmKind;
+  /** Files per target when the pilot is what runs (the estimate is for that slice). */
+  pilot?: number;
+  onCancel: () => void;
+  /** `allow`: place results that differ from their source; `pause`: pause Syncthing meanwhile. */
+  onConfirm: (allow: boolean, pause: boolean) => void;
+}) {
+  const { title, lines } = confirmLines(preview, kind);
+  const [allow, setAllow] = useState(false);
+  const [check, setCheck] = useState<SyncCheck | null>(null);
+  // null: the user has not touched the checkbox, the default of `syncOption` stands.
+  const [pauseChoice, setPauseChoice] = useState<boolean | null>(null);
+  const sync = syncOption(check);
+  const pause = !sync.disabled && (pauseChoice ?? sync.checked);
+  useEffect(() => {
+    let live = true;
+    syncApi.check(preview.plan_path, pilot).then(
+      (c) => live && setCheck(c),
+      (e) => live && setCheck({ reachable: false, reason: errorText(e), folders: [] }),
+    );
+    return () => {
+      live = false;
+    };
+  }, [preview.plan_path, pilot]);
+  const cancelRef = useRef<HTMLButtonElement>(null);
+  useEffect(() => {
+    cancelRef.current?.focus();
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") onCancel();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onCancel]);
+  return (
+    <div className="modal-backdrop" onMouseDown={(e) => e.target === e.currentTarget && onCancel()}>
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <h2 id="confirm-title">{title}</h2>
+        <FateLedger preview={preview} note={false} />
+        <EstimateBlock planPath={preview.plan_path} pilot={pilot} />
+        <ul className="modal-lines">
+          {lines.map((l) => (
+            <li key={l}>{l}</li>
+          ))}
+        </ul>
+        <label className="modal-check">
+          <input type="checkbox" checked={allow} onChange={(e) => setAllow(e.target.checked)} />
+          Allow results with mismatches (date, mtime, GPS, size, duration)
+        </label>
+        <label className="modal-check">
+          <input
+            type="checkbox"
+            checked={pause}
+            disabled={sync.disabled}
+            onChange={(e) => setPauseChoice(e.target.checked)}
+          />
+          Pause Syncthing during the run
+        </label>
+        <p className="muted small modal-note">{sync.note}</p>
+        <div className="modal-actions">
+          <button ref={cancelRef} type="button" className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button type="button" className="btn primary" onClick={() => onConfirm(allow, pause)}>
+            Run
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ---------- server ----------
+
+/// "For server": the current plan with the server's paths, saved to the export folder.
+export function ServerCard({ data, plan, run, busy }: { data: AppData; plan: PlanState; run: RunState; busy: string | null }) {
+  const x = run.exporting;
+  const canExport = !!data.summary?.valid && !!run.exportDir && !x && !run.run && !plan.scan && !busy;
+  const choose = async () => {
+    const dir = await pickFolder(run.exportDir);
+    if (dir) run.setExportDir(dir);
+  };
+  return (
+    <section className="run-card" aria-labelledby="run-server">
+      <header className="run-card-head">
+        <h2 id="run-server">On the server</h2>
+        <span className="muted">export plan</span>
+      </header>
+      <p className="run-text">
+        The plan is rebuilt with the server paths from the current state (same manual decisions, AI answers from
+        the cache; files waiting for AI are not included) and saved to a folder that Syncthing usually
+        syncs.
+      </p>
+      <div className="run-folder">
+        {run.exportDir ? (
+          <span className="path" title={run.exportDir}>
+            <bdi>{run.exportDir}</bdi>
+          </span>
+        ) : (
+          <span className="run-folder-empty muted">No folder chosen</span>
+        )}
+        <button type="button" className="btn" disabled={!!x} onClick={choose}>
+          Choose folder…
+        </button>
+      </div>
+      <div className="run-actions">
+        <button
+          type="button"
+          className="btn primary"
+          disabled={!canExport}
+          onClick={() => run.startExport(data.configPath)}
+        >
+          Export plan
+        </button>
+      </div>
+      {x && (
+        <div className="run-progress" role="status" aria-label="Export progress">
+          <div className="run-progress-head">
+            <span>
+              {SCAN_STAGES.find((s) => s.id === x.progress?.stage)?.label ?? "Reading config"}
+              {x.progress ? `: ${stageCount(x.progress)}` : "…"}
+            </span>
+          </div>
+          <div className="run-bar" aria-hidden>
+            <span
+              className={x.progress && stageFraction(x.progress) !== null ? undefined : "indeterminate"}
+              style={{ width: `${(x.progress ? (stageFraction(x.progress) ?? 0.3) : 0.3) * 100}%` }}
+            />
+          </div>
+          <div className="scan-current">
+            <span className="path">
+              <bdi>{x.progress?.current ?? ""}</bdi>
+            </span>
+            <button type="button" className="btn" disabled={x.cancelling} onClick={run.cancelExport}>
+              {x.cancelling ? "Stopping…" : "Cancel"}
+            </button>
+          </div>
+        </div>
+      )}
+      {run.exportError && (
+        <div className="notice bad">
+          <p className="notice-title">The server plan was not saved</p>
+          <pre className="notice-text">{run.exportError}</pre>
+        </div>
+      )}
+      {run.exported && <Exported done={run.exported} />}
+      <p className="run-foot muted small">
+        The GUI never touches the server: you run the command yourself, on the server. Its report comes back to this folder through Syncthing.
+      </p>
+    </section>
+  );
+}
+
+function Exported({ done }: { done: ExportDone }) {
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(done.command);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      setCopied(false);
+    }
+  };
+  return (
+    <div className="run-exported">
+      <p>
+        Plan saved: {filesWord(done.summary.files)}
+        {done.summary.ai && <span className="cost"> {formatCost(done.summary.ai)}</span>}
+      </p>
+      <p className="code">{done.plan_path}</p>
+      <p className="muted small">Run this on the server, putting in the path to the plan folder there:</p>
+      <div className="command">
+        <code>{done.command}</code>
+        <button type="button" className="btn" onClick={copy}>
+          {copied ? "Copied" : "Copy"}
+        </button>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,4 @@
+/target
+/crates/gallery-gui/gen
+node_modules/
+/ui/dist/

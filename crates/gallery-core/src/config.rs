@@ -1,0 +1,2167 @@
+//! Configuration model: sources, three-stage targets, presets, AI settings.
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::{Path, PathBuf};
+
+use serde::{Deserialize, Serialize};
+
+use crate::mask::{MAX_REF_DEPTH, MaskExpr, MaskItem, MaskScope};
+use crate::{Error, Result};
+
+/// Expand a leading `~` / `~/` to the home directory (`$HOME`).
+pub fn expand_tilde(p: &Path) -> PathBuf {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    match (home, p.strip_prefix("~")) {
+        (Some(home), Ok(rest)) => home.join(rest),
+        _ => p.to_path_buf(),
+    }
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Config {
+    #[serde(default)]
+    pub sources: Vec<Source>,
+    #[serde(default)]
+    pub targets: Targets,
+    /// The user's own name presets; the built-ins (`crate::presets`) are not
+    /// stored here, look names up with `Config::name_preset`.
+    #[serde(default)]
+    pub name_presets: BTreeMap<String, NamePreset>,
+    /// The user's own content presets; see `name_presets`.
+    #[serde(default)]
+    pub content_presets: BTreeMap<String, ContentPreset>,
+    /// The user's own named masks, referred to as `@name`; the built-ins
+    /// (`crate::presets::builtin_masks`) are not stored here.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub masks: BTreeMap<String, MaskExpr>,
+    #[serde(default)]
+    pub ai: AiSettings,
+    /// The user's corrections per source id (see [`crate::learn`]); not part
+    /// of the file: filled by `Config::attach_examples`.
+    #[serde(skip)]
+    pub ai_examples: BTreeMap<String, Vec<crate::learn::Correction>>,
+}
+
+fn default_skip() -> Vec<String> {
+    [
+        ".stfolder",
+        ".stversions",
+        ".gallery-trash",
+        ".gallery-tmp-*",
+    ]
+    .map(String::from)
+    .into()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Source {
+    pub id: String,
+    pub path: PathBuf,
+    #[serde(default)]
+    pub server_path: Option<PathBuf>,
+    #[serde(default)]
+    pub recursive: bool,
+    /// Globs of entries to ignore while scanning.
+    #[serde(default = "default_skip")]
+    pub skip: Vec<String>,
+    /// Text placed in the AI system prompt before the category list of this
+    /// source's files; changing it re-asks the AI for them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_prefix: Option<String>,
+    /// File holding `ai_prefix` (relative to the config file, `~` expanded);
+    /// read by `Config::load` into `ai_prefix`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_prefix_file: Option<PathBuf>,
+    /// Text placed after the category list, before the answer format.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_suffix: Option<String>,
+    /// File holding `ai_suffix`, like `ai_prefix_file`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_suffix_file: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Targets {
+    #[serde(default)]
+    pub before_ai: Vec<MaskTarget>,
+    #[serde(default)]
+    pub ai: Vec<AiTarget>,
+    #[serde(default)]
+    pub after_ai: Vec<MaskTarget>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MaskTarget {
+    pub name: String,
+    #[serde(default)]
+    pub filters: Vec<InputFilter>,
+    #[serde(default)]
+    pub outputs: Vec<Output>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InputFilter {
+    #[serde(default)]
+    pub sources: Vec<String>,
+    /// Mask of file names to match; `None` matches any file.
+    #[serde(default, rename = "match")]
+    pub matches: Option<MaskExpr>,
+    /// The filter does not match a file whose name matches any of these.
+    #[serde(default, skip_serializing_if = "MaskExpr::is_empty")]
+    pub exclude: MaskExpr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AiTarget {
+    pub name: String,
+    #[serde(default)]
+    pub sources: Vec<String>,
+    #[serde(default)]
+    pub prefilter: Option<Prefilter>,
+    pub description: String,
+    #[serde(default)]
+    pub outputs: Vec<Output>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Prefilter {
+    /// Mask of file names to match; `None` matches any file.
+    #[serde(default, rename = "match")]
+    pub matches: Option<MaskExpr>,
+    /// The prefilter does not match a file whose name matches any of these.
+    #[serde(default, skip_serializing_if = "MaskExpr::is_empty")]
+    pub exclude: MaskExpr,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct Output {
+    /// Destination directory template.
+    pub dir: String,
+    #[serde(default)]
+    pub server_dir: Option<String>,
+    /// Content pipe; empty means a byte-for-byte copy.
+    #[serde(default)]
+    pub content: Vec<PipeStep>,
+    /// Name pipe (TOML key `rename`).
+    #[serde(default)]
+    pub rename: Vec<PipeStep>,
+}
+
+/// One step of an output pipe. In a config file it is either a bare preset
+/// name (`"avif-high"`, the preset's own mask) or a table
+/// `{ mask = "...", preset = "..." }` that overrides the mask.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PipeStep {
+    /// `None`: use the preset's mask (see `ContentPreset::mask_or_default`).
+    pub mask: Option<MaskExpr>,
+    pub preset: String,
+}
+
+impl PipeStep {
+    /// A step that uses the preset's own mask.
+    pub fn named(preset: &str) -> Self {
+        Self {
+            mask: None,
+            preset: preset.into(),
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PipeStepTable {
+    #[serde(default)]
+    mask: Option<MaskExpr>,
+    preset: String,
+}
+
+impl Serialize for PipeStep {
+    fn serialize<S: serde::Serializer>(&self, ser: S) -> std::result::Result<S::Ok, S::Error> {
+        use serde::ser::SerializeStruct;
+        match &self.mask {
+            None => ser.serialize_str(&self.preset),
+            Some(m) => {
+                let mut st = ser.serialize_struct("PipeStep", 2)?;
+                st.serialize_field("mask", m)?;
+                st.serialize_field("preset", &self.preset)?;
+                st.end()
+            }
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for PipeStep {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> std::result::Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = PipeStep;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a preset name or a table { mask, preset }")
+            }
+            fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<PipeStep, E> {
+                Ok(PipeStep::named(v))
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> std::result::Result<PipeStep, A::Error> {
+                let t =
+                    PipeStepTable::deserialize(serde::de::value::MapAccessDeserializer::new(map))?;
+                Ok(PipeStep {
+                    mask: t.mask,
+                    preset: t.preset,
+                })
+            }
+        }
+        de.deserialize_any(V)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct NamePreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub template: String,
+    #[serde(default = "DateSource::default_source")]
+    pub date: DateSource,
+    #[serde(default)]
+    pub skip_if: Option<MaskExpr>,
+    #[serde(default)]
+    pub normalize_ext: bool,
+}
+
+impl NamePreset {
+    /// The preset's own mask, else `*`.
+    pub fn mask_or_default(&self) -> MaskExpr {
+        self.mask
+            .clone()
+            .unwrap_or_else(|| MaskExpr::parse("*").expect("`*` is a valid mask"))
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DateSource {
+    Capture,
+    FileCreated,
+    None,
+}
+
+impl DateSource {
+    fn default_source() -> Self {
+        DateSource::Capture
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "lowercase")]
+pub enum ContentPreset {
+    Metadata(MetadataPreset),
+    Photo(PhotoPreset),
+    Video(VideoPreset),
+    Audio(AudioPreset),
+    Png(PngPreset),
+    /// One name for an ordered list of presets; expanded at plan time.
+    Bundle(BundlePreset),
+}
+
+/// A named, ordered list of content steps (bundle). It has no mask of its
+/// own: every step keeps its preset's mask or its own override. `mask` is
+/// parsed only to refuse it with a clear message.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BundlePreset {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub steps: Vec<PipeStep>,
+}
+
+/// One step of a content pipe after bundles are expanded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ExpandedStep {
+    pub step: PipeStep,
+    /// The pipe step (bundle) this step came from.
+    pub bundle: Option<String>,
+}
+
+impl ContentPreset {
+    /// The preset's own mask, else the default for its kind.
+    pub fn mask_or_default(&self) -> MaskExpr {
+        // An audio preset leaves files already in its output format alone,
+        // or each scan would re-encode its own results.
+        if let ContentPreset::Audio(p) = self
+            && p.mask.is_none()
+        {
+            let own = format!("!*.{}", p.output_ext());
+            return MaskExpr(vec![
+                MaskItem::parse("@audio").expect("valid"),
+                MaskItem::parse(&own).expect("valid"),
+            ]);
+        }
+        let (own, default) = match self {
+            ContentPreset::Metadata(p) => (&p.mask, "*"),
+            ContentPreset::Photo(p) => (&p.mask, "@photo-original"),
+            ContentPreset::Video(p) => (&p.mask, "@video-original"),
+            ContentPreset::Audio(p) => (&p.mask, "@audio"),
+            ContentPreset::Png(p) => (&p.mask, "@png"),
+            ContentPreset::Bundle(p) => (&p.mask, "*"),
+        };
+        own.clone()
+            .unwrap_or_else(|| MaskExpr::parse(default).expect("kind default mask is valid"))
+    }
+
+    /// Extension of the file this preset writes for an input with `input_ext`.
+    pub fn output_ext(&self, input_ext: &str) -> String {
+        match self {
+            ContentPreset::Metadata(_) => input_ext,
+            ContentPreset::Photo(p) => p.output_ext(),
+            ContentPreset::Video(p) => p.output_ext(),
+            ContentPreset::Audio(p) => p.output_ext(),
+            ContentPreset::Png(p) => p.output_ext(),
+            ContentPreset::Bundle(_) => input_ext,
+        }
+        .to_string()
+    }
+
+    /// Whether the preset re-encodes lossily.
+    pub fn reencodes(&self) -> bool {
+        match self {
+            ContentPreset::Metadata(_) => false,
+            ContentPreset::Photo(p) => p.reencodes(),
+            ContentPreset::Video(p) => p.reencodes(),
+            ContentPreset::Audio(p) => p.codec != AudioCodec::Flac,
+            ContentPreset::Png(p) => p.reencodes(),
+            ContentPreset::Bundle(_) => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[serde(deny_unknown_fields)]
+pub struct MetadataPreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub write_capture_date: bool,
+    pub fix_gcam_make_model: bool,
+    pub strip_gcamera_xmp: bool,
+    pub strip_gain_map_xmp_for_avif: bool,
+    pub fill_offset_time: bool,
+    pub video_make_model: bool,
+    pub video_restore_gps: bool,
+}
+
+impl MetadataPreset {
+    /// "meta-full": every fix enabled.
+    pub fn full() -> Self {
+        Self {
+            mask: None,
+            write_capture_date: true,
+            fix_gcam_make_model: true,
+            strip_gcamera_xmp: true,
+            strip_gain_map_xmp_for_avif: true,
+            fill_offset_time: true,
+            video_make_model: true,
+            video_restore_gps: true,
+        }
+    }
+
+    /// "meta-dates": only the capture date.
+    pub fn dates_only() -> Self {
+        Self {
+            mask: None,
+            write_capture_date: true,
+            fix_gcam_make_model: false,
+            strip_gcamera_xmp: false,
+            strip_gain_map_xmp_for_avif: false,
+            fill_offset_time: false,
+            video_make_model: false,
+            video_restore_gps: false,
+        }
+    }
+}
+
+impl Default for MetadataPreset {
+    fn default() -> Self {
+        Self::full()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PhotoFormat {
+    Avif,
+    Webp,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[serde(deny_unknown_fields)]
+pub struct PhotoPreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub format: PhotoFormat,
+    pub quality: u8,
+    /// AVIF speed or WebP method, depending on `format`.
+    pub speed: u8,
+    pub max_short_side: Option<u32>,
+    pub ladder: bool,
+    pub min_saving_pct: u8,
+}
+
+impl PhotoPreset {
+    fn make(format: PhotoFormat, quality: u8, speed: u8) -> Self {
+        Self {
+            mask: None,
+            format,
+            quality,
+            speed,
+            max_short_side: None,
+            ladder: true,
+            min_saving_pct: 0,
+        }
+    }
+    /// PNG (screenshots) to AVIF: a bit higher quality than photos, since
+    /// text and flat UI areas show artefacts sooner.
+    pub fn png_avif() -> Self {
+        Self {
+            mask: Some(MaskExpr::parse("@png").expect("valid mask")),
+            ..Self::make(PhotoFormat::Avif, 80, 6)
+        }
+    }
+    /// WebP to AVIF: same level as `avif-high`.
+    pub fn webp_avif() -> Self {
+        Self {
+            mask: Some(MaskExpr::parse("*.webp").expect("valid mask")),
+            ..Self::make(PhotoFormat::Avif, 72, 6)
+        }
+    }
+    pub fn avif_low() -> Self {
+        Self::make(PhotoFormat::Avif, 55, 8)
+    }
+    pub fn avif_medium() -> Self {
+        Self::make(PhotoFormat::Avif, 65, 6)
+    }
+    pub fn avif_high() -> Self {
+        Self::make(PhotoFormat::Avif, 72, 6)
+    }
+    pub fn avif_max() -> Self {
+        Self::make(PhotoFormat::Avif, 82, 4)
+    }
+    /// "avif-fast": high quality, fastest speed.
+    pub fn avif_fast() -> Self {
+        Self::make(PhotoFormat::Avif, 72, 10)
+    }
+    pub fn webp_low() -> Self {
+        Self::make(PhotoFormat::Webp, 70, 4)
+    }
+    pub fn webp_medium() -> Self {
+        Self::make(PhotoFormat::Webp, 80, 5)
+    }
+    pub fn webp_high() -> Self {
+        Self::make(PhotoFormat::Webp, 87, 6)
+    }
+    pub fn webp_max() -> Self {
+        Self::make(PhotoFormat::Webp, 93, 6)
+    }
+    pub fn output_ext(&self) -> &'static str {
+        match self.format {
+            PhotoFormat::Avif => "avif",
+            PhotoFormat::Webp => "webp",
+        }
+    }
+    pub fn reencodes(&self) -> bool {
+        true
+    }
+}
+
+impl Default for PhotoPreset {
+    fn default() -> Self {
+        Self::avif_high()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Denoise {
+    VeryLow,
+    Low,
+    Medium,
+    High,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[serde(deny_unknown_fields)]
+pub struct VideoPreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub crf: u8,
+    pub preset: u8,
+    pub gop: u32,
+    pub max_short_side: Option<u32>,
+    pub audio_kbps: u32,
+    pub denoise: Option<Denoise>,
+    pub stabilize: bool,
+    pub ladder: bool,
+}
+
+impl VideoPreset {
+    fn make(crf: u8, preset: u8) -> Self {
+        Self {
+            mask: None,
+            crf,
+            preset,
+            gop: 240,
+            max_short_side: Some(1080),
+            audio_kbps: 160,
+            denoise: None,
+            stabilize: false,
+            ladder: true,
+        }
+    }
+    pub fn max() -> Self {
+        Self::make(27, 2)
+    }
+    pub fn high() -> Self {
+        Self::make(30, 3)
+    }
+    pub fn medium() -> Self {
+        Self::make(32, 4)
+    }
+    pub fn low() -> Self {
+        Self::make(36, 4)
+    }
+    /// "Fast": fast encoder preset.
+    pub fn fast() -> Self {
+        Self::make(32, 8)
+    }
+    /// "av1-action-cam": high + stabilization + medium denoise.
+    pub fn action_cam() -> Self {
+        Self {
+            stabilize: true,
+            denoise: Some(Denoise::Medium),
+            ..Self::high()
+        }
+    }
+    pub fn output_ext(&self) -> &'static str {
+        "av1.mp4"
+    }
+    pub fn reencodes(&self) -> bool {
+        true
+    }
+}
+
+impl Default for VideoPreset {
+    fn default() -> Self {
+        Self::high()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum AudioCodec {
+    Opus,
+    Mp3,
+    Aac,
+    Flac,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct AudioPreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    pub codec: AudioCodec,
+    /// Ignored for lossless codecs.
+    #[serde(default)]
+    pub kbps: Option<u32>,
+}
+
+impl AudioPreset {
+    pub fn opus(kbps: u32) -> Self {
+        Self {
+            mask: None,
+            codec: AudioCodec::Opus,
+            kbps: Some(kbps),
+        }
+    }
+    pub fn mp3(kbps: u32) -> Self {
+        Self {
+            mask: None,
+            codec: AudioCodec::Mp3,
+            kbps: Some(kbps),
+        }
+    }
+    pub fn aac(kbps: u32) -> Self {
+        Self {
+            mask: None,
+            codec: AudioCodec::Aac,
+            kbps: Some(kbps),
+        }
+    }
+    /// Lossless; no bitrate.
+    pub fn flac() -> Self {
+        Self {
+            mask: None,
+            codec: AudioCodec::Flac,
+            kbps: None,
+        }
+    }
+    pub fn output_ext(&self) -> &'static str {
+        match self.codec {
+            AudioCodec::Opus => "opus",
+            AudioCodec::Mp3 => "mp3",
+            AudioCodec::Aac => "m4a",
+            AudioCodec::Flac => "flac",
+        }
+    }
+}
+
+impl Default for AudioPreset {
+    fn default() -> Self {
+        Self::opus(128)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(default)]
+#[serde(deny_unknown_fields)]
+pub struct PngPreset {
+    /// Which files the preset applies to by default; the kind default if absent.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mask: Option<MaskExpr>,
+    /// optipng `-oN` level.
+    pub level: u8,
+}
+
+impl PngPreset {
+    pub fn output_ext(&self) -> &'static str {
+        "png"
+    }
+    /// PNG optimisation is lossless.
+    pub fn reencodes(&self) -> bool {
+        false
+    }
+}
+
+impl Default for PngPreset {
+    fn default() -> Self {
+        Self {
+            mask: None,
+            level: 3,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+#[serde(deny_unknown_fields)]
+pub struct AiSettings {
+    pub model: String,
+    pub effort: String,
+    pub jobs: usize,
+    /// How many of the user's most recent corrections of a source go into
+    /// its AI prompt as examples; 0 turns the learning off.
+    pub examples: usize,
+    /// Language the model writes each `reason` in: a name or code ("en",
+    /// "ru", "Ukrainian"); blank means "en".
+    pub language: String,
+}
+
+impl Default for AiSettings {
+    fn default() -> Self {
+        Self {
+            model: "claude-sonnet-5-5".into(),
+            effort: "low".into(),
+            jobs: 8,
+            examples: 20,
+            language: "en".into(),
+        }
+    }
+}
+
+/// One prompt slot of source `id`: inline `text` or the contents of `file`
+/// (relative to `dir`, `~` expanded); both is an error, blank is none.
+fn load_ai_text(
+    dir: &Path,
+    id: &str,
+    slot: &str,
+    text: Option<String>,
+    file: Option<PathBuf>,
+) -> std::result::Result<Option<String>, String> {
+    let text = match (text, file) {
+        (Some(_), Some(_)) => {
+            return Err(format!(
+                "source '{id}': both {slot} and {slot}_file are set"
+            ));
+        }
+        (Some(t), None) => t,
+        (None, Some(f)) => {
+            let f = dir.join(expand_tilde(&f));
+            std::fs::read_to_string(&f)
+                .map_err(|e| format!("source '{id}': {slot}_file {}: {e}", f.display()))?
+        }
+        (None, None) => return Ok(None),
+    };
+    Ok(Some(text).filter(|t| !t.trim().is_empty()))
+}
+
+/// The error for a step that names no preset; an old (pre-rename) built-in
+/// name gets a hint with the new one.
+pub(crate) fn unknown_preset(target: &str, kind: &str, name: &str) -> String {
+    let mut m = format!("target '{target}': unknown {kind} preset '{name}'");
+    if let Some(new) = crate::presets::renamed_builtin(name) {
+        m.push_str(&format!(" (built-in presets were renamed: use '{new}')"));
+    }
+    m
+}
+
+impl MaskScope for Config {
+    fn named_mask(&self, name: &str) -> Option<&MaskExpr> {
+        self.masks
+            .get(name)
+            .or_else(|| crate::presets::builtin_mask(name))
+    }
+}
+
+impl Config {
+    /// Read and parse a TOML config file; the sources' `ai_*_file` are read
+    /// here into `ai_prefix` / `ai_suffix`.
+    pub fn load(path: &Path) -> Result<Config> {
+        let text = std::fs::read_to_string(path)?;
+        let dir = path.parent().unwrap_or(Path::new(""));
+        Self::from_str_at(&text, dir, path)
+    }
+
+    /// Parse config `text` as if it were a file in `base_dir`: relative
+    /// `ai_*_file` paths are read from there. `label` names the text in
+    /// errors (the file path for `load`). Used to check an edited config
+    /// before it is written.
+    pub fn from_str_at(text: &str, base_dir: &Path, label: &Path) -> Result<Config> {
+        let path = label;
+        let mut c: Config = toml::from_str(text).map_err(|e| {
+            let mut m = format!("{}: {e}", path.display());
+            if m.contains("unknown field `instructions") {
+                if !m.ends_with('\n') {
+                    m.push('\n');
+                }
+                m.push_str(
+                    "[ai] instructions and instructions_file were removed: \
+use ai_prefix / ai_suffix (or ai_prefix_file / ai_suffix_file) of [[sources]]",
+                );
+            }
+            if m.contains("unknown field `kinds`") {
+                if !m.ends_with('\n') {
+                    m.push('\n');
+                }
+                m.push_str(
+                    "`kinds` was removed from filters and prefilters: \
+list the extensions in `match`: match = \"@photo\", match = \"@video\", \
+or both: match = [\"@photo\", \"@video\"]",
+                );
+            }
+            if m.contains("unknown field `name`, expected") {
+                let hint = if m.contains("`rename`") {
+                    "`name` was renamed in outputs: use `rename`"
+                } else if m.contains("`match`") {
+                    "`name` was renamed in filters and prefilters: use `match`"
+                } else {
+                    ""
+                };
+                if !hint.is_empty() {
+                    if !m.ends_with('\n') {
+                        m.push('\n');
+                    }
+                    m.push_str(hint);
+                }
+            }
+            Error::Config(m)
+        })?;
+        let dir = base_dir;
+        for s in &mut c.sources {
+            s.ai_prefix = load_ai_text(
+                dir,
+                &s.id,
+                "ai_prefix",
+                s.ai_prefix.take(),
+                s.ai_prefix_file.take(),
+            )
+            .map_err(|m| Error::Config(format!("{}: {m}", path.display())))?;
+            s.ai_suffix = load_ai_text(
+                dir,
+                &s.id,
+                "ai_suffix",
+                s.ai_suffix.take(),
+                s.ai_suffix_file.take(),
+            )
+            .map_err(|m| Error::Config(format!("{}: {m}", path.display())))?;
+        }
+        c.check_builtin_clash()
+            .and_then(|()| c.check_name_templates())
+            .map_err(|m| Error::Config(format!("{}: {m}", path.display())))?;
+        Ok(c)
+    }
+
+    /// A name preset by name: the user's own, else a built-in.
+    pub fn name_preset(&self, name: &str) -> Option<&NamePreset> {
+        self.name_presets
+            .get(name)
+            .or_else(|| crate::presets::builtin_name_preset(name))
+    }
+
+    /// A content preset by name: the user's own, else a built-in.
+    pub fn content_preset(&self, name: &str) -> Option<&ContentPreset> {
+        self.content_presets
+            .get(name)
+            .or_else(|| crate::presets::builtin_content_preset(name))
+    }
+
+    /// Expand bundles in a content pipe, in place and in order. A bundle
+    /// step may not carry a mask (its own steps do); bundles may nest.
+    pub fn expand_content(
+        &self,
+        target: &str,
+        steps: &[PipeStep],
+    ) -> std::result::Result<Vec<ExpandedStep>, String> {
+        let mut out = Vec::new();
+        for st in steps {
+            match self.content_preset(&st.preset) {
+                None => return Err(unknown_preset(target, "content", &st.preset)),
+                Some(ContentPreset::Bundle(_)) => {
+                    let mut open = vec![st.preset.as_str()];
+                    self.expand_bundle(st, &st.preset, &mut open, &mut out)?;
+                }
+                Some(_) => out.push(ExpandedStep {
+                    step: st.clone(),
+                    bundle: None,
+                }),
+            }
+        }
+        Ok(out)
+    }
+
+    fn expand_bundle<'a>(
+        &'a self,
+        st: &'a PipeStep,
+        top: &str,
+        open: &mut Vec<&'a str>,
+        out: &mut Vec<ExpandedStep>,
+    ) -> std::result::Result<(), String> {
+        let name = st.preset.as_str();
+        if st.mask.is_some() {
+            return Err(format!(
+                "bundle '{name}' used with a mask: a bundle has no mask, put masks on its steps"
+            ));
+        }
+        let Some(ContentPreset::Bundle(b)) = self.content_preset(name) else {
+            return Err(format!("unknown bundle '{name}'"));
+        };
+        if b.mask.is_some() {
+            return Err(format!(
+                "bundle '{name}': a bundle has no mask, put masks on its steps"
+            ));
+        }
+        if b.steps.is_empty() {
+            return Err(format!("bundle '{name}': no steps"));
+        }
+        for inner in &b.steps {
+            match self.content_preset(&inner.preset) {
+                None => {
+                    return Err(format!(
+                        "bundle '{name}': unknown content preset '{}'",
+                        inner.preset
+                    ));
+                }
+                Some(ContentPreset::Bundle(_)) => {
+                    if let Some(i) = open.iter().position(|n| *n == inner.preset) {
+                        let mut cycle = open[i..].to_vec();
+                        cycle.push(&inner.preset);
+                        return Err(format!("bundle cycle: {}", cycle.join(" -> ")));
+                    }
+                    if open.len() >= MAX_REF_DEPTH {
+                        return Err(format!(
+                            "bundle '{name}': nested deeper than {MAX_REF_DEPTH} levels"
+                        ));
+                    }
+                    open.push(&inner.preset);
+                    self.expand_bundle(inner, top, open, out)?;
+                    open.pop();
+                }
+                Some(_) => out.push(ExpandedStep {
+                    step: inner.clone(),
+                    bundle: Some(top.to_string()),
+                }),
+            }
+        }
+        Ok(())
+    }
+
+    /// A user preset must not reuse the name of a built-in one.
+    fn check_builtin_clash(&self) -> std::result::Result<(), String> {
+        let clash = |kind: &str, name: &str| {
+            format!("{kind} preset '{name}': this is a built-in preset — give yours another name")
+        };
+        if let Some(n) = self
+            .name_presets
+            .keys()
+            .find(|n| crate::presets::builtin_name_preset(n).is_some())
+        {
+            return Err(clash("name", n));
+        }
+        if let Some(n) = self
+            .content_presets
+            .keys()
+            .find(|n| crate::presets::builtin_content_preset(n).is_some())
+        {
+            return Err(clash("content", n));
+        }
+        match self
+            .masks
+            .keys()
+            .find(|n| crate::presets::builtin_mask(n).is_some())
+        {
+            Some(n) => Err(format!(
+                "mask '{n}': this is a built-in mask — give yours another name"
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// Every `@name` in `expr` is a known mask.
+    /// `exclude` / `skip_if` only turn files away: a `!` item there would
+    /// rescue files, so it is refused.
+    fn check_veto_mask(
+        &self,
+        whose: &str,
+        field: &str,
+        expr: &MaskExpr,
+    ) -> std::result::Result<(), String> {
+        if let Some(i) = expr.0.iter().find(|i| i.is_negated()) {
+            return Err(format!(
+                "{whose}: '{}' in {field} is not allowed: {field} only turns files away, \
+                 a '!' item would take more. Put the exception into match instead",
+                i.as_string()
+            ));
+        }
+        self.check_mask_refs(whose, expr)
+    }
+
+    fn check_mask_refs(&self, whose: &str, expr: &MaskExpr) -> std::result::Result<(), String> {
+        if expr.is_empty() {
+            return Err(format!("{whose}: empty mask list"));
+        }
+        match expr.refs().find(|n| self.named_mask(n).is_none()) {
+            Some(n) => Err(format!("{whose}: unknown mask '@{n}'")),
+            None => Ok(()),
+        }
+    }
+
+    /// Every user bundle expands: known steps, no mask, no cycle.
+    pub(crate) fn check_bundles(&self) -> std::result::Result<(), String> {
+        for (name, p) in &self.content_presets {
+            if matches!(p, ContentPreset::Bundle(_)) {
+                self.expand_content(name, &[PipeStep::named(name)])?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Named masks: no empty names, known references everywhere a mask is
+    /// accepted, and no reference cycle.
+    fn check_masks(&self) -> std::result::Result<(), String> {
+        if self.masks.keys().any(|n| n.is_empty() || n.contains('@')) {
+            return Err("masks: a mask name must be non-empty and have no '@'".into());
+        }
+        for (name, e) in &self.masks {
+            self.check_mask_refs(&format!("mask '{name}'"), e)?;
+        }
+        // Depth-first walk over `@` references; a name met again while it is
+        // still open is a cycle.
+        fn walk<'a>(
+            c: &'a Config,
+            name: &'a str,
+            open: &mut Vec<&'a str>,
+            done: &mut BTreeSet<&'a str>,
+        ) -> std::result::Result<(), String> {
+            if let Some(i) = open.iter().position(|n| *n == name) {
+                let mut cycle = open[i..].to_vec();
+                cycle.push(name);
+                return Err(format!("mask cycle: {}", cycle.join(" -> ")));
+            }
+            if open.len() + 1 >= MAX_REF_DEPTH {
+                return Err(format!(
+                    "mask '{name}': reference chain deeper than {} levels",
+                    MAX_REF_DEPTH - 1
+                ));
+            }
+            if !done.insert(name) {
+                return Ok(());
+            }
+            open.push(name);
+            if let Some(e) = c.named_mask(name) {
+                for r in e.refs() {
+                    walk(c, r, open, done)?;
+                }
+            }
+            open.pop();
+            Ok(())
+        }
+        let mut done = BTreeSet::new();
+        for name in self.masks.keys() {
+            walk(self, name, &mut Vec::new(), &mut done)?;
+        }
+        for (name, p) in &self.name_presets {
+            let whose = format!("name preset '{name}'");
+            if let Some(m) = &p.mask {
+                self.check_mask_refs(&whose, m)?;
+            }
+            if let Some(m) = &p.skip_if {
+                self.check_veto_mask(&whose, "skip_if", m)?;
+            }
+        }
+        for (name, p) in &self.content_presets {
+            let m = match p {
+                ContentPreset::Metadata(p) => &p.mask,
+                ContentPreset::Photo(p) => &p.mask,
+                ContentPreset::Video(p) => &p.mask,
+                ContentPreset::Audio(p) => &p.mask,
+                ContentPreset::Png(p) => &p.mask,
+                ContentPreset::Bundle(p) => {
+                    for st in &p.steps {
+                        if let Some(m) = &st.mask {
+                            self.check_mask_refs(&format!("bundle '{name}'"), m)?;
+                        }
+                    }
+                    &p.mask
+                }
+            };
+            if let Some(m) = m {
+                self.check_mask_refs(&format!("content preset '{name}'"), m)?;
+            }
+        }
+        let t = &self.targets;
+        for m in t.before_ai.iter().chain(&t.after_ai) {
+            for f in &m.filters {
+                let whose = format!("target '{}'", m.name);
+                if !f.exclude.is_empty() {
+                    self.check_veto_mask(&format!("{whose} filter"), "exclude", &f.exclude)?;
+                }
+                if let Some(n) = &f.matches {
+                    self.check_mask_refs(&whose, n)?;
+                }
+            }
+        }
+        for a in &t.ai {
+            let whose = format!("target '{}'", a.name);
+            if let Some(p) = &a.prefilter {
+                if !p.exclude.is_empty() {
+                    self.check_veto_mask(&format!("{whose} prefilter"), "exclude", &p.exclude)?;
+                }
+                if let Some(n) = &p.matches {
+                    self.check_mask_refs(&whose, n)?;
+                }
+            }
+        }
+        for (name, outputs) in t
+            .before_ai
+            .iter()
+            .chain(&t.after_ai)
+            .map(|m| (&m.name, &m.outputs))
+            .chain(t.ai.iter().map(|a| (&a.name, &a.outputs)))
+        {
+            let steps = outputs
+                .iter()
+                .flat_map(|o| o.content.iter().chain(&o.rename));
+            for st in steps {
+                if let Some(m) = &st.mask {
+                    self.check_mask_refs(&format!("target '{name}'"), m)?;
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Problems worth a warning but not an error: a name preset that makes
+    /// folders and has `skip_if`. A file it skips gets no folders, so in a
+    /// recursive source that is its own target an already sorted file would
+    /// be moved back to the output folder itself.
+    pub fn warnings(&self) -> Vec<String> {
+        self.name_presets
+            .iter()
+            .filter(|(_, p)| p.template.contains('/') && p.skip_if.is_some())
+            .map(|(name, _)| {
+                format!(
+                    "name preset '{name}': template makes folders and has skip_if; \
+a skipped file gets no folders (in a recursive source that is its own target \
+it moves back out of its folder)"
+                )
+            })
+            .collect()
+    }
+
+    /// Every source id is a plain name (it may be a folder via `{source}`),
+    /// and every name preset's template renders to a safe relative path.
+    fn check_name_templates(&self) -> std::result::Result<(), String> {
+        for s in &self.sources {
+            let id = s.id.as_str();
+            if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\']) {
+                return Err(format!(
+                    "source id '{id}': must be a non-empty name without '/' or '\\', not '.' or '..'"
+                ));
+            }
+        }
+        self.name_presets
+            .iter()
+            .try_for_each(|(name, p)| crate::name::check_template(name, p))
+    }
+
+    /// Check cross-references: unique target names, known sources and presets,
+    /// non-empty AI descriptions; and safe name templates.
+    pub fn validate(&self) -> Result<()> {
+        self.check_builtin_clash().map_err(Error::Config)?;
+        self.check_name_templates().map_err(Error::Config)?;
+        self.check_masks().map_err(Error::Config)?;
+        self.check_bundles().map_err(Error::Config)?;
+        let sources: BTreeSet<&str> = self.sources.iter().map(|s| s.id.as_str()).collect();
+        let check_sources = |target: &str, ids: &[String]| -> Result<()> {
+            match ids.iter().find(|id| !sources.contains(id.as_str())) {
+                Some(id) => Err(Error::Config(format!(
+                    "target '{target}': unknown source '{id}'"
+                ))),
+                None => Ok(()),
+            }
+        };
+        let check_outputs = |target: &str, outputs: &[Output]| -> Result<()> {
+            for o in outputs {
+                self.expand_content(target, &o.content)
+                    .map_err(Error::Config)?;
+                for s in &o.rename {
+                    if self.name_preset(&s.preset).is_none() {
+                        return Err(Error::Config(unknown_preset(target, "name", &s.preset)));
+                    }
+                }
+            }
+            Ok(())
+        };
+
+        let mut seen = BTreeSet::new();
+        let t = &self.targets;
+        let mask_targets = t.before_ai.iter().chain(&t.after_ai);
+        for m in mask_targets {
+            if !seen.insert(m.name.as_str()) {
+                return Err(Error::Config(format!("duplicate target name '{}'", m.name)));
+            }
+            for f in &m.filters {
+                check_sources(&m.name, &f.sources)?;
+            }
+            check_outputs(&m.name, &m.outputs)?;
+        }
+        for a in &t.ai {
+            if !seen.insert(a.name.as_str()) {
+                return Err(Error::Config(format!("duplicate target name '{}'", a.name)));
+            }
+            check_sources(&a.name, &a.sources)?;
+            if a.description.trim().is_empty() {
+                return Err(Error::Config(format!(
+                    "ai target '{}': empty description",
+                    a.name
+                )));
+            }
+            check_outputs(&a.name, &a.outputs)?;
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn example() -> Config {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gallery.toml");
+        Config::load(&p).unwrap()
+    }
+
+    fn load_str(text: &str) -> Result<Config> {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("g.toml");
+        std::fs::write(&p, text).unwrap();
+        Config::load(&p)
+    }
+
+    const USES_BUILTINS: &str = r#"
+[[sources]]
+id = "s"
+path = "/tmp/s"
+
+[[targets.after_ai]]
+name = "t"
+
+[[targets.after_ai.filters]]
+sources = ["s"]
+match = "*"
+
+[[targets.after_ai.outputs]]
+dir = "/tmp/o"
+content = [{ mask = "*", preset = "avif-high" }]
+rename = [{ mask = "*", preset = "capture-date" }]
+"#;
+
+    #[test]
+    fn builtin_presets_need_no_definition() {
+        let c = load_str(USES_BUILTINS).unwrap();
+        assert!(c.content_presets.is_empty() && c.name_presets.is_empty());
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn unknown_preset_still_fails() {
+        let c = load_str(&USES_BUILTINS.replace("avif-high", "Nope")).unwrap();
+        assert!(c.validate().unwrap_err().to_string().contains("Nope"));
+    }
+
+    #[test]
+    fn redefining_a_builtin_is_an_error() {
+        let content =
+            format!("{USES_BUILTINS}\n[content_presets.\"avif-high\"]\nkind = \"photo\"\n");
+        let name = format!(
+            "{USES_BUILTINS}\n[name_presets.\"capture-date\"]\ntemplate = \"{{stem}}.{{ext}}\"\n"
+        );
+        for (text, who) in [(content, "avif-high"), (name, "capture-date")] {
+            let m = load_str(&text).unwrap_err().to_string();
+            assert!(m.contains(who), "{m}");
+            assert!(
+                m.contains("this is a built-in preset — give yours another name"),
+                "{m}"
+            );
+        }
+        // `validate` catches presets added in code, too.
+        let mut c = load_str(USES_BUILTINS).unwrap();
+        c.name_presets.insert(
+            "ext-lower".into(),
+            NamePreset {
+                mask: None,
+                template: "{stem}.{ext}".into(),
+                date: DateSource::None,
+                skip_if: None,
+                normalize_ext: false,
+            },
+        );
+        assert!(c.validate().unwrap_err().to_string().contains("ext-lower"));
+    }
+
+    #[test]
+    fn audio_presets() {
+        assert_eq!(AudioPreset::default(), AudioPreset::opus(128));
+        assert_eq!(AudioPreset::opus(64).output_ext(), "opus");
+        assert_eq!(AudioPreset::mp3(320).kbps, Some(320));
+        assert_eq!(AudioPreset::aac(96).output_ext(), "m4a");
+        assert_eq!(AudioPreset::flac().kbps, None);
+        assert_eq!(AudioPreset::flac().output_ext(), "flac");
+    }
+
+    #[test]
+    fn example_config_loads() {
+        let c = example();
+        assert!(c.sources.len() >= 2);
+        assert!(!c.targets.before_ai.is_empty());
+        assert!(!c.targets.ai.is_empty());
+        assert!(!c.targets.after_ai.is_empty());
+        let all = c.targets.after_ai.iter().flat_map(|t| &t.outputs);
+        assert!(all.clone().any(|o| o.content.is_empty()));
+        let camera = c.sources.iter().find(|s| s.id == "camera").unwrap();
+        assert!(camera.ai_prefix.as_deref().unwrap().contains("phone"));
+        assert!(camera.ai_suffix.as_deref().unwrap().contains("Rules"));
+        assert_eq!(camera.ai_prefix_file, None);
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn example_config_round_trips() {
+        let c = example();
+        // Only the user's own presets are stored; built-ins stay out.
+        assert_eq!(c.name_presets.keys().collect::<Vec<_>>(), ["TikTok"]);
+        assert!(c.content_presets.is_empty());
+        let text = toml::to_string(&c).unwrap();
+        assert!(
+            !text.contains("avif-high\"]") && !text.contains("[name_presets.\"capture-date"),
+            "{text}"
+        );
+        let again: Config = toml::from_str(&text).unwrap();
+        assert_eq!(toml::to_string(&again).unwrap(), text);
+    }
+
+    #[test]
+    fn example_capture_date_name_is_not_doubled() {
+        use crate::datetime::capture_date;
+        use crate::media::kind_of;
+        use crate::name::{NameCtx, apply_name_pipe};
+        let c = example();
+        let preset = c.name_preset("capture-date").unwrap();
+        let name = |n: &str| {
+            let ctx = NameCtx {
+                capture: capture_date(n, kind_of(Path::new(n)), &serde_json::Value::Null, None),
+                ..NameCtx::default()
+            };
+            let steps = [(MaskExpr::parse("*").unwrap(), "capture-date", preset)];
+            apply_name_pipe(&c, &steps, n, &ctx).unwrap().final_name
+        };
+        assert_eq!(name("IMG_20260412_103314.jpg"), "20260412_103314.jpg");
+        assert_eq!(name("20260412_103314.jpg"), "20260412_103314.jpg");
+    }
+
+    #[test]
+    fn example_dated_folders_preset() {
+        use crate::name::{NameCtx, apply_name_pipe};
+        let c = example();
+        let ctx = NameCtx {
+            capture: chrono::NaiveDateTime::parse_from_str(
+                "2026-07-05 00:20:22",
+                "%Y-%m-%d %H:%M:%S",
+            )
+            .ok(),
+            ..NameCtx::default()
+        };
+        let steps = [
+            (
+                MaskExpr::parse("*").unwrap(),
+                "capture-date-dirs",
+                c.name_preset("capture-date-dirs").unwrap(),
+            ),
+            (
+                MaskExpr::parse("*").unwrap(),
+                "ext-lower",
+                c.name_preset("ext-lower").unwrap(),
+            ),
+        ];
+        let t = apply_name_pipe(&c, &steps, "Screenshot_2026-07-05-00-20-22.JPEG", &ctx).unwrap();
+        assert_eq!(t.rel_path(), Path::new("2026/07/20260705_002022.jpg"));
+    }
+
+    #[test]
+    fn example_screenshots_are_renamed_in_place() {
+        let c = example();
+        let t = c
+            .targets
+            .before_ai
+            .iter()
+            .find(|t| t.name == "Screenshots")
+            .unwrap();
+        let src = c.sources.iter().find(|s| s.id == "screenshots").unwrap();
+        assert_eq!(t.outputs.len(), 1);
+        let o = &t.outputs[0];
+        assert_eq!(Path::new(&o.dir), src.path);
+        assert!(o.content.is_empty());
+        assert_eq!(o.rename[0].preset, "capture-date-dirs");
+        let f = &t.filters[0];
+        assert_eq!(f.sources, ["screenshots"]);
+        // Files already named by date still go into their folders.
+        assert!(f.exclude.is_empty());
+        // Screenshots among camera photos still get a processed copy and a backup.
+        let other = c
+            .targets
+            .before_ai
+            .iter()
+            .find(|t| t.name == "Screenshots and screen recordings")
+            .unwrap();
+        assert_eq!(other.filters.len(), 1);
+        let f = &other.filters[0];
+        let n = f.matches.as_ref().unwrap();
+        assert!(n.matches("screen-1.mp4", &c) && n.matches("Screenshot_1.png", &c));
+        assert!(!n.matches("screen-1.jpg", &c) && !n.matches("IMG_1.jpg", &c));
+        assert_eq!(other.outputs.len(), 2);
+        assert_eq!(other.outputs[0].content[0].preset, "meta-full");
+        assert_eq!(other.outputs[1].dir, "~/Backup/Screenshots");
+    }
+
+    const SRC: &str = "[[sources]]\nid = \"cam\"\npath = \"/x\"\n";
+
+    #[test]
+    fn source_ai_texts_inline_and_from_files() {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("g.toml");
+        std::fs::write(&p, format!("{SRC}ai_prefix = \"camera frames\"\n")).unwrap();
+        let c = Config::load(&p).unwrap();
+        assert_eq!(c.sources[0].ai_prefix.as_deref(), Some("camera frames"));
+        assert_eq!(c.sources[0].ai_suffix, None);
+
+        // Relative files are read next to the config, not the working dir.
+        std::fs::create_dir(d.path().join("ai")).unwrap();
+        std::fs::write(d.path().join("ai/pre.md"), "before the list\n").unwrap();
+        std::fs::write(d.path().join("ai/post.md"), "price tag goes by item\n").unwrap();
+        std::fs::write(
+            &p,
+            format!("{SRC}ai_prefix_file = \"ai/pre.md\"\nai_suffix_file = \"ai/post.md\"\n"),
+        )
+        .unwrap();
+        let c = Config::load(&p).unwrap();
+        let s = &c.sources[0];
+        assert_eq!(s.ai_prefix.as_deref(), Some("before the list\n"));
+        assert_eq!(s.ai_suffix.as_deref(), Some("price tag goes by item\n"));
+        assert_eq!((&s.ai_prefix_file, &s.ai_suffix_file), (&None, &None));
+
+        // Blank text is the same as none.
+        std::fs::write(&p, format!("{SRC}ai_suffix = \"  \\n\"\n")).unwrap();
+        assert_eq!(Config::load(&p).unwrap().sources[0].ai_suffix, None);
+    }
+
+    #[test]
+    fn from_str_at_reads_prompt_files_relative_to_base_dir() {
+        let d = tempfile::tempdir().unwrap();
+        std::fs::create_dir(d.path().join("ai")).unwrap();
+        std::fs::write(d.path().join("ai/pre.md"), "before the list\n").unwrap();
+        let text = format!("{SRC}ai_prefix_file = \"ai/pre.md\"\n");
+        let c = Config::from_str_at(&text, d.path(), Path::new("g.toml")).unwrap();
+        assert_eq!(c.sources[0].ai_prefix.as_deref(), Some("before the list\n"));
+        // Errors name the given label, like `load` names the file.
+        let m = Config::from_str_at("[[sources]]\n", d.path(), Path::new("draft.toml"))
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("draft.toml"), "{m}");
+    }
+
+    #[test]
+    fn source_ai_text_and_file_together_is_error() {
+        for slot in ["ai_prefix", "ai_suffix"] {
+            let m = parse_err(&format!("{SRC}{slot} = \"x\"\n{slot}_file = \"r.md\"\n"));
+            assert!(m.contains("cam"), "{m}");
+            assert!(m.contains(&format!("{slot}_file")), "{m}");
+        }
+    }
+
+    #[test]
+    fn source_ai_missing_file_is_error() {
+        for slot in ["ai_prefix", "ai_suffix"] {
+            let m = parse_err(&format!("{SRC}{slot}_file = \"missing.md\"\n"));
+            assert!(m.contains("cam"), "{m}");
+            assert!(m.contains(&format!("{slot}_file")), "{m}");
+            assert!(m.contains("missing.md"), "{m}");
+        }
+    }
+
+    #[test]
+    fn removed_kinds_are_rejected_with_a_hint() {
+        let filter = "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.filters]]\nmatch = \"*\"\nkinds = [\"photo\"]\n";
+        let prefilter = "[[targets.ai]]\nname = \"t\"\ndescription = \"d\"\n[targets.ai.prefilter]\nkinds = [\"photo\"]\n";
+        for text in [filter, prefilter] {
+            let m = parse_err(text);
+            assert!(m.contains("`kinds`"), "{m}");
+            assert!(m.contains("match = \"@photo\""), "{m}");
+        }
+    }
+
+    #[test]
+    fn old_name_key_is_rejected_with_a_hint() {
+        let filter =
+            "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.filters]]\nname = \"*\"\n";
+        let prefilter = "[[targets.ai]]\nname = \"t\"\ndescription = \"d\"\n[targets.ai.prefilter]\nname = \"*\"\n";
+        for text in [filter, prefilter] {
+            let m = parse_err(text);
+            assert!(m.contains("unknown field `name`"), "{m}");
+            assert!(m.contains("use `match`"), "{m}");
+        }
+        let output = "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.outputs]]\ndir = \"/x\"\nname = [\"capture-date\"]\n";
+        let m = parse_err(output);
+        assert!(m.contains("use `rename`"), "{m}");
+        assert!(!m.contains("use `match`"), "{m}");
+    }
+
+    #[test]
+    fn new_match_and_rename_keys_parse() {
+        let c = load_str(&short_form_config("", "[]", r#"["capture-date"]"#)).unwrap();
+        let t = &c.targets.after_ai[0];
+        assert!(t.filters[0].matches.is_some());
+        assert_eq!(t.outputs[0].rename.len(), 1);
+    }
+
+    #[test]
+    fn removed_ai_instructions_are_rejected() {
+        for field in ["instructions", "instructions_file"] {
+            let m = parse_err(&format!("[ai]\n{field} = \"x\"\n"));
+            assert!(m.contains(&format!("`{field}`")), "{m}");
+            // The error points to what replaced it.
+            assert!(m.contains("ai_prefix"), "{m}");
+        }
+    }
+
+    fn parse_err(text: &str) -> String {
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("g.toml");
+        std::fs::write(&p, text).unwrap();
+        match Config::load(&p) {
+            Err(crate::Error::Config(m)) => m,
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn unknown_fields_are_rejected() {
+        // A typo must not silently fall back to a default.
+        let m = parse_err("[content_presets.P]\nkind = \"photo\"\nqualty = 70\n");
+        assert!(m.contains("qualty"), "{m}");
+        let m = parse_err("[content_presets.V]\nkind = \"video\"\ncrf_ = 30\n");
+        assert!(m.contains("crf_"), "{m}");
+        let m = parse_err("[content_presets.M]\nkind = \"metadata\"\nwrite_date = true\n");
+        assert!(m.contains("write_date"), "{m}");
+        let m = parse_err("[content_presets.A]\nkind = \"audio\"\ncodec = \"opus\"\nkpbs = 9\n");
+        assert!(m.contains("kpbs"), "{m}");
+        let m = parse_err("[content_presets.N]\nkind = \"png\"\nlevl = 2\n");
+        assert!(m.contains("levl"), "{m}");
+        let m = parse_err("[name_presets.N]\ntemplate = \"{stem}\"\nskipif = \"x\"\n");
+        assert!(m.contains("skipif"), "{m}");
+        let m = parse_err("[[sources]]\nid = \"s\"\npath = \"/x\"\nrecursiv = true\n");
+        assert!(m.contains("recursiv"), "{m}");
+        let m = parse_err("[ai]\nmodle = \"x\"\n");
+        assert!(m.contains("modle"), "{m}");
+        let m = parse_err("[target]\n");
+        assert!(m.contains("target"), "{m}");
+        let m = parse_err(
+            "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.outputs]]\ndir = \"/x\"\ncontnet = []\n",
+        );
+        assert!(m.contains("contnet"), "{m}");
+        let m = parse_err(
+            "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.filters]]\nmatch = \"*\"\nkind = []\n",
+        );
+        assert!(m.contains("kind"), "{m}");
+        let m = parse_err(
+            "[[targets.ai]]\nname = \"t\"\ndescription = \"d\"\n[targets.ai.prefilter]\nmatc = \"x\"\n",
+        );
+        assert!(m.contains("matc"), "{m}");
+        let m = parse_err(
+            "[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.outputs]]\ndir = \"/x\"\nrename = [{ mask = \"*\", preset = \"p\", x = 1 }]\n",
+        );
+        assert!(m.contains("`x`"), "{m}");
+    }
+
+    #[test]
+    fn unsafe_name_templates_are_rejected_at_load() {
+        for t in [
+            "../x.{ext}",
+            "/abs/{stem}.{ext}",
+            "a//b.{ext}",
+            "a\\\\b.{ext}",
+        ] {
+            let m = parse_err(&format!(
+                "[name_presets.\"With folders\"]\ntemplate = \"{t}\"\n"
+            ));
+            assert!(m.contains("With folders"), "{t}: {m}");
+        }
+        // Folders below the output directory are fine.
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("g.toml");
+        std::fs::write(
+            &p,
+            "[name_presets.F]\ntemplate = \"{date:YYYY}/{date:MM}/{stem}.{ext}\"\n",
+        )
+        .unwrap();
+        Config::load(&p).unwrap();
+    }
+
+    #[test]
+    fn bad_source_ids_are_rejected_at_load() {
+        for id in ["", "a/b", "a\\\\b", ".", ".."] {
+            let m = parse_err(&format!("[[sources]]\nid = \"{id}\"\npath = \"/x\"\n"));
+            assert!(m.contains("source id"), "{id}: {m}");
+        }
+    }
+
+    #[test]
+    fn folder_template_with_skip_if_is_warned_about() {
+        let mut c = Config::default();
+        let p = |t: &str, skip: Option<&str>| NamePreset {
+            mask: None,
+            template: t.into(),
+            date: DateSource::Capture,
+            skip_if: skip.map(|s| MaskExpr::parse(s).unwrap()),
+            normalize_ext: false,
+        };
+        c.name_presets
+            .insert("Folders".into(), p("{date:YYYY}/{stem}.{ext}", Some("^2")));
+        c.name_presets
+            .insert("Flat".into(), p("{date}.{ext}", Some("^2")));
+        c.name_presets.insert(
+            "Folders no skip".into(),
+            p("{date:YYYY}/{stem}.{ext}", None),
+        );
+        let w = c.warnings();
+        assert_eq!(w.len(), 1, "{w:?}");
+        assert!(
+            w[0].contains("Folders") && w[0].contains("skip_if"),
+            "{w:?}"
+        );
+        assert!(example().warnings().is_empty());
+    }
+
+    fn err(c: &Config) -> String {
+        match c.validate() {
+            Err(crate::Error::Config(m)) => m,
+            other => panic!("expected Config error, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn validate_rejects_duplicate_target_name() {
+        let mut c = example();
+        let dup = c.targets.before_ai[0].clone();
+        c.targets.after_ai.push(dup.clone());
+        assert!(err(&c).contains(&dup.name));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_source() {
+        let mut c = example();
+        c.targets.before_ai[0].filters[0].sources = vec!["nope".into()];
+        assert!(err(&c).contains("nope"));
+        let mut c = example();
+        c.targets.ai[0].sources = vec!["nope2".into()];
+        assert!(err(&c).contains("nope2"));
+    }
+
+    #[test]
+    fn validate_rejects_unknown_presets() {
+        let mut c = example();
+        c.targets.after_ai[0].outputs[0].content[0].preset = "ghost".into();
+        assert!(err(&c).contains("ghost"));
+        let mut c = example();
+        c.targets.after_ai[0].outputs[0].rename.push(PipeStep {
+            mask: Some(MaskExpr::parse("*").unwrap()),
+            preset: "ghost2".into(),
+        });
+        assert!(err(&c).contains("ghost2"));
+    }
+
+    #[test]
+    fn validate_rejects_empty_ai_description() {
+        let mut c = example();
+        c.targets.ai[0].description = "  ".into();
+        assert!(err(&c).contains(&c.targets.ai[0].name));
+    }
+
+    /// The effective mask of a content step, as the plan resolves it.
+    fn content_mask(c: &Config, st: &PipeStep) -> MaskExpr {
+        let preset = c.content_preset(&st.preset).unwrap();
+        st.mask.clone().unwrap_or_else(|| preset.mask_or_default())
+    }
+
+    fn short_form_config(extra: &str, content: &str, name: &str) -> String {
+        format!(
+            r#"{extra}
+[[sources]]
+id = "s"
+path = "/tmp/s"
+
+[[targets.after_ai]]
+name = "t"
+
+[[targets.after_ai.filters]]
+sources = ["s"]
+match = "*"
+
+[[targets.after_ai.outputs]]
+dir = "/tmp/o"
+content = {content}
+rename = {name}
+"#
+        )
+    }
+
+    #[test]
+    fn short_step_uses_the_preset_mask() {
+        let c = load_str(&short_form_config(
+            "",
+            r#"["meta-full", "avif-high", "av1-high"]"#,
+            r#"["capture-date"]"#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let o = &c.targets.after_ai[0].outputs[0];
+        assert!(o.content.iter().all(|s| s.mask.is_none()));
+        let photo = content_mask(&c, &o.content[1]);
+        assert!(photo.matches("a.HEIC", &c) && photo.matches("b.jpg", &c));
+        assert!(!photo.matches("c.mp4", &c));
+        let video = content_mask(&c, &o.content[2]);
+        assert!(video.matches("c.mp4", &c) && !video.matches("a.jpg", &c));
+        assert!(o.rename[0].mask.is_none());
+    }
+
+    #[test]
+    fn table_step_overrides_the_mask() {
+        let c = load_str(&short_form_config(
+            "",
+            r#"[{ mask = "*.png", preset = "avif-high" }, { preset = "meta-full" }]"#,
+            "[]",
+        ))
+        .unwrap();
+        let o = &c.targets.after_ai[0].outputs[0];
+        let m = content_mask(&c, &o.content[0]);
+        assert!(m.matches("a.png", &c) && !m.matches("a.jpg", &c));
+        assert!(o.content[1].mask.is_none());
+    }
+
+    #[test]
+    fn user_preset_mask_is_its_default() {
+        let c = load_str(&short_form_config(
+            "[content_presets.mine]\nkind = \"photo\"\nmask = \"*.tiff\"\n\n[name_presets.nm]\ntemplate = \"{stem}.{ext}\"\nmask = \"*.mov\"\n",
+            r#"["mine"]"#,
+            r#"["nm"]"#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let o = &c.targets.after_ai[0].outputs[0];
+        let m = content_mask(&c, &o.content[0]);
+        assert!(m.matches("x.TIFF", &c) && !m.matches("x.jpg", &c));
+        let nm = c.name_preset("nm").unwrap().mask_or_default();
+        assert!(nm.matches("a.mov", &c) && !nm.matches("a.jpg", &c));
+    }
+
+    #[test]
+    fn default_masks_per_kind() {
+        use crate::presets::{builtin_content_preset, builtin_name_preset};
+        let m = |n: &str| builtin_content_preset(n).unwrap().mask_or_default();
+        let c = Config::default();
+        assert!(
+            m("meta-full").matches("anything.xyz", &c) && m("meta-dates").matches("README", &c)
+        );
+        assert!(m("png-optipng").matches("a.PNG", &c) && !m("png-optipng").matches("a.jpg", &c));
+        assert!(m("opus-128").matches("a.flac", &c) && !m("opus-128").matches("a.mp4", &c));
+        assert!(m("webp-low").matches("a.heif", &c) && !m("webp-low").matches("a.png", &c));
+        assert!(m("av1-high").matches("a.mkv", &c) && m("av1-high").matches("a.m4v", &c));
+        assert!(
+            builtin_name_preset("capture-date")
+                .unwrap()
+                .mask_or_default()
+                .matches("zzz", &c)
+        );
+    }
+
+    #[test]
+    fn short_form_round_trips_as_a_string() {
+        let c = load_str(&short_form_config(
+            "",
+            r#"["meta-full", { mask = "*.jpg", preset = "avif-high" }]"#,
+            r#"["capture-date"]"#,
+        ))
+        .unwrap();
+        let text = toml::to_string(&c).unwrap();
+        assert!(text.contains("\"meta-full\""), "{text}");
+        assert!(!text.contains("preset = \"meta-full\""), "{text}");
+        assert!(text.contains("\"capture-date\""), "{text}");
+        let back: Config = toml::from_str(&text).unwrap();
+        let o = &back.targets.after_ai[0].outputs[0];
+        assert_eq!(o.content, c.targets.after_ai[0].outputs[0].content);
+        assert!(o.content[0].mask.is_none() && o.content[1].mask.is_some());
+    }
+
+    #[test]
+    fn unknown_short_preset_is_a_validate_error() {
+        let c = load_str(&short_form_config("", r#"["ghost-preset"]"#, "[]")).unwrap();
+        assert!(err(&c).contains("ghost-preset"));
+        let c = load_str(&short_form_config("", "[]", r#"["ghost-name"]"#)).unwrap();
+        assert!(err(&c).contains("ghost-name"));
+    }
+
+    /// A one-filter config; `extra` holds top-level tables such as `[masks]`.
+    fn masks_config(extra: &str, filter: &str, step: &str) -> String {
+        format!(
+            r#"{extra}
+[[sources]]
+id = "s"
+path = "/tmp/s"
+
+[[targets.after_ai]]
+name = "t"
+
+[[targets.after_ai.filters]]
+sources = ["s"]
+{filter}
+
+[[targets.after_ai.outputs]]
+dir = "/tmp/o"
+content = [{step}]
+"#
+        )
+    }
+
+    #[test]
+    fn mask_reference_resolves() {
+        let c = load_str(&masks_config("", r#"match = "@photo""#, r#""avif-high""#)).unwrap();
+        c.validate().unwrap();
+        let f = &c.targets.after_ai[0].filters[0];
+        let n = f.matches.as_ref().unwrap();
+        assert!(n.matches("a.WEBP", &c) && n.matches("b.tiff", &c));
+        assert!(!n.matches("c.mp4", &c));
+    }
+
+    #[test]
+    fn mask_list_is_or_and_exclude_takes_references() {
+        let c = load_str(&masks_config(
+            "",
+            r#"match = ["@photo", "@video", "*.txt"]
+exclude = ["@raw", "*.tmp.*"]"#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let f = &c.targets.after_ai[0].filters[0];
+        let n = f.matches.as_ref().unwrap();
+        assert!(n.matches("a.jpg", &c) && n.matches("b.MOV", &c) && n.matches("c.txt", &c));
+        assert!(!n.matches("d.png", &c));
+        assert!(f.exclude.matches("x.CR2", &c) && f.exclude.matches("a.tmp.jpg", &c));
+        assert!(!f.exclude.matches("x.jpg", &c));
+    }
+
+    #[test]
+    fn nested_mask_references() {
+        let c = load_str(&masks_config(
+            "[masks]\nshots = \"*screenshot*.{png,jpg}\"\nvisual = [\"@shots\", \"@video\"]\n",
+            r#"match = "@visual""#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let n = c.targets.after_ai[0].filters[0].matches.clone().unwrap();
+        assert!(n.matches("Screenshot_1.PNG", &c) && n.matches("v.mkv", &c));
+        assert!(!n.matches("IMG_1.jpg", &c));
+        // A built-in one is nested too: media = photo + video + png.
+        let media = MaskExpr::parse("@media").unwrap();
+        assert!(media.matches("a.png", &c) && media.matches("a.avi", &c));
+        assert!(!media.matches("a.cr2", &c));
+    }
+
+    #[test]
+    fn mask_cycle_is_a_validate_error() {
+        let c = load_str(&masks_config(
+            "[masks]\na = \"@b\"\nb = [\"*.x\", \"@c\"]\nc = \"@a\"\n",
+            r#"match = "@a""#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        let m = err(&c);
+        assert!(m.contains("cycle") && m.contains("a -> b -> c -> a"), "{m}");
+        // Matching a cyclic mask on an unvalidated config still ends.
+        assert!(!MaskExpr::parse("@a").unwrap().matches("q.y", &c));
+    }
+
+    #[test]
+    fn unknown_mask_reference_is_a_validate_error() {
+        let slots = [
+            (r#"match = "@nope1""#, r#""meta-full""#, "nope1"),
+            (
+                "match = \"*\"\nexclude = [\"@nope2\"]",
+                r#""meta-full""#,
+                "nope2",
+            ),
+            (
+                r#"match = "*""#,
+                r#"{ mask = ["@nope3"], preset = "meta-full" }"#,
+                "nope3",
+            ),
+        ];
+        for (filter, step, who) in slots {
+            let c = load_str(&masks_config("", filter, step)).unwrap();
+            assert!(err(&c).contains(&format!("@{who}")), "{filter} {step}");
+        }
+        let c = load_str(&masks_config(
+            "[content_presets.p]\nkind = \"photo\"\nmask = \"@nope4\"\n",
+            r#"match = "*""#,
+            r#""p""#,
+        ))
+        .unwrap();
+        assert!(err(&c).contains("@nope4"));
+        let c = load_str(&masks_config(
+            "[masks]\na = \"@nope5\"\n",
+            r#"match = "*""#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        assert!(err(&c).contains("@nope5"));
+    }
+
+    #[test]
+    fn negation_in_exclude_or_skip_if_is_a_validate_error() {
+        let c = load_str(&masks_config(
+            "",
+            "match = \"*\"\nexclude = [\"*.raw\", \"!*.jpg\"]",
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        let m = err(&c);
+        assert!(
+            m.contains("exclude") && m.contains("'!*.jpg'") && m.contains("match"),
+            "{m}"
+        );
+        let c = load_str(
+            "[[sources]]\nid = \"s\"\npath = \"/tmp/s\"\n\n[[targets.ai]]\nname = \"t\"\n\
+             description = \"d\"\n[targets.ai.prefilter]\nexclude = [\"!@raw\"]\n",
+        )
+        .unwrap();
+        let m = err(&c);
+        assert!(
+            m.contains("prefilter") && m.contains("exclude") && m.contains("'!@raw'"),
+            "{m}"
+        );
+        let mut c = Config::default();
+        c.name_presets.insert(
+            "n".into(),
+            NamePreset {
+                mask: None,
+                template: "{date}.{ext}".into(),
+                date: DateSource::Capture,
+                skip_if: Some(MaskExpr::parse("!*.jpg").unwrap()),
+                normalize_ext: false,
+            },
+        );
+        let m = err(&c);
+        assert!(
+            m.contains("skip_if") && m.contains("'!*.jpg'") && m.contains("'n'"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn user_mask_named_like_a_builtin_is_an_error() {
+        let text = masks_config(
+            "[masks]\nphoto = \"*.jpg\"\n",
+            r#"match = "*""#,
+            r#""meta-full""#,
+        );
+        let d = tempfile::tempdir().unwrap();
+        let p = d.path().join("g.toml");
+        std::fs::write(&p, &text).unwrap();
+        let m = match Config::load(&p) {
+            Err(crate::Error::Config(m)) => m,
+            other => panic!("expected Config error, got {other:?}"),
+        };
+        assert!(m.contains("mask 'photo'"), "{m}");
+    }
+
+    #[test]
+    fn preset_default_mask_is_a_reference() {
+        use crate::presets::builtin_content_preset;
+        let c = Config::default();
+        let m = builtin_content_preset("avif-high")
+            .unwrap()
+            .mask_or_default();
+        assert_eq!(m.source(), "@photo-original");
+        assert!(m.matches("a.heic", &c) && !m.matches("a.webp", &c));
+        let m = builtin_content_preset("opus-96").unwrap().mask_or_default();
+        assert_eq!(m.source(), "@audio & !*.opus");
+        assert!(m.matches("a.flac", &c) && !m.matches("a.opus", &c));
+        for (preset, own, other) in [
+            ("mp3-192", "mp3", "opus"),
+            ("aac-128", "m4a", "mp3"),
+            ("flac", "flac", "wav"),
+        ] {
+            let m = builtin_content_preset(preset).unwrap().mask_or_default();
+            assert!(!m.matches(&format!("a.{own}"), &c), "{preset}");
+            assert!(m.matches(&format!("a.{other}"), &c), "{preset}");
+        }
+    }
+
+    #[test]
+    fn masks_round_trip() {
+        let c = load_str(&masks_config(
+            "[masks]\nshots = \"*screenshot*\"\nboth = [\"@shots\", \"@raw\"]\n",
+            "match = [\"@photo\", \"@video\"]\nexclude = \"@raw\"",
+            r#"{ mask = ["@photo", "*.tif"], preset = "avif-high" }, "meta-full""#,
+        ))
+        .unwrap();
+        let text = toml::to_string(&c).unwrap();
+        let back: Config = toml::from_str(&text).unwrap();
+        assert_eq!(back.masks, c.masks);
+        let (f, g) = (
+            &back.targets.after_ai[0].filters[0],
+            &c.targets.after_ai[0].filters[0],
+        );
+        assert_eq!(f.matches, g.matches);
+        assert_eq!(f.exclude, g.exclude);
+        assert_eq!(f.exclude.source(), "@raw");
+        assert_eq!(
+            back.targets.after_ai[0].outputs[0].content,
+            c.targets.after_ai[0].outputs[0].content
+        );
+        assert!(text.contains("\"@shots\""), "{text}");
+    }
+
+    #[test]
+    fn skip_if_takes_references_and_lists() {
+        use crate::name::{NameCtx, apply_name_pipe};
+        let c = load_str(&masks_config(
+            "[name_presets.p]\ntemplate = \"x_{stem}.{ext}\"\ndate = \"none\"\nskip_if = [\"@dated\", \"*.tmp\"]\n",
+            r#"match = "*""#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let p = c.name_preset("p").unwrap();
+        let run = |n: &str| {
+            let steps = [(MaskExpr::parse("*").unwrap(), "p", p)];
+            apply_name_pipe(&c, &steps, n, &NameCtx::default())
+                .unwrap()
+                .final_name
+        };
+        assert_eq!(run("20260101_120000.jpg"), "20260101_120000.jpg");
+        assert_eq!(run("a.tmp"), "a.tmp");
+        assert_eq!(run("IMG_1.jpg"), "x_IMG_1.jpg");
+        // The built-in date presets skip by `@dated`.
+        let b = c.name_preset("capture-date").unwrap();
+        assert_eq!(b.skip_if.as_ref().unwrap().source(), "@dated");
+    }
+
+    #[test]
+    fn unknown_skip_if_reference_and_empty_lists_are_errors() {
+        let c = load_str(&masks_config(
+            "[name_presets.p]\ntemplate = \"{stem}.{ext}\"\nskip_if = \"@nope6\"\n",
+            r#"match = "*""#,
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        assert!(err(&c).contains("@nope6"));
+        for (extra, filter) in [
+            ("[masks]\nempty = []\n", r#"match = "*""#),
+            ("", r#"match = []"#),
+        ] {
+            let c = load_str(&masks_config(extra, filter, r#""meta-full""#)).unwrap();
+            assert!(err(&c).contains("empty mask list"), "{extra}{filter}");
+        }
+        // An empty exclude is just "exclude nothing".
+        let c = load_str(&masks_config(
+            "",
+            "match = \"*\"\nexclude = []",
+            r#""meta-full""#,
+        ))
+        .unwrap();
+        c.validate().unwrap();
+    }
+
+    #[test]
+    fn too_deep_reference_chain_is_a_validate_error() {
+        let mut extra = String::from("[masks]\n");
+        for i in 0..20 {
+            extra.push_str(&format!("m{i} = \"@m{}\"\n", i + 1));
+        }
+        extra.push_str("m20 = \"*.x\"\n");
+        let c = load_str(&masks_config(&extra, r#"match = "@m0""#, r#""meta-full""#)).unwrap();
+        let m = err(&c);
+        assert!(m.contains("deeper than"), "{m}");
+    }
+
+    #[test]
+    fn old_builtin_preset_name_gets_a_rename_hint() {
+        let c = load_str(&masks_config("", r#"match = "*""#, r#""AVIF high""#)).unwrap();
+        let m = err(&c);
+        assert!(
+            m.contains("'AVIF high'") && m.contains("'avif-high'"),
+            "{m}"
+        );
+        let c = load_str(&masks_config("", r#"match = "*""#, r#""ghost-x""#)).unwrap();
+        assert!(!err(&c).contains("renamed"));
+    }
+
+    const BUNDLE_BASE: &str = r#"
+[[sources]]
+id = "s"
+path = "/tmp/s"
+"#;
+
+    fn bundle_err(extra: &str) -> String {
+        load_str(&format!("{BUNDLE_BASE}{extra}"))
+            .and_then(|c| c.validate())
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn bundle_parses_with_both_step_forms() {
+        let c = load_str(&format!(
+            "{BUNDLE_BASE}\n[content_presets.pack]\nkind = \"bundle\"\nsteps = [\"avif-high\", {{ mask = \"*.png\", preset = \"png-avif\" }}]\n"
+        ))
+        .unwrap();
+        c.validate().unwrap();
+        let ContentPreset::Bundle(b) = &c.content_presets["pack"] else {
+            panic!("not a bundle")
+        };
+        assert_eq!(b.steps.len(), 2);
+        assert!(b.steps[0].mask.is_none() && b.steps[1].mask.is_some());
+    }
+
+    #[test]
+    fn bundle_with_a_mask_is_an_error() {
+        let e = bundle_err(
+            "\n[content_presets.pack]\nkind = \"bundle\"\nmask = \"*.png\"\nsteps = [\"png-avif\"]\n",
+        );
+        assert!(e.contains("pack") && e.contains("no mask"), "{e}");
+    }
+
+    #[test]
+    fn bundle_step_with_a_mask_on_a_bundle_is_an_error() {
+        let e = bundle_err(
+            "\n[[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.outputs]]\ndir = \"/tmp/o\"\ncontent = [{ mask = \"*.png\", preset = \"compress-all\" }]\n",
+        );
+        assert!(e.contains("compress-all") && e.contains("no mask"), "{e}");
+    }
+
+    #[test]
+    fn bundle_cycles_unknown_steps_and_empty_are_errors() {
+        let e = bundle_err(
+            "\n[content_presets.a]\nkind = \"bundle\"\nsteps = [\"b\"]\n[content_presets.b]\nkind = \"bundle\"\nsteps = [\"a\"]\n",
+        );
+        assert!(e.contains("bundle cycle: "), "{e}");
+        let e = bundle_err("\n[content_presets.a]\nkind = \"bundle\"\nsteps = [\"nope\"]\n");
+        assert!(e.contains("unknown content preset 'nope'"), "{e}");
+        let e = bundle_err("\n[content_presets.a]\nkind = \"bundle\"\nsteps = []\n");
+        assert!(e.contains("no steps"), "{e}");
+        let e = bundle_err(
+            "\n[content_presets.a]\nkind = \"bundle\"\nsteps = [\"avif-high\"]\nmaks = 1\n",
+        );
+        assert!(e.contains("maks"), "{e}");
+    }
+
+    #[test]
+    fn bundle_may_not_reuse_a_builtin_name() {
+        let e = bundle_err(
+            "\n[content_presets.compress-all]\nkind = \"bundle\"\nsteps = [\"avif-high\"]\n",
+        );
+        assert!(e.contains("compress-all") && e.contains("built-in"), "{e}");
+    }
+
+    #[test]
+    fn builtin_bundles_expand_to_known_presets() {
+        let c = Config::default();
+        for (name, want) in [
+            (
+                "compress-all",
+                ["avif-high", "png-avif", "webp-avif", "av1-high"].as_slice(),
+            ),
+            ("compress-photos", &["avif-high", "png-avif", "webp-avif"]),
+            (
+                "compress-fast",
+                &["avif-fast", "png-avif", "webp-avif", "av1-fast"],
+            ),
+        ] {
+            let got: Vec<_> = c
+                .expand_content("t", &[PipeStep::named(name)])
+                .unwrap()
+                .into_iter()
+                .map(|e| e.step.preset)
+                .collect();
+            assert_eq!(got, want, "{name}");
+        }
+    }
+}
