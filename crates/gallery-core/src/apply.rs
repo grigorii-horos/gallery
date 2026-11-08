@@ -2354,11 +2354,16 @@ mod tests {
             .collect();
         assert_eq!(before, after);
         assert_eq!(std::fs::read(&src).unwrap(), b"original");
+        // Windows locks are mandatory: the file cannot be read while held.
+        #[cfg(unix)]
         assert_eq!(std::fs::read_to_string(&lock).unwrap(), me);
         // Undo of the same plan waits for it too.
         let rp = report_path(&plan);
         std::fs::write(&rp, "{}").unwrap();
-        assert!(matches!(crate::undo::undo(&rp), Err(Error::Plan(m)) if m.contains(&me)));
+        assert!(matches!(
+            crate::undo::undo(&rp),
+            Err(Error::Plan(m)) if m.contains("plan.lock") && (!cfg!(unix) || m.contains(&me))
+        ));
         std::fs::remove_file(&rp).unwrap();
 
         // Once it is released, a run takes the lock and releases it at the end.

@@ -176,7 +176,7 @@ fn video_keeps_gps() {
         out["UserData:GPSCoordinates"],
         orig["UserData:GPSCoordinates"]
     );
-    assert_eq!(out["Keys:Make"], "Xiaomi");
+    assert_eq!(out["Keys:Make"], "Xiaomi", "{out:#}");
     assert_eq!(out["Keys:Model"], "23078PND5G");
 }
 

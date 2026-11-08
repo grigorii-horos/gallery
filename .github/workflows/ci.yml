@@ -89,6 +89,8 @@ jobs:
       - name: Tool versions
         continue-on-error: true
         run: |
+          exiftool -ver || true
+          ffmpeg -version | head -1 || true
           for t in ffmpeg exiftool avifenc magick optipng; do
             if command -v "$t" >/dev/null; then echo "found $t"; else echo "MISSING $t (its tests will skip)"; fi
           done
