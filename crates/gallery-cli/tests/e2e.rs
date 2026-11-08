@@ -752,7 +752,7 @@ fn apply_dry_run_prints_the_estimate() {
         .clone();
     let text = String::from_utf8(out).unwrap();
     assert!(text.contains("Estimate (rough estimate):"), "{text}");
-    assert!(text.contains("docs: 1 files"), "{text}");
+    assert!(text.contains("docs: 1 file,"), "{text}");
     assert!(text.contains("to trash: 1"), "{text}");
     // A dry run writes nothing.
     assert!(!root.join("out").exists());

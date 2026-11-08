@@ -226,7 +226,7 @@ pub fn plural_category(code: &str, n: u64) -> &'static str {
             };
             if single {
                 "one"
-            } else if n != 0 && n % 1_000_000 == 0 {
+            } else if n != 0 && n.is_multiple_of(1_000_000) {
                 "many"
             } else {
                 "other"

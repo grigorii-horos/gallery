@@ -187,4 +187,30 @@ mod tests {
         save(&p, &s);
         assert_eq!(load(&p), s);
     }
+
+    #[test]
+    fn notices_follow_the_language_and_its_plural_forms() {
+        let n = |loc: &str, k: usize| gallery_core::i18n::with_locale(loc, || super::new_files(k));
+        assert_eq!(n("en", 1), "1 new file");
+        assert_eq!(n("en", 5), "5 new files");
+        assert_eq!(n("ru", 1), "1 новый файл");
+        assert_eq!(n("ru", 3), "3 новых файла");
+        assert_eq!(n("ru", 5), "5 новых файлов");
+        assert_eq!(n("pl", 22), "22 nowe pliki");
+        assert_eq!(n("zh-CN", 4), "4 个新文件");
+        let mut st = NotifyState::default();
+        let text = gallery_core::i18n::with_locale("de", || decide(&mut st, 3, 1, 100_000));
+        assert_eq!(
+            text.as_deref(),
+            Some("Gallery: 3 neue Dateien zu sortieren")
+        );
+        let paused = gallery_core::i18n::with_locale("fr", || {
+            decide_pause(&mut NotifyState::default(), &["Photos".into()], 1)
+        });
+        assert!(
+            paused
+                .unwrap()
+                .starts_with("Gallery : Syncthing en pause : Photos")
+        );
+    }
 }

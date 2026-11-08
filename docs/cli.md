@@ -27,12 +27,23 @@ gallery <command> [options]
 | [`examples`](#examples) | List or clear the AI's learned corrections | `clear` deletes them |
 | [`install-desktop`](#install-desktop) | Write the app-menu entry for `gallery-gui` | writes two files |
 
+## Language
+
+`gallery --lang <code> <command>` sets the language of `--help` and of the messages and output
+(`en`, `ru`, `uk`, `de`, `fr`, `es`, `pt-BR`, `it`, `pl`, `zh-CN`). Without it the language comes
+from `LC_ALL`, `LC_MESSAGES`, `LANG` (first one set; `C`/`POSIX` count as unset), else English.
+`uk_UA` is `uk`, `pt_PT` is `pt-BR`, `zh_TW` is `zh-CN`; an unsupported language is English.
+Machine-readable output is not translated: `--json`, and the first line of `pending` (`pending: N`).
+When `[ai] language` is unset, the AI writes its reasons in this language too. Errors from clap
+itself (an unknown flag, a missing argument) stay in English.
+
 ## Environment
 
 | Variable | Effect |
 |---|---|
 | `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY` | AI key (first one that is set). Otherwise `~/.config/gallery/api-key` is read if only its owner can access it (mode `0600`); a file with wider permissions is ignored with a warning. |
 | `GALLERY_TRASH=folder` | Move sources to `<source>/.gallery-trash/<run>/` instead of the system trash. Handy on a server without a desktop trash. The GUI's pilot before/after view can only read trashed originals from this folder (the system trash is not searched). |
+| `LC_ALL`, `LC_MESSAGES`, `LANG` | Language of the output when `--lang` is not given (see [Language](#language)). |
 | `GALLERY_TOOLS_DIR` | Look for `ffmpeg`, `ffprobe`, `exiftool`, `avifenc`, `magick`, `optipng` here first, then in `PATH`. |
 
 ## Exit codes

@@ -152,7 +152,7 @@ a doubtful frame is better left uncategorized\n\
 ANSWER FORMAT:\n\
 - category — exactly one category name from the list (no description); \
 NONE — no category fits;\n\
-- reason — the reason in 3-6 words, written in en (\"Lidl receipt\", \"ESP32 board close-up\");\n\
+- reason — the reason in 3-6 words, written in English (\"Lidl receipt\", \"ESP32 board close-up\");\n\
 - confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n";
     assert_eq!(system_prompt(&cats(), &SourcePrompt::default()), expected);
     // Blank texts add nothing.
@@ -456,7 +456,7 @@ fn system_prompt_asks_for_the_reason_in_the_configured_language() {
     assert!(ru.contains("written in ru"), "{ru}");
     // Blank means the default, English.
     let en = system_prompt(&cats(), &SourcePrompt::default());
-    assert!(en.contains("written in en"), "{en}");
+    assert!(en.contains("written in English"), "{en}");
     assert_eq!(system_prompt(&cats(), &with("  ")), en);
     assert_ne!(ru, en);
 }

@@ -26,6 +26,7 @@ It is a desktop app (Tauri v2: Rust core + React UI) and a command-line tool bui
 - [AI setup](#ai-setup)
 - [Server workflow](#server-workflow)
 - [CLI reference](#cli-reference)
+- [Languages](#languages)
 - [Documentation](#documentation) · [License](#license)
 
 ## Highlights
@@ -211,7 +212,7 @@ The AI stage is optional: without AI targets (`[[targets.ai]]`) Gallery never co
    [ai]
    model = "claude-sonnet-5-5"   # default
    effort = "low"                # default
-   language = "en"               # language of the model's short reasons (name or code: "ru", "Ukrainian")
+   language = "ru"               # language of the model's short reasons (name or code); unset = the interface language
    examples = 20                 # your latest corrections shown to the AI; 0 turns learning off
    ```
 5. **Cost.** Answers are cached per file, model and prompt, so each file is asked about once.
@@ -266,6 +267,30 @@ Plan on the desktop (where the AI and your decisions live), apply on the machine
 Exit codes: `0` ok · `1` error (for `check`: a required tool is missing) · `2` an `apply` item failed
 or the run stopped on discrepancies · `130` stopped with Ctrl-C. Full reference with every flag:
 [docs/cli.md](docs/cli.md).
+
+## Languages
+
+The GUI and the command line speak ten languages: English (the source and the fallback),
+Русский, Українська, Deutsch, Français, Español, Português (Brasil), Italiano, Polski and 简体中文.
+
+- **GUI:** *Settings → Language* lists the ten by their own names, plus *System*. The choice
+  applies at once, with no restart: the interface, the messages from the core, the tray menu and
+  the notifications. It is stored in the GUI's `settings.json`. *System* (the default) follows the
+  operating system's language and falls back to English.
+- **CLI:** `gallery --lang ru presets` (global flag), else `LC_ALL`, `LC_MESSAGES`, `LANG`, else
+  English. `--help` and the output are translated; the first line of `gallery pending` stays
+  `pending: N` in every language, and `--json` output is never translated.
+- **Matching:** the exact language first (`uk_UA` → Ukrainian, `ru_UA` → Russian), then the one
+  regional variant there is (`pt_PT` → Brazilian Portuguese, `zh_TW` → Simplified Chinese);
+  anything else is English.
+- **AI reasons:** when `[ai] language` is not set, the model writes its short reasons in the
+  interface language (the CLI's or the GUI's); an explicit `language` always wins.
+- **Not translated:** preset and mask names, config keys, file paths and log lines.
+  Screenshots stay in English.
+
+Translations live in `locales/<lang>.json` (messages of the Rust crates) and
+`ui/src/i18n/locales/<lang>.json` (the interface). Tests fail if a language lacks a key, has an
+extra one, uses other placeholders than English or lacks a plural form its language needs.
 
 ## Documentation
 

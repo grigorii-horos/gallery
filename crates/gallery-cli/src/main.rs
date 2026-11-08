@@ -1665,4 +1665,30 @@ mod lang_tests {
             Some(())
         });
     }
+
+    #[test]
+    fn every_language_localizes_the_whole_help() {
+        for l in gallery_core::i18n::LANGUAGES {
+            gallery_core::i18n::with_locale(l.code, || {
+                let mut cmd = command();
+                cmd.build();
+                let help = cmd.render_long_help().to_string();
+                assert!(help.contains("--lang"), "{}", l.code);
+                // Every subcommand's own help carries its translated text.
+                for sub in cmd.get_subcommands() {
+                    let key = format!("cli.{}.about", sub.get_name().replace('-', "_"));
+                    let text = gallery_core::i18n::translate(&key, &[]);
+                    assert!(help.contains(&text), "{} {key}", l.code);
+                }
+                if l.code != "en" {
+                    assert!(
+                        !help.contains("Scan the sources and write a plan"),
+                        "{}",
+                        l.code
+                    );
+                    assert!(!help.contains("Usage:"), "{}", l.code);
+                }
+            });
+        }
+    }
 }

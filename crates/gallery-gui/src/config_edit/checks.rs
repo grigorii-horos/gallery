@@ -552,4 +552,117 @@ mod tests {
         );
         assert_eq!(locate("something else", &d), None);
     }
+
+    /// The editor reads names out of the core's messages through the catalog:
+    /// that must work in every language.
+    #[test]
+    fn locate_finds_names_in_every_language() {
+        use super::super::model::{ContentPresetDraft, MaskDraft, NamePresetDraft, SourceDraft};
+        use gallery_core::t;
+        let mut d = ConfigDraft::default();
+        d.sources.push(SourceDraft {
+            id: "cam".into(),
+            ..Default::default()
+        });
+        for name in ["T", "T"] {
+            d.targets.after_ai.push(TargetDraft {
+                name: name.into(),
+                ..Default::default()
+            });
+        }
+        d.name_presets.push(NamePresetDraft {
+            name: "Np".into(),
+            ..Default::default()
+        });
+        d.content_presets.push(ContentPresetDraft {
+            name: "Cp".into(),
+            ..Default::default()
+        });
+        d.mask_defs.push(MaskDraft {
+            name: "M".into(),
+            items: vec![],
+        });
+        for l in gallery_core::i18n::LANGUAGES {
+            gallery_core::i18n::with_locale(l.code, || {
+                let at = |m: String| locate(&m, &d);
+                let who = |key: &str, name: &str| {
+                    gallery_core::i18n::translate(key, &[("name", name.to_string())])
+                };
+                let here = |what: &str| format!("{}: {what}", l.code);
+                assert_eq!(
+                    at(t!("config.unknown_source", target = "T", id = "x")).as_deref(),
+                    Some("targets.after_ai[0]"),
+                    "{}",
+                    here("unknown_source")
+                );
+                assert_eq!(
+                    at(t!("config.duplicate_target", name = "T")).as_deref(),
+                    Some("targets.after_ai[1]"),
+                    "{}",
+                    here("duplicate_target")
+                );
+                assert_eq!(
+                    at(t!("config.bad_source_id", id = "cam")).as_deref(),
+                    Some("sources[0]"),
+                    "{}",
+                    here("bad_source_id")
+                );
+                assert_eq!(
+                    at(t!("config.ai_both", id = "cam", slot = "ai_prefix")).as_deref(),
+                    Some("sources[0]"),
+                    "{}",
+                    here("ai_both")
+                );
+                assert_eq!(
+                    at(t!(
+                        "config.empty_mask_list",
+                        whose = who("config.who_mask", "M")
+                    ))
+                    .as_deref(),
+                    Some("masks.M"),
+                    "{}",
+                    here("who_mask")
+                );
+                assert_eq!(
+                    at(t!(
+                        "config.veto_negated",
+                        whose = who("config.who_name_preset", "Np"),
+                        item = "!x",
+                        field = "skip_if"
+                    ))
+                    .as_deref(),
+                    Some("name_presets.Np"),
+                    "{}",
+                    here("who_name_preset")
+                );
+                assert_eq!(
+                    at(t!(
+                        "config.bundle_unknown_preset",
+                        name = "Cp",
+                        preset = "zz"
+                    )),
+                    None,
+                    "{}",
+                    here("a bundle message names no draft field")
+                );
+                assert_eq!(
+                    at(t!("config.mask_cycle", cycle = "M -> N -> M")).as_deref(),
+                    Some("masks.M"),
+                    "{}",
+                    here("mask_cycle")
+                );
+                assert_eq!(
+                    gallery_core::i18n::extract(
+                        "config.warn_folders_skip_if",
+                        "name",
+                        &t!("config.warn_folders_skip_if", name = "Np")
+                    )
+                    .as_deref(),
+                    Some("Np"),
+                    "{}",
+                    here("warn_folders_skip_if")
+                );
+            });
+        }
+    }
 }

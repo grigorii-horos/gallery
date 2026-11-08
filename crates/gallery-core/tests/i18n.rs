@@ -175,3 +175,200 @@ fn an_explicit_ai_language_wins_over_the_locale() {
     assert!(p.contains("written in Ukrainian"), "{p}");
     assert!(!p.contains("German"), "{p}");
 }
+
+// ---- the catalogs ----
+
+use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
+
+type Catalog = BTreeMap<String, String>;
+
+fn load(code: &str) -> Catalog {
+    let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../../locales/{code}.json"));
+    let text = std::fs::read_to_string(&path).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
+    serde_json::from_str(&text).unwrap_or_else(|e| panic!("{}: {e}", path.display()))
+}
+
+const SUFFIXES: [&str; 6] = ["zero", "one", "two", "few", "many", "other"];
+
+fn base(key: &str) -> &str {
+    for s in SUFFIXES {
+        if let Some(b) = key.strip_suffix(&format!("_{s}")) {
+            return b;
+        }
+    }
+    key
+}
+
+/// `%{name}` placeholders of a message.
+fn placeholders(text: &str) -> BTreeSet<String> {
+    let mut out = BTreeSet::new();
+    let mut rest = text;
+    while let Some(i) = rest.find("%{") {
+        let tail = &rest[i + 2..];
+        let Some(end) = tail.find('}') else { break };
+        out.insert(tail[..end].to_string());
+        rest = &tail[end + 1..];
+    }
+    out
+}
+
+/// Keys of English that are plural (`x_one` + `x_other`).
+fn plural_bases(en: &Catalog) -> BTreeSet<String> {
+    en.keys()
+        .filter(|k| k.ends_with("_one"))
+        .map(|k| base(k).to_string())
+        .collect()
+}
+
+#[test]
+fn every_language_has_every_key_of_english_and_no_other() {
+    let en = load("en");
+    let bases = |c: &Catalog| {
+        c.keys()
+            .map(|k| base(k).to_string())
+            .collect::<BTreeSet<_>>()
+    };
+    for l in LANGUAGES.iter().filter(|l| l.code != "en") {
+        let c = load(l.code);
+        let (want, have) = (bases(&en), bases(&c));
+        let missing: Vec<_> = want.difference(&have).collect();
+        let extra: Vec<_> = have.difference(&want).collect();
+        assert!(missing.is_empty(), "{}: missing {missing:?}", l.code);
+        assert!(extra.is_empty(), "{}: not in English {extra:?}", l.code);
+    }
+}
+
+#[test]
+fn plural_messages_carry_exactly_the_languages_forms() {
+    let en = load("en");
+    for l in LANGUAGES {
+        let c = load(l.code);
+        let need: BTreeSet<&str> = gallery_core::i18n::plural_categories(l.code)
+            .iter()
+            .copied()
+            .collect();
+        for b in plural_bases(&en) {
+            let have: BTreeSet<&str> = SUFFIXES
+                .iter()
+                .copied()
+                .filter(|s| c.contains_key(&format!("{b}_{s}")))
+                .collect();
+            assert_eq!(have, need, "{}: {b}", l.code);
+        }
+    }
+}
+
+#[test]
+fn plain_keys_do_not_look_like_plural_forms() {
+    let en = load("en");
+    let plural = plural_bases(&en);
+    for k in en.keys() {
+        if base(k) == k.as_str() {
+            assert!(!plural.contains(k), "{k}");
+        }
+    }
+}
+
+#[test]
+fn translations_use_the_placeholders_of_english() {
+    let en = load("en");
+    for l in LANGUAGES {
+        for (key, text) in load(l.code) {
+            let b = base(&key);
+            let reference = en
+                .get(&key)
+                .or_else(|| en.get(&format!("{b}_other")))
+                .or_else(|| en.get(b))
+                .unwrap_or_else(|| panic!("{} {key}: not in English", l.code));
+            assert_eq!(
+                placeholders(&text),
+                placeholders(reference),
+                "{} {key}",
+                l.code
+            );
+            assert!(!text.trim().is_empty(), "{} {key} is empty", l.code);
+        }
+    }
+}
+
+#[test]
+fn leading_separators_of_fragments_survive_translation() {
+    // Some messages are glued to others (", stabilization"): the separator is part of them.
+    let en = load("en");
+    for l in LANGUAGES {
+        let c = load(l.code);
+        for key in [
+            "preset.stabilization",
+            "preset.denoise",
+            "preset.keep_names",
+            "preset.lower_ext",
+            "undo.output_remains",
+            "explain.exclude_fired",
+            "explain.exclude_not_fired",
+            "plan.newer_version",
+            "config.preset_renamed",
+            "explain.tree.unsure",
+        ] {
+            let lead = |s: &str| s.starts_with([' ', ',', ';', '，', '；', '—', '–', '（']);
+            assert_eq!(
+                lead(&c[key]),
+                lead(&en[key]),
+                "{} {key}: {:?}",
+                l.code,
+                c[key]
+            );
+        }
+    }
+}
+
+#[test]
+fn plurals_read_right_in_russian_polish_and_chinese() {
+    let f = |loc: &str, n: u64| with_locale(loc, || tn!("count.files", n));
+    assert_eq!(f("en", 1), "1 file");
+    assert_eq!(f("en", 3), "3 files");
+    assert_eq!(f("ru", 1), "1 файл");
+    assert_eq!(f("ru", 3), "3 файла");
+    assert_eq!(f("ru", 11), "11 файлов");
+    assert_eq!(f("ru", 21), "21 файл");
+    assert_eq!(f("uk", 22), "22 файли");
+    assert_eq!(f("pl", 1), "1 plik");
+    assert_eq!(f("pl", 4), "4 pliki");
+    assert_eq!(f("pl", 5), "5 plików");
+    assert_eq!(f("pl", 22), "22 pliki");
+    assert_eq!(f("zh-CN", 1), "1 个文件");
+    assert_eq!(f("zh-CN", 5), "5 个文件");
+    assert_eq!(f("fr", 0), "0 fichier");
+    assert_eq!(f("fr", 2), "2 fichiers");
+    assert_eq!(f("de", 1), "1 Datei");
+}
+
+#[test]
+fn sizes_and_decimals_follow_the_language() {
+    use gallery_core::triage::size_text;
+    assert_eq!(with_locale("en", || size_text(1536)), "1.5 KB");
+    assert_eq!(with_locale("ru", || size_text(1536)), "1,5 КБ");
+    assert_eq!(with_locale("fr", || size_text(5 * 1024 * 1024)), "5,0 Mo");
+    assert_eq!(with_locale("zh-CN", || size_text(512)), "512 B");
+}
+
+#[test]
+fn a_core_error_speaks_the_language_in_force() {
+    use gallery_core::mask::Mask;
+    let err = |loc: &str| with_locale(loc, || Mask::parse("^(").unwrap_err().to_string());
+    assert!(
+        err("en").starts_with("config: bad mask '^('"),
+        "{}",
+        err("en")
+    );
+    assert!(
+        err("ru").starts_with("конфигурация: неверная маска «^(»"),
+        "{}",
+        err("ru")
+    );
+    assert!(
+        err("de").starts_with("Konfiguration: ungültige Maske „^(“"),
+        "{}",
+        err("de")
+    );
+}

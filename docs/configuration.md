@@ -401,7 +401,7 @@ model    = "claude-sonnet-5-5"   # default
 effort   = "low"                 # default; passed to the API as the request's effort
 jobs     = 8                     # default: parallel requests
 examples = 20                    # default: how many of your latest corrections go into the prompt; 0 = off
-language = "en"                  # default: language of the model's one-line reasons
+# language = "en"               # default: unset, the interface language; name or code
 ```
 
 | Key | Default | Meaning |
@@ -410,7 +410,7 @@ language = "en"                  # default: language of the model's one-line rea
 | `effort` | `low` | Request effort. Classification of a thumbnail rarely needs more. |
 | `jobs` | `8` | Requests in flight at once. |
 | `examples` | `20` | When you change what the AI decided (or settle a doubtful answer), the correction is stored as **text** (no images) and the latest `examples` for the same source are shown to the model in later requests. `0` turns learning off. List/clear them with `gallery examples list` / `clear` or in the GUI Settings. Examples affect only *new* requests: answers already cached stay valid. |
-| `language` | `en` | Language the model writes each answer's short reason in: a name or a code (`"en"`, `"ru"`, `"Ukrainian"`). Category names and descriptions are sent exactly as you wrote them. |
+| `language` | unset | Language the model writes each answer's short reason in: a name or a code (`"en"`, `"ru"`, `"Ukrainian"`). **Unset, it follows the interface language** — the GUI's *Settings → Language*, or the CLI's `--lang` / `LANG` — and is English by default. An explicit value always wins. Category names and descriptions are sent exactly as you wrote them. |
 
 Answers are cached per file (path, size, mtime), model and prompt in
 `<cache dir>/gallery/ai-cache.jsonl`, so a file is asked about only once; examples are deliberately
