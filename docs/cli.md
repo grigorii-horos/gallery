@@ -30,7 +30,7 @@ gallery <command> [options]
 ## Language
 
 `gallery --lang <code> <command>` sets the language of `--help` and of the messages and output
-(`en`, `ru`, `uk`, `de`, `fr`, `es`, `pt-BR`, `it`, `pl`, `zh-CN`). Without it the language comes
+(`en`, `ru`, `uk`, `de`, `fr`, `es`, `pt-BR`, `it`, `pl`, `ro`, `zh-CN`). Without it the language comes
 from `LC_ALL`, `LC_MESSAGES`, `LANG` (first one set; `C`/`POSIX` count as unset), else English.
 `uk_UA` is `uk`, `pt_PT` is `pt-BR`, `zh_TW` is `zh-CN`; an unsupported language is English.
 Machine-readable output is not translated: `--json`, and the first line of `pending` (`pending: N`).

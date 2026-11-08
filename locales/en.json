@@ -355,7 +355,7 @@
   "cli.long": "Media organizer. Files from the config's sources are sorted into targets (masks, then AI, then masks), land in a plan and are processed only after that.\n\nWorkflow: `gallery scan -c gallery.toml -o plan.json`, review the summary and the plan, `gallery apply plan.json`; `gallery undo plan.report.json` undoes a run.\n\nWorking through a server: `scan --server` builds a plan with server paths; the plan is copied to the server, `gallery apply` runs there, and the report comes back via Syncthing next to the plan.\n\nSources are not changed in place: they go to the trash only after all outputs of their target are written and verified. If an output lies in the source's own folder and does not change the content, the source is not copied but renamed in place (and does not go to the trash); a file that already has the right name is left out of the plan (\"unchanged\"). GALLERY_TRASH=folder uses a .gallery-trash folder instead of the system trash. The AI key is taken from ANTHROPIC_API_KEY or CLAUDE_API_KEY.",
   "cli.help": "Short help",
   "cli.help_full": "Detailed help",
-  "cli.lang": "Message language: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN",
+  "cli.lang": "Message language: en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN",
   "cli.check.about": "Show tools, versions and capabilities",
   "cli.check.long": "Shows the external tools (ffmpeg, ffprobe, exiftool, avifenc, magick, optipng), their versions and ffmpeg's capabilities. Exit code 1 if a required tool or capability is missing. Tools are looked up in GALLERY_TOOLS_DIR, then in PATH.",
   "cli.scan.about": "Scan the sources and write a plan",

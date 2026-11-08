@@ -270,10 +270,10 @@ or the run stopped on discrepancies · `130` stopped with Ctrl-C. Full reference
 
 ## Languages
 
-The GUI and the command line speak ten languages: English (the source and the fallback),
-Русский, Українська, Deutsch, Français, Español, Português (Brasil), Italiano, Polski and 简体中文.
+The GUI and the command line speak eleven languages: English (the source and the fallback),
+Русский, Українська, Deutsch, Français, Español, Português (Brasil), Italiano, Polski, Română and 简体中文.
 
-- **GUI:** *Settings → Language* lists the ten by their own names, plus *System*. The choice
+- **GUI:** *Settings → Language* lists the eleven by their own names, plus *System*. The choice
   applies at once, with no restart: the interface, the messages from the core, the tray menu and
   the notifications. It is stored in the GUI's `settings.json`. *System* (the default) follows the
   operating system's language and falls back to English.

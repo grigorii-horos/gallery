@@ -27,8 +27,8 @@ pub struct Language {
     pub english: &'static str,
 }
 
-/// The ten languages, English first. English is the source and the fallback.
-pub const LANGUAGES: [Language; 10] = [
+/// The eleven languages, English first. English is the source and the fallback.
+pub const LANGUAGES: [Language; 11] = [
     Language {
         code: "en",
         native: "English",
@@ -73,6 +73,11 @@ pub const LANGUAGES: [Language; 10] = [
         code: "pl",
         native: "Polski",
         english: "Polish",
+    },
+    Language {
+        code: "ro",
+        native: "Română",
+        english: "Romanian",
     },
     Language {
         code: "zh-CN",
@@ -216,6 +221,16 @@ pub fn plural_category(code: &str, n: u64) -> &'static str {
             }
         }
         "zh" => "other",
+        // Romanian: 0 and 2-19 (mod 100) are "few".
+        "ro" => {
+            if n == 1 {
+                "one"
+            } else if n == 0 || (2..=19).contains(&(n % 100)) {
+                "few"
+            } else {
+                "other"
+            }
+        }
         // The Romance languages: "many" is a round million ("1 000 000 de fichiers");
         // French and Portuguese count 0 as singular too.
         "fr" | "pt" | "es" | "it" => {
@@ -246,6 +261,7 @@ pub fn plural_category(code: &str, n: u64) -> &'static str {
 pub fn plural_categories(code: &str) -> &'static [&'static str] {
     match code.split('-').next().unwrap_or("") {
         "ru" | "uk" | "pl" => &["one", "few", "many", "other"],
+        "ro" => &["one", "few", "other"],
         "zh" => &["other"],
         "es" | "fr" | "it" | "pt" => &["one", "many", "other"],
         _ => &["one", "other"],

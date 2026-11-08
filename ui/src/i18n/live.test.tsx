@@ -39,7 +39,7 @@ describe("switching the language live", () => {
     });
   });
 
-  it("lists system and the ten languages by their own names", async () => {
+  it("lists system and the eleven languages by their own names", async () => {
     render(<Screen />);
     const picker = await screen.findByLabelText("Language");
     const names = [...picker.querySelectorAll("option")].map((o) => o.textContent);
@@ -54,6 +54,7 @@ describe("switching the language live", () => {
       "Português (Brasil)",
       "Italiano",
       "Polski",
+      "Română",
       "简体中文",
     ]);
   });

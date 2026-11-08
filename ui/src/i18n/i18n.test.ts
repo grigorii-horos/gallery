@@ -20,8 +20,8 @@ describe("catalog parity", () => {
   const en = all.en;
   const bases = (c: Catalog) => [...new Set(Object.keys(c).map((k) => k.replace(PLURAL, "")))].sort();
 
-  it("has the ten languages and an English catalog", () => {
-    expect(LANGUAGES.map((l) => l.code)).toEqual(["en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "zh-CN"]);
+  it("has the eleven languages and an English catalog", () => {
+    expect(LANGUAGES.map((l) => l.code)).toEqual(["en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "ro", "zh-CN"]);
     expect(Object.keys(all).sort()).toEqual(LANGUAGES.map((l) => l.code).sort());
   });
 
@@ -86,6 +86,16 @@ describe("plural forms", () => {
     expect(f(12)).toBe("12 plików");
     expect(f(22)).toBe("22 pliki");
     expect(f(25)).toBe("25 plików");
+  });
+
+  it("picks one / few / other for Romanian", async () => {
+    await applyLanguageSetting("ro");
+    const f = (n: number) => t("files", { count: n });
+    expect(f(1)).toBe("1 fișier");
+    expect(f(3)).toBe("3 fișiere");
+    expect(f(19)).toBe("19 fișiere");
+    expect(f(20)).toBe("20 de fișiere");
+    expect(f(102)).toBe("102 fișiere");
   });
 
   it("has no plural for Chinese", async () => {

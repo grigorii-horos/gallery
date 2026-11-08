@@ -359,7 +359,7 @@
   "cli.long": "Organizator mediów. Pliki ze źródeł konfiguracji są rozdzielane na cele (maski, potem AI, potem maski), trafiają do planu i dopiero potem są przetwarzane.\n\nPrzebieg: `gallery scan -c gallery.toml -o plan.json`, przejrzyj podsumowanie i plan, `gallery apply plan.json`; `gallery undo plan.report.json` cofa uruchomienie.\n\nPraca przez serwer: `scan --server` buduje plan ze ścieżkami serwera; plan jest kopiowany na serwer, tam działa `gallery apply`, a raport wraca przez Syncthing obok planu.\n\nŹródła nie są zmieniane na miejscu: do kosza trafiają dopiero po zapisaniu i zweryfikowaniu wszystkich wyjść ich celu. Jeśli wyjście leży w folderze samego źródła i nie zmienia zawartości, źródło nie jest kopiowane, tylko zmienia nazwę na miejscu (i nie trafia do kosza); plik, który ma już właściwą nazwę, zostaje poza planem („bez zmian”). GALLERY_TRASH=folder używa folderu .gallery-trash zamiast systemowego kosza. Klucz AI pochodzi z ANTHROPIC_API_KEY lub CLAUDE_API_KEY.",
   "cli.help": "Krótka pomoc",
   "cli.help_full": "Szczegółowa pomoc",
-  "cli.lang": "Język komunikatów: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN",
+  "cli.lang": "Język komunikatów: en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN",
   "cli.check.about": "Pokaż narzędzia, wersje i możliwości",
   "cli.check.long": "Pokazuje zewnętrzne narzędzia (ffmpeg, ffprobe, exiftool, avifenc, magick, optipng), ich wersje i możliwości ffmpeg. Kod wyjścia 1, jeśli brakuje wymaganego narzędzia lub możliwości. Narzędzi szuka się w GALLERY_TOOLS_DIR, potem w PATH.",
   "cli.scan.about": "Przeskanuj źródła i zapisz plan",

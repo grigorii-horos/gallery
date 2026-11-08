@@ -353,7 +353,7 @@
   "cli.long": "媒体整理器。配置中各来源的文件会被分配到目标（先掩码，再 AI，再掩码），进入计划，之后才会处理。\n\n流程：`gallery scan -c gallery.toml -o plan.json`，检查摘要和计划，`gallery apply plan.json`；`gallery undo plan.report.json` 撤销一次运行。\n\n通过服务器工作：`scan --server` 生成带服务器路径的计划；计划被复制到服务器，在那里运行 `gallery apply`，报告通过 Syncthing 回到计划旁边。\n\n来源不会被就地修改：只有在其目标的所有输出都写入并验证之后，来源才会移入回收站。如果输出位于来源自己的文件夹中且不改变内容，则不会复制来源，而是就地重命名（也不会进入回收站）；名称已经正确的文件不会出现在计划中（“无变化”）。GALLERY_TRASH=folder 使用 .gallery-trash 文件夹代替系统回收站。AI 密钥取自 ANTHROPIC_API_KEY 或 CLAUDE_API_KEY。",
   "cli.help": "简短帮助",
   "cli.help_full": "详细帮助",
-  "cli.lang": "消息语言：en、ru、uk、de、fr、es、pt-BR、it、pl、zh-CN",
+  "cli.lang": "消息语言：en、ru、uk、de、fr、es、pt-BR、it、pl、ro、zh-CN",
   "cli.check.about": "显示工具、版本和功能",
   "cli.check.long": "显示外部工具（ffmpeg、ffprobe、exiftool、avifenc、magick、optipng）、它们的版本以及 ffmpeg 的功能。如果缺少必需的工具或功能，退出码为 1。工具先在 GALLERY_TOOLS_DIR 中查找，再在 PATH 中查找。",
   "cli.scan.about": "扫描来源并写入计划",

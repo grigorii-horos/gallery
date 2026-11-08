@@ -357,7 +357,7 @@
   "cli.long": "Organiseur de médias. Les fichiers des sources de la configuration sont répartis dans des cibles (masques, puis IA, puis masques), arrivent dans un plan et ne sont traités qu’ensuite.\n\nDéroulement : `gallery scan -c gallery.toml -o plan.json`, vérifiez le résumé et le plan, `gallery apply plan.json` ; `gallery undo plan.report.json` annule une exécution.\n\nTravail via un serveur : `scan --server` construit un plan avec les chemins du serveur ; le plan est copié sur le serveur, `gallery apply` s’y exécute, et le rapport revient via Syncthing à côté du plan.\n\nLes sources ne sont pas modifiées sur place : elles ne vont à la corbeille qu’une fois toutes les sorties de leur cible écrites et vérifiées. Si une sortie se trouve dans le dossier de la source et ne change pas le contenu, la source n’est pas copiée mais renommée sur place (et ne va pas à la corbeille) ; un fichier qui a déjà le bon nom reste hors du plan (« inchangé »). GALLERY_TRASH=folder utilise un dossier .gallery-trash au lieu de la corbeille du système. La clé IA est prise dans ANTHROPIC_API_KEY ou CLAUDE_API_KEY.",
   "cli.help": "Aide courte",
   "cli.help_full": "Aide détaillée",
-  "cli.lang": "Langue des messages : en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN",
+  "cli.lang": "Langue des messages : en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN",
   "cli.check.about": "Afficher les outils, leurs versions et leurs capacités",
   "cli.check.long": "Affiche les outils externes (ffmpeg, ffprobe, exiftool, avifenc, magick, optipng), leurs versions et les capacités de ffmpeg. Code de sortie 1 si un outil ou une capacité requis manque. Les outils sont cherchés dans GALLERY_TOOLS_DIR, puis dans PATH.",
   "cli.scan.about": "Analyser les sources et écrire un plan",

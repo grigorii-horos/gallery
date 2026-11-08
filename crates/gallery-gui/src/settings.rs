@@ -112,7 +112,7 @@ mod tests {
     fn language_is_system_or_a_supported_code() {
         assert_eq!(TraySettings::default().language, "system");
         for code in [
-            "en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "zh-CN",
+            "en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "ro", "zh-CN",
         ] {
             assert_eq!(language_setting(code), code);
         }

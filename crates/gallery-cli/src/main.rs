@@ -46,7 +46,7 @@ struct Cli {
     /// Detailed help
     #[arg(short = 'H', long = "help-full", global = true, action = ArgAction::HelpLong)]
     help_full: Option<bool>,
-    /// Message language: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN
+    /// Message language: en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN
     #[arg(long, global = true, value_name = "CODE")]
     lang: Option<String>,
     #[command(subcommand)]

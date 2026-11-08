@@ -357,7 +357,7 @@
   "cli.long": "Organizador de medios. Los archivos de los orígenes de la configuración se reparten en destinos (máscaras, luego IA, luego máscaras), pasan a un plan y solo después se procesan.\n\nFlujo: `gallery scan -c gallery.toml -o plan.json`, revisa el resumen y el plan, `gallery apply plan.json`; `gallery undo plan.report.json` deshace una ejecución.\n\nTrabajo mediante un servidor: `scan --server` construye un plan con rutas del servidor; el plan se copia al servidor, allí se ejecuta `gallery apply` y el informe vuelve por Syncthing junto al plan.\n\nLos orígenes no se modifican en el sitio: solo van a la papelera cuando todas las salidas de su destino están escritas y verificadas. Si una salida está en la propia carpeta del origen y no cambia el contenido, el origen no se copia sino que se renombra en el sitio (y no va a la papelera); un archivo que ya tiene el nombre correcto queda fuera del plan («sin cambios»). GALLERY_TRASH=folder usa una carpeta .gallery-trash en lugar de la papelera del sistema. La clave de la IA se toma de ANTHROPIC_API_KEY o CLAUDE_API_KEY.",
   "cli.help": "Ayuda breve",
   "cli.help_full": "Ayuda detallada",
-  "cli.lang": "Idioma de los mensajes: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN",
+  "cli.lang": "Idioma de los mensajes: en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN",
   "cli.check.about": "Mostrar herramientas, versiones y capacidades",
   "cli.check.long": "Muestra las herramientas externas (ffmpeg, ffprobe, exiftool, avifenc, magick, optipng), sus versiones y las capacidades de ffmpeg. Código de salida 1 si falta una herramienta o capacidad obligatoria. Las herramientas se buscan en GALLERY_TOOLS_DIR y luego en PATH.",
   "cli.scan.about": "Escanear los orígenes y escribir un plan",

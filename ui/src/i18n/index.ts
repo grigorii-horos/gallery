@@ -12,6 +12,7 @@ import es from "./locales/es.json";
 import ptBR from "./locales/pt-BR.json";
 import it from "./locales/it.json";
 import pl from "./locales/pl.json";
+import ro from "./locales/ro.json";
 import zhCN from "./locales/zh-CN.json";
 
 declare module "i18next" {
@@ -31,7 +32,7 @@ export interface Language {
   english: string;
 }
 
-/** The ten languages, English first (the source and the fallback). */
+/** The eleven languages, English first (the source and the fallback). */
 export const LANGUAGES = [
   { code: "en", native: "English", english: "English" },
   { code: "ru", native: "Русский", english: "Russian" },
@@ -42,6 +43,7 @@ export const LANGUAGES = [
   { code: "pt-BR", native: "Português (Brasil)", english: "Brazilian Portuguese" },
   { code: "it", native: "Italiano", english: "Italian" },
   { code: "pl", native: "Polski", english: "Polish" },
+  { code: "ro", native: "Română", english: "Romanian" },
   { code: "zh-CN", native: "简体中文", english: "Simplified Chinese" },
 ] as const satisfies readonly Language[];
 
@@ -62,6 +64,7 @@ export const resources = {
   "pt-BR": { translation: ptBR },
   it: { translation: it },
   pl: { translation: pl },
+  ro: { translation: ro },
   "zh-CN": { translation: zhCN },
 } as const;
 

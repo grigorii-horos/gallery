@@ -16,6 +16,8 @@ fn exact_language_match_comes_first() {
     assert_eq!(resolve("pt-BR"), Some("pt-BR"));
     assert_eq!(resolve("pt_br"), Some("pt-BR"));
     assert_eq!(resolve("zh_CN.UTF-8"), Some("zh-CN"));
+    assert_eq!(resolve("ro_RO.UTF-8"), Some("ro"));
+    assert_eq!(resolve("ro_MD"), Some("ro"));
 }
 
 #[test]
@@ -51,12 +53,12 @@ fn settings_value_is_a_code_or_system() {
 }
 
 #[test]
-fn ten_languages_with_native_and_english_names() {
+fn eleven_languages_with_native_and_english_names() {
     let codes: Vec<_> = LANGUAGES.iter().map(|l| l.code).collect();
     assert_eq!(
         codes,
         [
-            "en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "zh-CN"
+            "en", "ru", "uk", "de", "fr", "es", "pt-BR", "it", "pl", "ro", "zh-CN"
         ]
     );
     assert!(
@@ -101,6 +103,21 @@ fn plural_categories_follow_cldr() {
         (0, "many"),
     ] {
         assert_eq!(cat("pl", n), want, "pl {n}");
+    }
+    // Romanian: one / few / other.
+    for (n, want) in [
+        (0, "few"),
+        (1, "one"),
+        (2, "few"),
+        (19, "few"),
+        (20, "other"),
+        (21, "other"),
+        (101, "other"),
+        (102, "few"),
+        (119, "few"),
+        (120, "other"),
+    ] {
+        assert_eq!(cat("ro", n), want, "ro {n}");
     }
     // Chinese has none.
     for n in [0, 1, 2, 100] {
@@ -336,6 +353,11 @@ fn plurals_read_right_in_russian_polish_and_chinese() {
     assert_eq!(f("pl", 4), "4 pliki");
     assert_eq!(f("pl", 5), "5 plików");
     assert_eq!(f("pl", 22), "22 pliki");
+    assert_eq!(f("ro", 1), "1 fișier");
+    assert_eq!(f("ro", 3), "3 fișiere");
+    assert_eq!(f("ro", 19), "19 fișiere");
+    assert_eq!(f("ro", 20), "20 de fișiere");
+    assert_eq!(f("ro", 102), "102 fișiere");
     assert_eq!(f("zh-CN", 1), "1 个文件");
     assert_eq!(f("zh-CN", 5), "5 个文件");
     assert_eq!(f("fr", 0), "0 fichier");

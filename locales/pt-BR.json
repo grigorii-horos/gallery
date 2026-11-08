@@ -357,7 +357,7 @@
   "cli.long": "Organizador de mídia. Os arquivos das origens da configuração são distribuídos em destinos (máscaras, depois IA, depois máscaras), vão para um plano e só depois são processados.\n\nFluxo: `gallery scan -c gallery.toml -o plan.json`, confira o resumo e o plano, `gallery apply plan.json`; `gallery undo plan.report.json` desfaz uma execução.\n\nTrabalho por um servidor: `scan --server` monta um plano com caminhos do servidor; o plano é copiado para o servidor, lá roda `gallery apply`, e o relatório volta pelo Syncthing ao lado do plano.\n\nAs origens não são alteradas no lugar: só vão para a lixeira depois que todas as saídas do seu destino foram gravadas e verificadas. Se uma saída está na própria pasta da origem e não muda o conteúdo, a origem não é copiada, e sim renomeada no lugar (e não vai para a lixeira); um arquivo que já tem o nome certo fica fora do plano (“sem alteração”). GALLERY_TRASH=folder usa uma pasta .gallery-trash em vez da lixeira do sistema. A chave da IA vem de ANTHROPIC_API_KEY ou CLAUDE_API_KEY.",
   "cli.help": "Ajuda curta",
   "cli.help_full": "Ajuda detalhada",
-  "cli.lang": "Idioma das mensagens: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN",
+  "cli.lang": "Idioma das mensagens: en, ru, uk, de, fr, es, pt-BR, it, pl, ro, zh-CN",
   "cli.check.about": "Mostrar ferramentas, versões e recursos",
   "cli.check.long": "Mostra as ferramentas externas (ffmpeg, ffprobe, exiftool, avifenc, magick, optipng), suas versões e os recursos do ffmpeg. Código de saída 1 se faltar uma ferramenta ou recurso obrigatório. As ferramentas são procuradas em GALLERY_TOOLS_DIR e depois no PATH.",
   "cli.scan.about": "Verificar as origens e gravar um plano",
