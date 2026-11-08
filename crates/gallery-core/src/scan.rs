@@ -259,7 +259,7 @@ mod tests {
 
     fn rels(v: &[FileEntry]) -> Vec<String> {
         v.iter()
-            .map(|e| e.rel.to_string_lossy().into_owned())
+            .map(|e| e.rel.to_string_lossy().replace('\\', "/"))
             .collect()
     }
 
@@ -350,6 +350,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        windows,
+        ignore = "walkdir lists metadata with the entries on Windows, so nothing vanishes"
+    )]
     fn files_vanishing_mid_scan_are_skipped() {
         // Syncthing may remove a file or a directory between the directory
         // listing and the metadata read (or the descent).

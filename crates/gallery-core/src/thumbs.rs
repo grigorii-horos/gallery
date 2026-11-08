@@ -278,7 +278,14 @@ mod tests {
         std::fs::create_dir_all(&fresh).unwrap();
         std::fs::write(cache.join("keep.jpg"), b"x").unwrap();
         let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
-        std::fs::File::open(&old)
+        let mut open = std::fs::OpenOptions::new();
+        open.read(true);
+        // Windows opens a directory only with FILE_FLAG_BACKUP_SEMANTICS.
+        #[cfg(windows)]
+        std::os::windows::fs::OpenOptionsExt::custom_flags(&mut open, 0x0200_0000);
+        #[cfg(windows)]
+        open.write(true);
+        open.open(&old)
             .unwrap()
             .set_modified(two_hours_ago)
             .unwrap();

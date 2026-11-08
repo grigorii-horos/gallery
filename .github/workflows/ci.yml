@@ -55,9 +55,12 @@ jobs:
       - name: ImageMagick 7 (Linux)
         if: runner.os == 'Linux'
         continue-on-error: true # tests needing magick skip when it is missing
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           mkdir -p "$HOME/tools"
-          curl -fsSL https://imagemagick.org/archive/binaries/magick -o "$HOME/tools/magick"
+          gh release download --repo ImageMagick/ImageMagick --pattern '*-gcc-x86_64.AppImage' --dir "$HOME/tools"
+          mv "$HOME/tools"/ImageMagick-*-gcc-x86_64.AppImage "$HOME/tools/magick"
           chmod +x "$HOME/tools/magick"
           echo "$HOME/tools" >> "$GITHUB_PATH"
 

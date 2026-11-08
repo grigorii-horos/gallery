@@ -403,7 +403,7 @@ mod tests {
              # pics\n[[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"   # only jpg\n\
              [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = r.display()
+            r = r.to_string_lossy().replace('\\', "/")
         );
         let cfg = r.join("gallery.toml");
         std::fs::write(&cfg, toml).unwrap();

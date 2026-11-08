@@ -1633,7 +1633,26 @@ fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
     rename_exclusive_windows(from, to)
 }
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let c = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(std::io::Error::other);
+    let (f, t) = (c(from)?, c(to)?);
+    // SAFETY: both are valid NUL-terminated paths, alive for the call.
+    let r = unsafe { libc::renamex_np(f.as_ptr(), t.as_ptr(), libc::RENAME_EXCL) };
+    if r == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    // A file system without exclusive rename: the check-then-rename below.
+    if e.raw_os_error() == Some(libc::ENOTSUP) {
+        return std::fs::rename(from, to);
+    }
+    Err(e)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
 fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
 }
@@ -2108,6 +2127,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn in_place_failure_keeps_processed_output() {
         let d = tempfile::tempdir().unwrap();
         let (plan, src) = in_place_plan(d.path());
@@ -2147,6 +2167,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn damaged_byte_copy_is_not_placed() {
         let d = tempfile::tempdir().unwrap();
         let (plan_path, src) = in_place_plan(d.path());
@@ -2170,6 +2191,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn run_interrupted_after_the_trash_can_be_undone() {
         let d = tempfile::tempdir().unwrap();
         let (plan, src) = in_place_plan(d.path());
@@ -2297,6 +2319,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn finished_run_leaves_no_journal() {
         let d = tempfile::tempdir().unwrap();
         let (plan, _) = in_place_plan(d.path());
@@ -2318,7 +2341,11 @@ mod tests {
             .map(|e| e.unwrap().path())
             .collect();
         match apply_with_caps(&plan, &fake_tools(), &all_caps(), &folder_opts()) {
-            Err(Error::Plan(m)) => assert!(m.contains(&me) && m.contains("plan.lock"), "{m}"),
+            Err(Error::Plan(m)) => {
+                assert!(m.contains("plan.lock"), "{m}");
+                // Windows locks are mandatory: the holder's pid is unreadable.
+                assert!(!cfg!(unix) || m.contains(&me), "{m}");
+            }
             other => panic!("expected a lock error, got {other:?}"),
         }
         let after: Vec<_> = std::fs::read_dir(d.path())
@@ -2420,6 +2447,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn rename_waits_for_every_write() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2444,6 +2472,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn failed_write_leaves_the_source_unrenamed() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2494,6 +2523,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn source_changed_after_the_writes_is_not_renamed() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2518,6 +2548,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn keep_with_backup_writes_the_backup_only() {
         let d = tempfile::tempdir().unwrap();
         let backup = d.path().join("backup/IMG_1.png");
@@ -2540,6 +2571,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn rename_with_backup_is_undone() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2562,6 +2594,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        any(target_os = "macos", windows),
+        ignore = "case-insensitive file system: the case-only target is the file itself"
+    )]
     fn case_only_rename_keeps_the_name() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/IMG.jpg");

@@ -188,7 +188,7 @@ mod tests {
                 "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
                  [[targets.after_ai]]\nname = \"pngs\"\n[[targets.after_ai.filters]]\n\
                  sources = [\"s\"]\nmatch = \"*.png\"\n[[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-                r = r.display()
+                r = r.to_string_lossy().replace('\\', "/")
             ),
         )
         .unwrap();
@@ -227,7 +227,7 @@ mod tests {
         let st = EffectState::default();
         go(&f, &st, &[]);
         // New sources = another folder: the file list must be scanned again.
-        let r = f.dir.path().display();
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
         let text = std::fs::read_to_string(&f.cfg)
             .unwrap()
             .replace(&format!("{r}/src\""), &format!("{r}/src2\""));
