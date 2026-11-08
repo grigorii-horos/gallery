@@ -87,9 +87,11 @@ impl std::fmt::Debug for Syncthing {
 fn parse_gui(xml: &str) -> Result<(bool, String, String)> {
     let start = xml
         .find("<gui")
-        .ok_or_else(|| err("config.xml has no <gui> section"))?;
+        .ok_or_else(|| err(crate::t!("sync.no_gui")))?;
     let rest = &xml[start..];
-    let head_end = rest.find('>').ok_or_else(|| err("config.xml is corrupt"))?;
+    let head_end = rest
+        .find('>')
+        .ok_or_else(|| err(crate::t!("sync.corrupt")))?;
     let head = &rest[..head_end];
     let body = match rest.find("</gui>") {
         Some(e) if e > head_end => &rest[head_end..e],
@@ -102,10 +104,10 @@ fn parse_gui(xml: &str) -> Result<(bool, String, String)> {
         Some(unescape(body[s..s + e].trim()))
     };
     let tls = head.contains("tls=\"true\"");
-    let address = tag("address").ok_or_else(|| err("config.xml has no GUI address"))?;
+    let address = tag("address").ok_or_else(|| err(crate::t!("sync.no_address")))?;
     let key = tag("apikey")
         .filter(|k| !k.is_empty())
-        .ok_or_else(|| err("config.xml has no API key"))?;
+        .ok_or_else(|| err(crate::t!("sync.no_key")))?;
     Ok((tls, address, key))
 }
 
@@ -124,7 +126,7 @@ fn loopback_base(address: &str, tls: bool) -> Result<String> {
     let scheme = if tls { "https" } else { "http" };
     let (host, port) = address
         .rsplit_once(':')
-        .ok_or_else(|| err("Syncthing GUI address has no port"))?;
+        .ok_or_else(|| err(crate::t!("sync.no_port")))?;
     let host = host.trim_start_matches('[').trim_end_matches(']');
     let host = match host {
         "0.0.0.0" | "::" | "" => "127.0.0.1",
@@ -135,9 +137,7 @@ fn loopback_base(address: &str, tls: bool) -> Result<String> {
             .parse::<std::net::IpAddr>()
             .is_ok_and(|ip| ip.is_loopback());
     if !ok || port.parse::<u16>().is_err() {
-        return Err(err(
-            "Syncthing GUI is not listening on this computer: leaving it alone",
-        ));
+        return Err(err(crate::t!("sync.not_local")));
     }
     let host = if host.contains(':') {
         format!("[{host}]")
@@ -188,7 +188,7 @@ impl Syncthing {
         let found = default_config_paths().into_iter().find(|p| p.is_file());
         match found {
             Some(p) => Syncthing::from_config(&p),
-            None => Err(err("Syncthing config.xml not found")),
+            None => Err(err(crate::t!("sync.config_not_found"))),
         }
     }
 
@@ -200,17 +200,17 @@ impl Syncthing {
             // The GUI's own certificate is self-signed; the host is loopback.
             .danger_accept_invalid_certs(self.tls)
             .build()
-            .map_err(|_| err("could not create the HTTP client"))
+            .map_err(|_| err(crate::t!("sync.http_client")))
     }
 
     /// An error that names what failed, never the request (it holds the key).
     fn fail(&self, what: &str, e: &reqwest::Error) -> Error {
         let why = if e.is_timeout() {
-            "no response"
+            crate::t!("sync.no_response")
         } else if e.is_connect() {
-            "not responding"
+            crate::t!("sync.not_responding")
         } else {
-            "exchange error"
+            crate::t!("sync.exchange_error")
         };
         err(format!("({}): {what}: {why}", self.base))
     }
@@ -227,11 +227,11 @@ impl Syncthing {
                 .get(format!("{}/rest/noauth/health", self.base))
                 .send()
                 .await
-                .map_err(|e| self.fail("check", &e))?;
+                .map_err(|e| self.fail(&crate::t!("sync.what_check"), &e))?;
             if r.status().is_success() {
                 Ok(())
             } else {
-                Err(self.status_error("check", r.status()))
+                Err(self.status_error(&crate::t!("sync.what_check"), r.status()))
             }
         })?
     }
@@ -245,13 +245,13 @@ impl Syncthing {
                 .header("X-API-Key", &self.key)
                 .send()
                 .await
-                .map_err(|e| self.fail("folder list", &e))?;
+                .map_err(|e| self.fail(&crate::t!("sync.what_folder_list"), &e))?;
             if !r.status().is_success() {
-                return Err(self.status_error("folder list", r.status()));
+                return Err(self.status_error(&crate::t!("sync.what_folder_list"), r.status()));
             }
             r.json::<Vec<Folder>>()
                 .await
-                .map_err(|_| err("folder list could not be parsed"))
+                .map_err(|_| err(crate::t!("sync.folder_list_parse")))
         })?
     }
 
@@ -266,11 +266,11 @@ impl Syncthing {
                 .json(&serde_json::json!({ "paused": paused }))
                 .send()
                 .await
-                .map_err(|e| self.fail("folder", &e))?;
+                .map_err(|e| self.fail(&crate::t!("sync.what_folder"), &e))?;
             if r.status().is_success() {
                 Ok(())
             } else {
-                Err(self.status_error("folder", r.status()))
+                Err(self.status_error(&crate::t!("sync.what_folder"), r.status()))
             }
         })?
     }
@@ -424,7 +424,7 @@ pub struct SyncPause {
 impl SyncPause {
     /// The local Syncthing with the default state file.
     pub fn discover() -> Result<SyncPause> {
-        let state_path = default_state_path().ok_or_else(|| err("no data directory"))?;
+        let state_path = default_state_path().ok_or_else(|| err(crate::t!("sync.no_data_dir")))?;
         Ok(SyncPause {
             client: Syncthing::discover()?,
             state_path,
@@ -492,7 +492,10 @@ impl SyncPause {
             }
         }
         if !failed.is_empty() {
-            return Err(err(format!("could not pause: {}", failed.join(", "))));
+            return Err(err(crate::t!(
+                "sync.could_not_pause",
+                folders = failed.join(", ")
+            )));
         }
         Ok(Some(st))
     }

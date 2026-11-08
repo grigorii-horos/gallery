@@ -257,42 +257,65 @@ pub fn describe_content(p: &ContentPreset) -> String {
     match p {
         ContentPreset::Metadata(m) => {
             let on = [
-                (m.write_capture_date, "capture date"),
-                (m.fix_gcam_make_model, "Make/Model GCam"),
-                (m.strip_gcamera_xmp, "XMP-GCamera"),
-                (m.strip_gain_map_xmp_for_avif, "gain map XMP"),
-                (m.fill_offset_time, "OffsetTime"),
-                (m.video_make_model, "video Make/Model"),
-                (m.video_restore_gps, "video GPS"),
+                (m.write_capture_date, crate::t!("preset.m_capture_date")),
+                (m.fix_gcam_make_model, "Make/Model GCam".to_string()),
+                (m.strip_gcamera_xmp, "XMP-GCamera".to_string()),
+                (
+                    m.strip_gain_map_xmp_for_avif,
+                    crate::t!("preset.m_gain_map"),
+                ),
+                (m.fill_offset_time, "OffsetTime".to_string()),
+                (m.video_make_model, crate::t!("preset.m_video_make_model")),
+                (m.video_restore_gps, crate::t!("preset.m_video_gps")),
             ];
-            let names: Vec<_> = on.iter().filter(|(f, _)| *f).map(|(_, n)| *n).collect();
-            format!("metadata: {}", names.join(", "))
+            let names: Vec<_> = on
+                .iter()
+                .filter(|(f, _)| *f)
+                .map(|(_, n)| n.as_str())
+                .collect();
+            crate::t!("preset.metadata", names = names.join(", "))
         }
         ContentPreset::Photo(p) => {
             let (fmt, speed) = match p.format {
-                crate::config::PhotoFormat::Avif => ("AVIF", "speed"),
-                crate::config::PhotoFormat::Webp => ("WebP", "method"),
+                crate::config::PhotoFormat::Avif => ("AVIF", crate::t!("preset.speed")),
+                crate::config::PhotoFormat::Webp => ("WebP", crate::t!("preset.method")),
             };
-            format!("{fmt}: quality {}, {speed} {}", p.quality, p.speed)
+            crate::t!(
+                "preset.photo",
+                fmt = fmt,
+                quality = p.quality,
+                speed = speed,
+                level = p.speed
+            )
         }
         ContentPreset::Video(v) => {
-            let mut s = format!("AV1: crf {}, preset {}", v.crf, v.preset);
+            let mut s = crate::t!("preset.video", crf = v.crf, preset = v.preset);
             if v.stabilize {
-                s.push_str(", stabilization");
+                s.push_str(&crate::t!("preset.stabilization"));
             }
             if let Some(d) = v.denoise {
-                s.push_str(&format!(", denoise {d:?}").to_lowercase());
+                s.push_str(&crate::t!(
+                    "preset.denoise",
+                    level = format!("{d:?}").to_lowercase()
+                ));
             }
             s
         }
         ContentPreset::Audio(a) => match a.kbps {
-            Some(k) => format!("{:?}: {k} kbps", a.codec).to_lowercase(),
-            None => format!("{:?}: lossless", a.codec).to_lowercase(),
+            Some(k) => crate::t!(
+                "preset.kbps",
+                codec = format!("{:?}", a.codec).to_lowercase(),
+                kbps = k
+            ),
+            None => crate::t!(
+                "preset.lossless",
+                codec = format!("{:?}", a.codec).to_lowercase()
+            ),
         },
         ContentPreset::Png(p) => format!("optipng -o{}", p.level),
         ContentPreset::Bundle(b) => {
             let names: Vec<_> = b.steps.iter().map(|s| s.preset.as_str()).collect();
-            format!("set: {}", names.join(" + "))
+            crate::t!("preset.bundle", names = names.join(" + "))
         }
     }
 }
@@ -300,16 +323,16 @@ pub fn describe_content(p: &ContentPreset) -> String {
 /// One line of key parameters of a name preset, for `gallery presets`.
 pub fn describe_name(p: &NamePreset) -> String {
     let date = match p.date {
-        DateSource::Capture => "capture date",
-        DateSource::FileCreated => "file creation date",
-        DateSource::None => "no date",
+        DateSource::Capture => crate::t!("preset.date_capture"),
+        DateSource::FileCreated => crate::t!("preset.date_created"),
+        DateSource::None => crate::t!("preset.date_none"),
     };
     let mut s = format!("{} ({date}", p.template);
     if p.skip_if.is_some() {
-        s.push_str(", keep ready-made names");
+        s.push_str(&crate::t!("preset.keep_names"));
     }
     if p.normalize_ext {
-        s.push_str(", extension to lower case");
+        s.push_str(&crate::t!("preset.lower_ext"));
     }
     s.push(')');
     s

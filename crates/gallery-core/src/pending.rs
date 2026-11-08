@@ -266,7 +266,7 @@ fn build_in(
     if !new.is_empty() {
         let tools = env
             .tools
-            .ok_or_else(|| crate::Error::Tool("exiftool is not available".into()))?;
+            .ok_or_else(|| crate::Error::Tool(crate::t!("tools.exiftool_missing")))?;
         read = exif::read_with(tools, &new, &NoProgress, cancel)?;
     }
     let exif_reads = new.len();

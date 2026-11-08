@@ -74,7 +74,7 @@ pub fn undo_items(report_path: &Path, sources: &[PathBuf]) -> Result<UndoSummary
 
 fn read_report(report_path: &Path) -> Result<Report> {
     let text = std::fs::read_to_string(report_path)?;
-    serde_json::from_str(&text).map_err(|e| Error::Plan(format!("report: {e}")))
+    serde_json::from_str(&text).map_err(|e| Error::Plan(crate::t!("undo.report", error = e)))
 }
 
 /// The plan to retry the failed items of a finished run ("Retry
@@ -99,9 +99,7 @@ pub fn prepare_retry_excluding(
     let plan = Plan::load(plan_path)?;
     let report = read_report(report_path)?;
     if report.finished.is_empty() {
-        return Err(Error::Plan(
-            "run not finished: undo it first or wait for it to end".into(),
-        ));
+        return Err(Error::Plan(crate::t!("undo.not_finished")));
     }
     let mut sub = subplan(&plan, &report);
     sub.retry_of = Some(report.run_id.clone());
@@ -146,7 +144,7 @@ fn undo_selected(
     let _lock = RunLock::acquire_for_report(report_path)?;
     let mut report = read_report(report_path)?;
     if report.undone {
-        return Err(Error::Plan("already undone".into()));
+        return Err(Error::Plan(crate::t!("undo.already_undone")));
     }
     merge_journal(report_path, &mut report)?;
     // Items a previous, partly failed undo already finished stay as they are.
@@ -260,7 +258,7 @@ fn run_window(r: &Report) -> Result<Window> {
     let ts = |s: &str| {
         chrono::DateTime::parse_from_rfc3339(s)
             .map(|t| t.timestamp())
-            .map_err(|e| Error::Plan(format!("report: time '{s}': {e}")))
+            .map_err(|e| Error::Plan(crate::t!("undo.report_time", value = s, error = e)))
     };
     let to = if r.finished.is_empty() {
         chrono::Local::now().timestamp()
@@ -308,7 +306,7 @@ impl Undo {
             let found = match self.locate(t) {
                 Ok(f) => f,
                 Err(why) => {
-                    self.problem(src, format!("{why}; outputs kept"));
+                    self.problem(src, crate::t!("undo.outputs_kept", why = why));
                     return None;
                 }
             };
@@ -321,28 +319,26 @@ impl Undo {
                     .iter()
                     .find(|o| o.actual.as_deref() == Some(src.as_path()));
                 if own.filter(|o| check_output(src, o).is_ok()).is_none() {
-                    return Some(format!(
-                        "{}: destination is taken, source left in the trash",
-                        src.display()
-                    ));
+                    return Some(crate::t!("undo.dest_taken_trash", path = src.display()));
                 }
                 match move_aside(src) {
                     Ok(p) => aside = Some(p),
                     Err(e) => {
-                        self.problem(
-                            src,
-                            format!("output not removed ({e}); source left in the trash"),
-                        );
+                        self.problem(src, crate::t!("undo.output_not_removed", error = e));
                         return None;
                     }
                 }
             }
             if let Err(e) = self.restore(found, src) {
-                let mut why = format!("not restored ({e}); outputs kept");
+                let mut why = crate::t!("undo.not_restored", error = e);
                 if let Some(a) = &aside
                     && let Err(e) = move_noreplace(a, src)
                 {
-                    why.push_str(&format!("; output remains as {} ({e})", a.display()));
+                    why.push_str(&crate::t!(
+                        "undo.output_remains",
+                        path = a.display(),
+                        error = e
+                    ));
                 }
                 self.problem(src, why);
                 return None;
@@ -352,7 +348,7 @@ impl Undo {
             if let Some(a) = aside {
                 match std::fs::remove_file(&a) {
                     Ok(()) => self.sum.removed_outputs += 1,
-                    Err(e) => self.problem(&a, format!("output not deleted ({e})")),
+                    Err(e) => self.problem(&a, crate::t!("undo.output_not_deleted", error = e)),
                 }
             }
         }
@@ -365,7 +361,7 @@ impl Undo {
                 continue;
             }
             if self.renamed.contains(p) {
-                self.problem(p, "renamed source; output kept");
+                self.problem(p, crate::t!("undo.renamed_source"));
                 continue;
             }
             // The source path holds the source again (or still), and a restored
@@ -374,16 +370,16 @@ impl Undo {
                 continue;
             }
             if let Some(why) = self.someones_source(p) {
-                self.problem(p, format!("{why}; output kept"));
+                self.problem(p, crate::t!("undo.output_kept", why = why));
                 continue;
             }
             match check_output(p, o) {
                 Ok(()) => match std::fs::remove_file(p) {
                     Ok(()) => self.sum.removed_outputs += 1,
-                    Err(e) => self.problem(p, format!("output not deleted ({e})")),
+                    Err(e) => self.problem(p, crate::t!("undo.output_not_deleted", error = e)),
                 },
                 Err(None) => {}
-                Err(Some(why)) => self.problem(p, format!("{why}; output kept")),
+                Err(Some(why)) => self.problem(p, crate::t!("undo.output_kept", why = why)),
             }
         }
         None
@@ -409,15 +405,15 @@ impl Undo {
         if old != src {
             self.problem(
                 src,
-                format!("renamed from another path {}; outputs kept", old.display()),
+                crate::t!("undo.renamed_from_other", path = old.display()),
             );
             return RenameBack::Failed;
         }
         let taken = || {
-            RenameBack::Wait(format!(
-                "{}: destination is taken, renamed source left as {}",
-                src.display(),
-                new.display()
+            RenameBack::Wait(crate::t!(
+                "undo.dest_taken_renamed",
+                path = src.display(),
+                new = new.display()
             ))
         };
         if std::fs::symlink_metadata(src).is_ok() {
@@ -431,8 +427,8 @@ impl Undo {
         match check_output(new, o) {
             Ok(()) => {}
             Err(why) => {
-                let why = why.unwrap_or_else(|| "file is missing".into());
-                self.problem(new, format!("{why}; source not renamed back, outputs kept"));
+                let why = why.unwrap_or_else(|| crate::t!("undo.file_missing"));
+                self.problem(new, crate::t!("undo.not_renamed_back_why", why = why));
                 return RenameBack::Failed;
             }
         }
@@ -444,7 +440,7 @@ impl Undo {
             }
             Err(e) if e.kind() == ErrorKind::AlreadyExists => taken(),
             Err(e) => {
-                self.problem(new, format!("not renamed back ({e}); outputs kept"));
+                self.problem(new, crate::t!("undo.not_renamed_back", error = e));
                 RenameBack::Failed
             }
         }
@@ -462,7 +458,7 @@ impl Undo {
             .collect();
         trashed.into_iter().find_map(|t| match t {
             Some(t) if self.locate(&t).is_ok() => None,
-            _ => Some("source path that is not in the trash".to_string()),
+            _ => Some(crate::t!("undo.source_path_not_trashed")),
         })
     }
 
@@ -470,7 +466,11 @@ impl Undo {
         match t {
             TrashRef::Folder { path } => match std::fs::symlink_metadata(path) {
                 Ok(_) => Ok(Found::Folder(path.clone())),
-                Err(e) => Err(format!("not in the trash: {} ({e})", path.display())),
+                Err(e) => Err(crate::t!(
+                    "undo.not_in_trash",
+                    path = path.display(),
+                    error = e
+                )),
             },
             TrashRef::System { original } => {
                 let (time, item) = self.trash.find(original, self.window)?;
@@ -508,11 +508,11 @@ impl Undo {
 /// `Ok` when `p` is a regular file of the recorded size and blake3 (each if
 /// recorded); `Err(None)` when it is gone; otherwise why it must be kept.
 fn check_output(p: &Path, o: &OutputResult) -> std::result::Result<(), Option<String>> {
-    let changed = || Some("file changed after apply".to_string());
+    let changed = || Some(crate::t!("undo.changed_after_apply"));
     match std::fs::symlink_metadata(p) {
         Err(e) if e.kind() == ErrorKind::NotFound => return Err(None),
         Err(e) => return Err(Some(e.to_string())),
-        Ok(m) if !m.is_file() => return Err(Some("not a file".into())),
+        Ok(m) if !m.is_file() => return Err(Some(crate::t!("undo.not_a_file"))),
         Ok(m) if o.size.is_some_and(|s| s != m.len()) => return Err(changed()),
         Ok(_) => {}
     }
@@ -589,11 +589,11 @@ impl<T: Clone> TrashIndex<T> {
         });
         let index = index
             .as_ref()
-            .map_err(|e| format!("Trash unavailable ({e})"))?;
+            .map_err(|e| crate::t!("undo.trash_unavailable", error = e))?;
         let cands = index.get(original).map(Vec::as_slice).unwrap_or_default();
         pick(cands, original, w, |_| original.to_path_buf(), |c| c.0)
             .cloned()
-            .ok_or_else(|| "not in the Trash (deleted during the run)".to_string())
+            .ok_or_else(|| crate::t!("undo.trash_deleted_during_run"))
     }
 
     /// Forget an entry that was restored.
@@ -672,7 +672,7 @@ mod system {
     pub enum Item {}
 
     pub fn list() -> Result<Listing<Item>, String> {
-        Err("no Trash listing, restore by hand".into())
+        Err(crate::t!("undo.no_trash_listing"))
     }
 
     pub fn restore(item: Item) -> Result<(), String> {

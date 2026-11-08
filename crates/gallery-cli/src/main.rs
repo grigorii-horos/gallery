@@ -46,6 +46,9 @@ struct Cli {
     /// Detailed help
     #[arg(short = 'H', long = "help-full", global = true, action = ArgAction::HelpLong)]
     help_full: Option<bool>,
+    /// Message language: en, ru, uk, de, fr, es, pt-BR, it, pl, zh-CN
+    #[arg(long, global = true, value_name = "CODE")]
+    lang: Option<String>,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -246,15 +249,112 @@ Outputs changed after the run stay. A report can be undone once."
 /// Exit code of a run stopped by Ctrl-C (128 + SIGINT).
 const CANCELLED: u8 = 130;
 
+/// The `--lang` value in `args` (`--lang ru` or `--lang=ru`), read before
+/// clap runs so that `--help` is already in that language.
+fn lang_arg(args: &[String]) -> Option<&str> {
+    let mut it = args.iter().skip(1);
+    while let Some(a) = it.next() {
+        if a == "--" {
+            break;
+        }
+        if let Some(v) = a.strip_prefix("--lang=") {
+            return Some(v);
+        }
+        if a == "--lang" {
+            return it.next().map(String::as_str);
+        }
+    }
+    None
+}
+
+/// The language of this run: `--lang`, else LC_ALL / LC_MESSAGES / LANG, else English.
+fn choose_locale(args: &[String]) -> &'static str {
+    match lang_arg(args) {
+        Some(code) => gallery_core::i18n::resolve(code).unwrap_or(gallery_core::i18n::DEFAULT),
+        None => gallery_core::i18n::detect_env(),
+    }
+}
+
+/// The text of catalog key `key`, when it has one.
+fn catalog(key: &str) -> Option<String> {
+    gallery_core::i18n::try_translate(key)
+}
+
+/// Replaces the help texts of `cmd` (and its subcommands) with the catalog's
+/// in the language in force. `path` is the command's key: `cli.scan`,
+/// `cli.sync.status`. An argument looks for `<path>.<id>`, then `cli.arg.<id>`;
+/// a missing key leaves the English text of the source.
+fn localize(mut cmd: clap::Command, path: &str) -> clap::Command {
+    if let Some(t) = catalog(&format!("{path}.about")) {
+        cmd = cmd.about(t);
+    }
+    if let Some(t) = catalog(&format!("{path}.long")) {
+        cmd = cmd.long_about(t);
+    }
+    // clap wants 'static headings; the few leaked strings live as long as the process.
+    let heading = |k: &str| -> Option<&'static str> {
+        catalog(&format!("cli.h.{k}")).map(|h| &*Box::leak(h.into_boxed_str()))
+    };
+    if let Some(h) = heading("commands") {
+        cmd = cmd.subcommand_help_heading(h);
+    }
+    let ids: Vec<(String, bool)> = cmd
+        .get_arguments()
+        .map(|a| (a.get_id().to_string(), a.is_positional()))
+        .collect();
+    for (id, positional) in ids {
+        let text = catalog(&format!("{path}.{id}")).or_else(|| catalog(&format!("cli.arg.{id}")));
+        let head = heading(if positional { "arguments" } else { "options" });
+        cmd = cmd.mut_arg(id, |a| {
+            let a = match text {
+                Some(t) => a.help(t),
+                None => a,
+            };
+            match head {
+                Some(h) => a.help_heading(h),
+                None => a,
+            }
+        });
+    }
+    let subs: Vec<String> = cmd
+        .get_subcommands()
+        .map(|s| s.get_name().to_string())
+        .collect();
+    for name in subs {
+        let key = format!("{path}.{}", name.replace('-', "_"));
+        cmd = cmd.mut_subcommand(&name, |s| localize(s, &key));
+    }
+    if let Some(usage) = heading("usage") {
+        cmd = cmd.help_template(format!(
+            "{{about-with-newline}}\n{usage} {{usage}}\n\n{{all-args}}{{after-help}}"
+        ));
+    }
+    cmd
+}
+
+/// The command line definition in the language in force.
+fn command() -> clap::Command {
+    use clap::CommandFactory;
+    localize(Cli::command(), "cli")
+}
+
+fn parse_cli(args: &[String]) -> Cli {
+    use clap::FromArgMatches;
+    let matches = command().get_matches_from(args);
+    Cli::from_arg_matches(&matches).unwrap_or_else(|e| e.exit())
+}
+
 fn main() -> ExitCode {
-    match run(Cli::parse().cmd) {
+    let args: Vec<String> = std::env::args().collect();
+    gallery_core::i18n::set_locale(choose_locale(&args));
+    match run(parse_cli(&args).cmd) {
         Ok(code) => ExitCode::from(code),
         Err(Error::Cancelled) => {
-            eprintln!("cancelled");
+            eprintln!("{}", gallery_core::t!("error.cancelled"));
             ExitCode::from(CANCELLED)
         }
         Err(e) => {
-            eprintln!("error: {e}");
+            eprintln!("{}", gallery_core::t!("cli.error", error = e));
             ExitCode::from(1)
         }
     }
@@ -303,14 +403,14 @@ impl Progress for Line {
 }
 
 fn progress_text(ev: &ProgressEvent) -> String {
-    let stage = match ev.stage {
-        Stage::Scan => "scan",
-        Stage::Exif => "EXIF",
-        Stage::Ai => "AI",
-        Stage::Plan => "plan",
-        Stage::Apply => "apply",
-        Stage::Undo => "undo",
-    };
+    let stage = gallery_core::t!(match ev.stage {
+        Stage::Scan => "cli.stage.scan",
+        Stage::Exif => "cli.stage.exif",
+        Stage::Ai => "cli.stage.ai",
+        Stage::Plan => "cli.stage.plan",
+        Stage::Apply => "cli.stage.apply",
+        Stage::Undo => "cli.stage.undo",
+    });
     if ev.total == 0 {
         format!("{stage}: {}", ev.done)
     } else {
@@ -328,9 +428,9 @@ const PHASE_WRITING: u8 = 2;
 /// What a Ctrl-C does.
 #[derive(Debug, PartialEq, Eq)]
 enum CtrlC {
-    /// Print the notice and exit at once.
+    /// Print the notice (a catalog key) and exit at once.
     Exit(&'static str),
-    /// Set the cancel flag and print the notice.
+    /// Set the cancel flag and print the notice (a catalog key).
     Notice(&'static str),
 }
 
@@ -338,13 +438,13 @@ enum CtrlC {
 /// when an earlier Ctrl-C has (`again`) or has not already cancelled.
 fn ctrl_c_action(read_only: bool, phase: u8, again: bool) -> CtrlC {
     if !read_only {
-        CtrlC::Notice("stopping: started files are finished, new ones are not started…")
+        CtrlC::Notice("cli.ctrlc.stopping_files")
     } else if phase == PHASE_WRITING {
-        CtrlC::Notice("writing the plan…")
+        CtrlC::Notice("cli.ctrlc.writing_plan")
     } else if again && phase == PHASE_READING {
-        CtrlC::Exit("interrupted")
+        CtrlC::Exit("cli.ctrlc.interrupted")
     } else {
-        CtrlC::Notice("stopping…")
+        CtrlC::Notice("cli.ctrlc.stopping")
     }
 }
 
@@ -358,17 +458,20 @@ fn cancel_on_ctrl_c(read_only: bool) -> Cancel {
         let phase = SCAN_PHASE.load(Ordering::SeqCst);
         match ctrl_c_action(read_only, phase, flag.is_cancelled()) {
             CtrlC::Exit(msg) => {
-                eprintln!("\n{msg}");
+                eprintln!("\n{}", gallery_core::t!(msg));
                 std::process::exit(CANCELLED.into());
             }
             CtrlC::Notice(msg) => {
                 flag.cancel();
-                eprintln!("\n{msg}");
+                eprintln!("\n{}", gallery_core::t!(msg));
             }
         }
     });
     if let Err(e) = set {
-        eprintln!("warning: Ctrl-C not intercepted: {e}");
+        eprintln!(
+            "{}",
+            gallery_core::t!("cli.ctrlc.not_intercepted", error = e)
+        );
     }
     cancel
 }
@@ -434,11 +537,12 @@ fn run(cmd: Cmd) -> Result<u8> {
 /// The `pending` text: the count first, then ready files per target.
 fn pending_text(p: &gallery_core::pending::Pending) -> String {
     use std::fmt::Write;
+    // The first line is for scripts: it stays `pending: N` in every language.
     let mut out = format!(
-        "pending: {}\nready to apply: {}\nawaiting AI: {}\n",
+        "pending: {}\n{}\n{}\n",
         p.total(),
-        p.to_process,
-        p.need_ai
+        gallery_core::t!("cli.pending_ready", n = p.to_process),
+        gallery_core::t!("cli.pending_ai", n = p.need_ai)
     );
     for (name, n) in &p.by_target {
         let _ = writeln!(out, "  {name}: {n}");
@@ -461,7 +565,7 @@ fn load_config(config: &Path) -> Result<Config> {
 fn examples_cmd(action: &ExamplesCmd) -> Result<()> {
     use gallery_core::learn::Store;
     let path =
-        Store::default_path().ok_or_else(|| Error::Config("no user data directory".into()))?;
+        Store::default_path().ok_or_else(|| Error::Config(gallery_core::t!("lock.no_data_dir")))?;
     let store = Store::new(path);
     match action {
         ExamplesCmd::List { source } => {
@@ -469,7 +573,7 @@ fn examples_cmd(action: &ExamplesCmd) -> Result<()> {
         }
         ExamplesCmd::Clear { source } => {
             let n = store.clear(source.as_deref())?;
-            println!("Examples deleted: {n}");
+            println!("{}", gallery_core::t!("cli.examples_deleted", n = n));
         }
     }
     Ok(())
@@ -487,7 +591,7 @@ fn examples_text(all: &[gallery_core::learn::Correction], source: Option<&str>) 
     ids.sort_unstable();
     ids.dedup();
     if ids.is_empty() {
-        return "No examples\n".into();
+        return format!("{}\n", gallery_core::t!("cli.no_examples"));
     }
     let mut out = String::new();
     for id in ids {
@@ -495,16 +599,23 @@ fn examples_text(all: &[gallery_core::learn::Correction], source: Option<&str>) 
         let _ = writeln!(out, "{id}: {}", mine.len());
         for c in mine.iter().rev() {
             let right = match &c.user_choice {
-                Action::Target { name } => name.as_str(),
-                Action::Keep => "leave in place",
+                Action::Target { name } => name.clone(),
+                Action::Keep => gallery_core::t!("cli.leave_in_place"),
             };
             let _ = writeln!(
                 out,
-                "  {}: {} — AI chose {}, correct is {right} [{}]",
-                c.file,
-                c.ai_reason,
-                c.ai_suggested.as_deref().unwrap_or("nothing"),
-                c.id
+                "  {}",
+                gallery_core::t!(
+                    "cli.example_line",
+                    file = c.file,
+                    reason = c.ai_reason,
+                    chose = c
+                        .ai_suggested
+                        .clone()
+                        .unwrap_or_else(|| gallery_core::t!("cli.nothing")),
+                    right = right,
+                    id = c.id
+                )
             );
         }
     }
@@ -540,9 +651,9 @@ fn gui_exe(exe: Option<PathBuf>) -> Result<PathBuf> {
         None => std::env::current_exe()?.with_file_name("gallery-gui"),
     };
     if !path.is_file() {
-        return Err(Error::Config(format!(
-            "gallery-gui not found: {} (use --exe)",
-            path.display()
+        return Err(Error::Config(gallery_core::t!(
+            "cli.gui_not_found",
+            path = path.display()
         )));
     }
     Ok(std::fs::canonicalize(path)?)
@@ -551,10 +662,10 @@ fn gui_exe(exe: Option<PathBuf>) -> Result<PathBuf> {
 fn install_desktop_cmd(exe: Option<PathBuf>) -> Result<()> {
     let exe = gui_exe(exe)?;
     let data_home =
-        dirs::data_dir().ok_or_else(|| Error::Config("no user data directory".into()))?;
+        dirs::data_dir().ok_or_else(|| Error::Config(gallery_core::t!("lock.no_data_dir")))?;
     let icon = include_bytes!("../../gallery-gui/icons/128x128.png");
     for f in gallery_core::desktop::install_menu_entry(&data_home, &exe, icon)? {
-        println!("written: {}", f.display());
+        println!("{}", gallery_core::t!("cli.written", path = f.display()));
     }
     Ok(())
 }
@@ -566,17 +677,17 @@ fn presets_text() -> String {
     };
     use std::fmt::Write;
     let scope = gallery_core::config::Config::default();
-    let mut out = String::from("Name presets\n");
+    let mut out = format!("{}\n", gallery_core::t!("cli.presets_name"));
     for (name, p) in builtin_name_presets() {
         let mask = p.mask_or_default();
         let _ = writeln!(
             out,
-            "  {name}: {} [mask: {}]",
+            "  {name}: {} [{}]",
             describe_name(&p),
-            mask.expand(&scope)
+            gallery_core::t!("cli.mask_label", mask = mask.expand(&scope))
         );
     }
-    out.push_str("\nContent presets\n");
+    out.push_str(&format!("\n{}\n", gallery_core::t!("cli.presets_content")));
     let (bundles, singles): (Vec<_>, Vec<_>) = builtin_content_presets()
         .into_iter()
         .partition(|(_, p)| matches!(p, gallery_core::config::ContentPreset::Bundle(_)));
@@ -584,16 +695,16 @@ fn presets_text() -> String {
         let mask = p.mask_or_default();
         let _ = writeln!(
             out,
-            "  {name}: {} [mask: {}]",
+            "  {name}: {} [{}]",
             describe_content(&p),
-            mask.expand(&scope)
+            gallery_core::t!("cli.mask_label", mask = mask.expand(&scope))
         );
     }
-    out.push_str("\nBundles (one step = several presets in order)\n");
+    out.push_str(&format!("\n{}\n", gallery_core::t!("cli.presets_bundles")));
     for (name, p) in bundles {
         let _ = writeln!(out, "  {name}: {}", describe_content(&p));
     }
-    out.push_str("\nMasks (@name)\n");
+    out.push_str(&format!("\n{}\n", gallery_core::t!("cli.presets_masks")));
     for (name, e) in gallery_core::presets::builtin_masks() {
         let (raw, full) = (e.source(), e.expand(&scope));
         if raw == full {
@@ -616,12 +727,12 @@ fn check() -> Result<u8> {
                 let required = name != "optipng";
                 ok &= !required;
                 println!(
-                    "{name}: not found{}",
-                    if required {
-                        " (required)"
+                    "{name}: {}",
+                    gallery_core::t!(if required {
+                        "cli.check_missing_required"
                     } else {
-                        " (needed for PNG presets)"
-                    }
+                        "cli.check_missing_png"
+                    })
                 );
             }
         }
@@ -633,10 +744,16 @@ fn check() -> Result<u8> {
     for (tool, version) in &caps.versions {
         println!("{tool}: {version}");
     }
-    let yn = |b: bool| if b { "yes" } else { "no" };
-    println!("ffmpeg libsvtav1 (AV1 video): {}", yn(caps.svtav1));
-    println!("ffmpeg libopus (Opus audio): {}", yn(caps.opus));
-    println!("ffmpeg vidstab (stabilization): {}", yn(caps.vidstab));
+    let yn = |b: bool| gallery_core::t!(if b { "cli.yes" } else { "cli.no" });
+    println!(
+        "{}",
+        gallery_core::t!("cli.check_svtav1", v = yn(caps.svtav1))
+    );
+    println!("{}", gallery_core::t!("cli.check_opus", v = yn(caps.opus)));
+    println!(
+        "{}",
+        gallery_core::t!("cli.check_vidstab", v = yn(caps.vidstab))
+    );
     // svtav1 is needed by the main video presets; the others only by optional presets.
     Ok(if caps.svtav1 { 0 } else { 1 })
 }
@@ -645,9 +762,9 @@ fn check() -> Result<u8> {
 /// else the default file when it exists, else none.
 fn overrides_for_scan(explicit: Option<&Path>, default: Option<PathBuf>) -> Result<Overrides> {
     match explicit {
-        Some(p) if !p.exists() => Err(Error::Config(format!(
-            "manual decisions file not found: {}",
-            p.display()
+        Some(p) if !p.exists() => Err(Error::Config(gallery_core::t!(
+            "cli.overrides_not_found",
+            path = p.display()
         ))),
         Some(p) => Overrides::load(p),
         None => match default {
@@ -659,7 +776,7 @@ fn overrides_for_scan(explicit: Option<&Path>, default: Option<PathBuf>) -> Resu
 
 /// The summary line about manual decisions, when any were applied.
 fn overrides_line(applied: usize) -> Option<String> {
-    (applied > 0).then(|| format!("overrides: {applied} applied"))
+    (applied > 0).then(|| gallery_core::t!("cli.overrides_applied", n = applied))
 }
 
 fn explain_cmd(config: &Path, overrides: Option<&Path>, paths: &[PathBuf]) -> Result<()> {
@@ -709,17 +826,20 @@ fn unmatched_cmd(config: &Path, plan: Option<&Path>, overrides: Option<&Path>) -
     };
     let groups = group_unmatched(&plan, &cfg);
     if groups.is_empty() {
-        println!("No unmatched files");
+        println!("{}", gallery_core::t!("cli.no_unmatched"));
         return Ok(());
     }
     let total: u64 = groups.iter().map(|g| g.size).sum();
     println!(
-        "Unmatched: {} files in {} groups, {}",
-        plan.unmatched.len(),
-        groups.len(),
-        size_text(total)
+        "{}",
+        gallery_core::t!(
+            "cli.unmatched_summary",
+            files = gallery_core::tn!("count.files", plan.unmatched.len()),
+            groups = gallery_core::tn!("count.groups", groups.len()),
+            size = size_text(total)
+        )
     );
-    println!("source/folder\textension\tfiles\tsize\treason");
+    println!("{}", gallery_core::t!("cli.unmatched_header"));
     for g in &groups {
         println!("{}", table_line(g));
     }
@@ -732,11 +852,11 @@ fn scan_estimate_cmd(config: &Path, overrides: &Overrides) -> Result<()> {
     let cfg = load_config(config)?;
     cfg.validate()?;
     if cfg.targets.ai.is_empty() {
-        println!("The config has no AI targets: a scan will not call it");
+        println!("{}", gallery_core::t!("cli.no_ai_targets"));
         return Ok(());
     }
     let cache = AiClassifier::default_cache_path()
-        .ok_or_else(|| Error::Ai("no user cache directory".into()))?;
+        .ok_or_else(|| Error::Ai(gallery_core::t!("ai.no_cache_dir")))?;
     let cancel = cancel_on_ctrl_c(true);
     let line = Line::new();
     let dry = pipeline::ai_dry_run(&cfg, overrides, &cache, &line, &cancel);
@@ -745,9 +865,12 @@ fn scan_estimate_cmd(config: &Path, overrides: &Overrides) -> Result<()> {
         .map(|p| usage_log::load(&p))
         .unwrap_or_default();
     let e = gallery_core::estimate::ai_estimate(&dry?, &cfg.ai.model, &rows);
-    println!("AI: {} ({})", e.label, e.source_label);
+    println!(
+        "{}",
+        gallery_core::t!("cli.ai_line", label = e.label, source = e.source_label)
+    );
     if e.usd.is_some_and(|u| u.mid > 1.0) {
-        println!("Costs more than $1: the GUI will ask for confirmation before such a scan");
+        println!("{}", gallery_core::t!("cli.costs_more"));
     }
     Ok(())
 }
@@ -771,24 +894,40 @@ fn print_estimate(plan: &Plan, plan_path: &Path, jobs: usize) {
         let text = size_text(v.unsigned_abs());
         if v < 0 { format!("-{text}") } else { text }
     };
-    println!("Estimate ({}):", e.source_label);
+    println!(
+        "{}",
+        gallery_core::t!("cli.estimate_title", source = e.source_label)
+    );
     for t in e.targets.iter().chain(std::iter::once(&e.total)) {
-        let name = if t.name.is_empty() { "total" } else { &t.name };
+        let name = if t.name.is_empty() {
+            gallery_core::t!("cli.total")
+        } else {
+            t.name.clone()
+        };
         println!(
-            "  {name}: {} files, {} -> {} – {}, saves {} – {}, time {}",
-            t.files,
-            size_text(t.input_bytes),
-            size_text(t.output_bytes.low),
-            size_text(t.output_bytes.high),
-            saving(t.saving_bytes.low),
-            saving(t.saving_bytes.high),
-            t.time_text()
+            "  {name}: {}",
+            gallery_core::t!(
+                "cli.estimate_line",
+                files = gallery_core::tn!("count.files", t.files),
+                input = size_text(t.input_bytes),
+                low = size_text(t.output_bytes.low),
+                high = size_text(t.output_bytes.high),
+                save_low = saving(t.saving_bytes.low),
+                save_high = saving(t.saving_bytes.high),
+                time = t.time_text()
+            )
         );
     }
     let t = &e.total;
     println!(
-        "  to trash: {}, rename: {}, keep: {} (files in parallel: {jobs})",
-        t.trash, t.renamed, t.kept
+        "  {}",
+        gallery_core::t!(
+            "cli.estimate_totals",
+            trash = t.trash,
+            renamed = t.renamed,
+            kept = t.kept,
+            jobs = jobs
+        )
     );
 }
 
@@ -796,7 +935,7 @@ fn scan_cmd(config: &Path, output: &Path, opts: ScanOptions, overrides: &Overrid
     let cfg = load_config(config)?;
     cfg.validate()?;
     for w in cfg.warnings() {
-        eprintln!("warning: {w}");
+        eprintln!("{}", gallery_core::t!("cli.warning", text = w));
     }
     let tools = Tools::discover()?;
     let cancel = cancel_on_ctrl_c(true);
@@ -813,7 +952,7 @@ fn scan_cmd(config: &Path, output: &Path, opts: ScanOptions, overrides: &Overrid
     SCAN_PHASE.store(PHASE_OTHER, Ordering::SeqCst);
     let (plan, ai, warnings, applied) = saved?;
     for w in warnings {
-        eprintln!("warning: {w}");
+        eprintln!("{}", gallery_core::t!("cli.warning", text = w));
     }
 
     print_summary(&plan, output);
@@ -822,8 +961,19 @@ fn scan_cmd(config: &Path, output: &Path, opts: ScanOptions, overrides: &Overrid
     }
     if let Some(u) = ai {
         match u.cost(&cfg.ai.model) {
-            Some(c) => println!("AI: ${c:.4} ({} in, {} out tokens)", u.input, u.output),
-            None => println!("AI: {} in, {} out tokens", u.input, u.output),
+            Some(c) => println!(
+                "{}",
+                gallery_core::t!(
+                    "cli.ai_cost",
+                    usd = gallery_core::i18n::decimal(c, 4),
+                    input = u.input,
+                    output = u.output
+                )
+            ),
+            None => println!(
+                "{}",
+                gallery_core::t!("cli.ai_tokens", input = u.input, output = u.output)
+            ),
         }
     }
     Ok(())
@@ -834,34 +984,59 @@ fn print_summary(plan: &Plan, output: &Path) {
     for it in &plan.items {
         *per_target.entry(it.target.as_str()).or_default() += 1;
     }
-    println!("Plan: {} ({} files)", output.display(), plan.items.len());
+    println!(
+        "{}",
+        gallery_core::t!(
+            "cli.plan_line",
+            path = output.display(),
+            files = gallery_core::tn!("count.files", plan.items.len())
+        )
+    );
     for (t, n) in per_target {
         println!("  {t}: {n}");
     }
     if !plan.review.is_empty() {
-        println!("For review: {}", plan.review.len());
+        println!(
+            "{}",
+            gallery_core::t!("cli.for_review", n = plan.review.len())
+        );
         for r in &plan.review {
             println!("  {} -> {} ({})", r.source.display(), r.suggested, r.reason);
         }
     }
-    println!("Matched no target: {}", plan.unmatched.len());
+    println!(
+        "{}",
+        gallery_core::t!("cli.matched_none", n = plan.unmatched.len())
+    );
     // Routed, but every output would leave the file as it is; or only an
     // exclude mask turned it away (left alone on purpose).
-    println!("unchanged: {}", plan.unchanged.len());
+    println!(
+        "{}",
+        gallery_core::t!("cli.unchanged", n = plan.unchanged.len())
+    );
     if !plan.warnings.is_empty() {
-        println!("Warnings: {}", plan.warnings.len());
+        println!(
+            "{}",
+            gallery_core::t!("cli.warnings", n = plan.warnings.len())
+        );
         for w in &plan.warnings {
             match w {
                 Warning::SeriesSplit { a, b } => {
-                    println!("  series split up: {} and {}", a.display(), b.display())
+                    println!(
+                        "  {}",
+                        gallery_core::t!("cli.w_series", a = a.display(), b = b.display())
+                    )
                 }
                 Warning::DoubleEncode { source, dest } => println!(
-                    "  double re-encoding: {} -> {}",
-                    source.display(),
-                    dest.display()
+                    "  {}",
+                    gallery_core::t!(
+                        "cli.w_double",
+                        source = source.display(),
+                        dest = dest.display()
+                    )
                 ),
                 Warning::MissingServerPath { what } => {
-                    println!("  no server path: {what}")
+                    println!("  {}", gallery_core::t!("cli.w_server_path", what = what))
                 }
             }
         }
@@ -906,9 +1081,9 @@ fn anomaly_lines(report: &gallery_core::apply::Report) -> Vec<String> {
         .iter()
         .flat_map(|it| {
             it.outputs.iter().flat_map(move |o| {
-                o.anomalies
-                    .iter()
-                    .map(move |a| format!("discrepancy: {}: {a}", it.source.display()))
+                o.anomalies.iter().map(move |a| {
+                    gallery_core::t!("cli.discrepancy", path = it.source.display(), what = a)
+                })
             })
         })
         .collect()
@@ -933,7 +1108,13 @@ fn apply_cmd(
         match SyncPause::discover() {
             Ok(s) => Some(s),
             Err(e) => {
-                eprintln!("warning: Syncthing not paused: {e}");
+                eprintln!(
+                    "{}",
+                    gallery_core::t!(
+                        "cli.warning",
+                        text = gallery_core::t!("apply.sync_not_paused", error = e)
+                    )
+                );
                 None
             }
         }
@@ -961,9 +1142,12 @@ fn apply_cmd(
             pilot_plan = dry_dir.path().join("pilot.plan.json");
             pilot.save(&pilot_plan)?;
             println!(
-                "pilot (check): {} files, rest: {}; pilot files are not written",
-                pilot.items.len(),
-                rest.items.len()
+                "{}",
+                gallery_core::t!(
+                    "cli.pilot_check",
+                    files = gallery_core::tn!("count.files", pilot.items.len()),
+                    rest = rest.items.len()
+                )
             );
             pilot_plan.as_path()
         }
@@ -973,11 +1157,14 @@ fn apply_cmd(
             pilot.save(&p)?;
             rest.save(&r)?;
             println!(
-                "pilot: {} files in {}, rest ({}) in {}",
-                pilot.items.len(),
-                p.display(),
-                rest.items.len(),
-                r.display()
+                "{}",
+                gallery_core::t!(
+                    "cli.pilot",
+                    files = gallery_core::tn!("count.files", pilot.items.len()),
+                    pilot_path = p.display(),
+                    rest = rest.items.len(),
+                    rest_path = r.display()
+                )
             );
             rest_plan = Some(r);
             pilot_plan = p;
@@ -1004,15 +1191,25 @@ fn apply_cmd(
             ItemStatus::Done { .. } | ItemStatus::DryRun => done += 1,
             ItemStatus::Failed { .. } => {
                 failed += 1;
-                eprintln!("failed: {}: {}", it.source.display(), failure_reason(it));
+                eprintln!(
+                    "{}",
+                    gallery_core::t!(
+                        "cli.failed",
+                        path = it.source.display(),
+                        reason = failure_reason(it)
+                    )
+                );
             }
             ItemStatus::Stale | ItemStatus::Missing => {
                 skipped += 1;
                 let why = match it.status {
-                    ItemStatus::Stale => "changed after the plan",
-                    _ => "no such file",
+                    ItemStatus::Stale => gallery_core::t!("cli.skip_stale"),
+                    _ => gallery_core::t!("cli.skip_missing"),
                 };
-                eprintln!("skipped: {}: {why}", it.source.display());
+                eprintln!(
+                    "{}",
+                    gallery_core::t!("cli.skipped", path = it.source.display(), why = why)
+                );
             }
         }
     }
@@ -1021,15 +1218,30 @@ fn apply_cmd(
         eprintln!("{a}");
     }
     for w in &report.tool_warnings {
-        println!("warning: {w}");
+        println!("{}", gallery_core::t!("cli.warning", text = w));
     }
-    let verb = if dry_run { "checked" } else { "processed" };
-    println!("{verb}: {done}, renamed: {renamed}, errors: {failed}, skipped: {skipped}");
+    println!(
+        "{}",
+        gallery_core::t!(
+            if dry_run {
+                "cli.result_checked"
+            } else {
+                "cli.result_processed"
+            },
+            done = done,
+            renamed = renamed,
+            failed = failed,
+            skipped = skipped
+        )
+    );
     if dry_run && let Ok(p) = Plan::load(plan) {
         print_estimate(&p, plan, opts.jobs);
     }
     if !dry_run {
-        println!("Report: {}", report_path(plan).display());
+        println!(
+            "{}",
+            gallery_core::t!("cli.report", path = report_path(plan).display())
+        );
     }
     if let Some(p) = &pause {
         print_pause_note(p);
@@ -1039,8 +1251,12 @@ fn apply_cmd(
     }
     if report.stopped_by_anomalies {
         eprintln!(
-            "stopped because of discrepancies: files not started: {}",
-            Plan::load(plan).map_or(0, |p| p.items.len().saturating_sub(report.items.len()))
+            "{}",
+            gallery_core::t!(
+                "cli.stopped_anomalies",
+                n = Plan::load(plan)
+                    .map_or(0, |p| p.items.len().saturating_sub(report.items.len()))
+            )
         );
         return Ok(2);
     }
@@ -1048,8 +1264,8 @@ fn apply_cmd(
         // Not started files are not in the report and were not touched.
         let total = Plan::load(plan).map_or(0, |p| p.items.len());
         eprintln!(
-            "stopped: files not started: {}",
-            total.saturating_sub(report.items.len())
+            "{}",
+            gallery_core::t!("cli.stopped", n = total.saturating_sub(report.items.len()))
         );
         return Ok(CANCELLED);
     }
@@ -1061,46 +1277,58 @@ fn print_pause_note(p: &SyncPause) {
     if let Ok(Some(st)) = gallery_core::syncthing::load_state(&p.state_path) {
         let names: Vec<&str> = st.folders.iter().map(|f| f.label.as_str()).collect();
         println!(
-            "sync is paused ({}), check the result, then: gallery sync resume",
-            names.join(", ")
+            "{}",
+            gallery_core::t!("cli.sync_paused_note", names = names.join(", "))
         );
     }
 }
 
 fn sync_cmd(action: &SyncCmd) -> Result<u8> {
     let state_path = gallery_core::syncthing::default_state_path()
-        .ok_or_else(|| Error::Config("no data folder".into()))?;
+        .ok_or_else(|| Error::Config(gallery_core::t!("lock.no_data_dir")))?;
     let state = gallery_core::syncthing::load_state(&state_path)?;
     match action {
         SyncCmd::Status => {
             match &state {
-                None => println!("Gallery has paused nothing"),
+                None => println!("{}", gallery_core::t!("cli.sync_nothing_paused")),
                 Some(st) => {
                     let names: Vec<&str> = st.folders.iter().map(|f| f.label.as_str()).collect();
-                    println!("paused: {}", names.join(", "));
-                    println!("since {}, plan: {}", st.paused_at, st.plan);
-                    println!("to resume: gallery sync resume");
+                    println!(
+                        "{}",
+                        gallery_core::t!("cli.sync_paused", names = names.join(", "))
+                    );
+                    println!(
+                        "{}",
+                        gallery_core::t!("cli.sync_since", since = st.paused_at, plan = st.plan)
+                    );
+                    println!("{}", gallery_core::t!("cli.sync_to_resume"));
                 }
             }
             match gallery_core::syncthing::Syncthing::discover().and_then(|c| c.health()) {
-                Ok(()) => println!("Syncthing is responding"),
-                Err(e) => println!("Syncthing is unavailable: {e}"),
+                Ok(()) => println!("{}", gallery_core::t!("cli.sync_responding")),
+                Err(e) => println!("{}", gallery_core::t!("cli.sync_unavailable", error = e)),
             }
             Ok(0)
         }
         SyncCmd::Resume => {
             if state.is_none() {
-                println!("nothing to resume");
+                println!("{}", gallery_core::t!("cli.sync_nothing_to_resume"));
                 return Ok(0);
             }
             let out = SyncPause::discover()?.resume()?;
             if !out.resumed.is_empty() {
-                println!("sync resumed: {}", out.resumed.join(", "));
+                println!(
+                    "{}",
+                    gallery_core::t!("cli.sync_resumed", names = out.resumed.join(", "))
+                );
             }
             if out.failed.is_empty() {
                 Ok(0)
             } else {
-                eprintln!("could not resume: {}", out.failed.join(", "));
+                eprintln!(
+                    "{}",
+                    gallery_core::t!("cli.sync_resume_failed", names = out.failed.join(", "))
+                );
                 Ok(2)
             }
         }
@@ -1115,7 +1343,7 @@ fn print_pilot_summary(
     plan: &Path,
     rest: Option<&Path>,
 ) {
-    println!("discrepancies with the sources: {anomalies}");
+    println!("{}", gallery_core::t!("cli.pilot_anomalies", n = anomalies));
     let samples: Vec<&Path> = report
         .items
         .iter()
@@ -1124,17 +1352,20 @@ fn print_pilot_summary(
         .take(5)
         .collect();
     if !samples.is_empty() {
-        println!("sample results:");
+        println!("{}", gallery_core::t!("cli.pilot_samples"));
         for p in samples {
             println!("  {}", p.display());
         }
     }
     println!(
-        "undo the pilot: gallery undo {}",
-        report_path(plan).display()
+        "{}",
+        gallery_core::t!("cli.pilot_undo", path = report_path(plan).display())
     );
     if let Some(r) = rest {
-        println!("continue with the rest: gallery apply {}", r.display());
+        println!(
+            "{}",
+            gallery_core::t!("cli.pilot_continue", path = r.display())
+        );
     }
 }
 
@@ -1149,7 +1380,7 @@ fn failure_reason(it: &ItemResult) -> String {
             let e = o.error.as_ref()?;
             Some(format!("{}: {e}", o.planned.display()))
         })
-        .unwrap_or_else(|| "unknown error".to_string())
+        .unwrap_or_else(|| gallery_core::t!("cli.unknown_error"))
 }
 
 fn undo_cmd(report: &Path) -> Result<()> {
@@ -1160,22 +1391,26 @@ fn undo_cmd(report: &Path) -> Result<()> {
     line.clear();
     let s = s?;
     println!(
-        "sources restored: {}, outputs deleted: {}",
-        s.restored, s.removed_outputs
+        "{}",
+        gallery_core::t!(
+            "cli.undo_result",
+            restored = s.restored,
+            removed = s.removed_outputs
+        )
     );
     for p in &s.problems {
-        eprintln!("problem: {p}");
+        eprintln!("{}", gallery_core::t!("cli.problem", text = p));
     }
     if s.cancelled {
-        eprintln!("undo stopped; run undo again to finish");
+        eprintln!("{}", gallery_core::t!("cli.undo_stopped"));
         return Err(Error::Cancelled);
     }
     if s.problems.is_empty() {
         Ok(())
     } else {
-        Err(Error::Plan(format!(
-            "undo with problems: {}",
-            s.problems.len()
+        Err(Error::Plan(gallery_core::t!(
+            "cli.undo_problems",
+            n = s.problems.len()
         )))
     }
 }
@@ -1339,25 +1574,95 @@ mod tests {
         // First Ctrl-C while reading: stop; second: exit at once.
         assert_eq!(
             ctrl_c_action(true, PHASE_READING, false),
-            Notice("stopping…")
+            Notice("cli.ctrlc.stopping")
         );
         assert_eq!(
             ctrl_c_action(true, PHASE_READING, true),
-            Exit("interrupted")
+            Exit("cli.ctrlc.interrupted")
         );
         // While the plan file is written: never exit, say so.
         for again in [false, true] {
             assert_eq!(
                 ctrl_c_action(true, PHASE_WRITING, again),
-                Notice("writing the plan…")
+                Notice("cli.ctrlc.writing_plan")
             );
         }
         // Apply and undo never exit on Ctrl-C.
         for again in [false, true] {
             assert_eq!(
                 ctrl_c_action(false, PHASE_OTHER, again),
-                Notice("stopping: started files are finished, new ones are not started…")
+                Notice("cli.ctrlc.stopping_files")
             );
         }
+    }
+}
+
+#[cfg(test)]
+mod lang_tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    fn args(a: &[&str]) -> Vec<String> {
+        a.iter().map(|s| s.to_string()).collect()
+    }
+
+    /// Every help text of the clap definition: `(catalog key, argument id, text)`.
+    fn help_texts(
+        cmd: &clap::Command,
+        path: &str,
+        out: &mut Vec<(String, Option<String>, String)>,
+    ) {
+        if let Some(a) = cmd.get_about() {
+            out.push((format!("{path}.about"), None, a.to_string()));
+        }
+        if let Some(a) = cmd.get_long_about() {
+            out.push((format!("{path}.long"), None, a.to_string()));
+        }
+        for a in cmd.get_arguments() {
+            if let Some(h) = a.get_help() {
+                let id = a.get_id().to_string();
+                out.push((format!("{path}.{id}"), Some(id), h.to_string()));
+            }
+        }
+        for s in cmd.get_subcommands() {
+            help_texts(
+                s,
+                &format!("{path}.{}", s.get_name().replace('-', "_")),
+                out,
+            );
+        }
+    }
+
+    #[test]
+    fn lang_flag_is_read_before_clap() {
+        assert_eq!(
+            lang_arg(&args(&["gallery", "--lang", "ru", "check"])),
+            Some("ru")
+        );
+        assert_eq!(
+            lang_arg(&args(&["gallery", "check", "--lang=de"])),
+            Some("de")
+        );
+        assert_eq!(lang_arg(&args(&["gallery", "check"])), None);
+        assert_eq!(lang_arg(&args(&["gallery", "--", "--lang", "ru"])), None);
+        assert_eq!(
+            choose_locale(&args(&["gallery", "--lang", "pt_PT"])),
+            "pt-BR"
+        );
+        assert_eq!(choose_locale(&args(&["gallery", "--lang", "xx"])), "en");
+    }
+
+    #[test]
+    fn english_help_is_the_catalog_and_the_source_text() {
+        let mut all = Vec::new();
+        help_texts(&Cli::command(), "cli", &mut all);
+        assert!(all.len() > 50);
+        gallery_core::i18n::with_locale("en", || {
+            for (key, id, text) in all {
+                let found = catalog(&key).or_else(|| catalog(&format!("cli.arg.{}", id?)));
+                assert_eq!(found.as_deref(), Some(text.as_str()), "{key}");
+            }
+            Some(())
+        });
     }
 }

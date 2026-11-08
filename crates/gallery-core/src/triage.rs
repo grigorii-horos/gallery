@@ -80,7 +80,7 @@ pub fn group_unmatched_with(plan: &Plan, cfg: &Config, opts: &ExplainOptions) ->
             files.sort();
             let reason = match explain(cfg, files[0].0, &Overrides::default(), opts) {
                 Ok(e) => e.verdict,
-                Err(e) => format!("could not explain: {e}"),
+                Err(e) => crate::t!("triage.explain_failed", error = e),
             };
             Group {
                 count: files.len(),
@@ -107,7 +107,7 @@ pub fn group_unmatched_with(plan: &Plan, cfg: &Config, opts: &ExplainOptions) ->
 
 /// Human-readable size text: `1.5 MB`.
 pub fn size_text(bytes: u64) -> String {
-    const U: [&str; 4] = ["B", "KB", "MB", "GB"];
+    const U: [&str; 4] = ["unit.b", "unit.kb", "unit.mb", "unit.gb"];
     let mut v = bytes as f64;
     let mut i = 0;
     while v >= 1024.0 && i < U.len() - 1 {
@@ -115,9 +115,9 @@ pub fn size_text(bytes: u64) -> String {
         i += 1;
     }
     if i == 0 {
-        format!("{bytes} {}", U[0])
+        format!("{bytes} {}", crate::t!(U[0]))
     } else {
-        format!("{v:.1} {}", U[i])
+        format!("{} {}", crate::i18n::decimal(v, 1), crate::t!(U[i]))
     }
 }
 
@@ -129,7 +129,7 @@ pub fn table_line(g: &Group) -> String {
         format!("{}/{}", g.source, g.dir)
     };
     let ext = if g.ext.is_empty() {
-        "(no extension)".to_string()
+        crate::t!("triage.no_ext")
     } else {
         format!(".{}", g.ext)
     };

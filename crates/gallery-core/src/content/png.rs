@@ -12,7 +12,7 @@ impl ContentStep for PngPreset {
             .tools
             .optipng
             .as_ref()
-            .ok_or_else(|| Error::Tool("png: optipng not found".into()))?;
+            .ok_or_else(|| Error::Tool(crate::t!("content.optipng_missing")))?;
         let out = tmp_output(ctx.tmp_dir, input, self.output_ext())?;
         // The result may be no smaller; that is fine, the copy is still valid.
         let res = copy_keep_mtime(input, &out).and_then(|()| {
@@ -32,7 +32,11 @@ impl ContentStep for PngPreset {
             }),
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
-                Err(Error::Tool(format!("png {}: {e}", ctx.original.display())))
+                Err(Error::Tool(crate::t!(
+                    "content.png_failed",
+                    path = ctx.original.display(),
+                    error = e
+                )))
             }
         }
     }

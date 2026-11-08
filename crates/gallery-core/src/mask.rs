@@ -31,7 +31,8 @@ impl Eq for Mask {}
 
 impl Mask {
     pub fn parse(s: &str) -> Result<Mask> {
-        let bad = |e: &dyn std::fmt::Display| Error::Config(format!("bad mask '{s}': {e}"));
+        let bad =
+            |e: &dyn std::fmt::Display| Error::Config(crate::t!("mask.bad", mask = s, detail = e));
         let matcher = if s.starts_with('^') {
             let re = RegexBuilder::new(s)
                 .case_insensitive(true)
@@ -109,22 +110,18 @@ impl MaskItem {
     pub fn parse(s: &str) -> Result<MaskItem> {
         if let Some(rest) = s.strip_prefix('!') {
             if rest.starts_with(char::is_whitespace) && !rest.trim().is_empty() {
-                return Err(Error::Config(format!(
-                    "bad mask '{s}': no space allowed after '!'"
-                )));
+                return Err(Error::Config(crate::t!("mask.bad_space", mask = s)));
             }
             if rest.trim().is_empty() {
-                return Err(Error::Config(format!(
-                    "bad mask '{s}': nothing to exclude after '!'"
-                )));
+                return Err(Error::Config(crate::t!("mask.bad_empty_not", mask = s)));
             }
             if rest.starts_with('!') {
-                return Err(Error::Config(format!("bad mask '{s}': double '!'")));
+                return Err(Error::Config(crate::t!("mask.bad_double_not", mask = s)));
             }
             return Ok(MaskItem::Not(Box::new(MaskItem::parse(rest)?)));
         }
         match s.strip_prefix('@') {
-            Some("") => Err(Error::Config("bad mask '@': a mask name is missing".into())),
+            Some("") => Err(Error::Config(crate::t!("mask.bad_ref_name"))),
             Some(name) => Ok(MaskItem::Ref(name.to_string())),
             None => Mask::parse(s).map(MaskItem::Pattern),
         }
@@ -202,17 +199,23 @@ fn check_item(
     let pos = children.iter().find(|c| !c.negated && c.hit);
     let neg = children.iter().find(|c| c.negated && c.hit);
     let reason = match (negated, hit) {
-        (false, true) => "matched".to_string(),
+        (false, true) => crate::t!("mask.matched"),
         (false, false) => match (pos, neg) {
-            (Some(p), Some(n)) => format!("matched {}, but excluded by {}", p.item, n.item),
-            _ if ext.is_empty() => "no match".to_string(),
-            _ => format!("extension {ext} does not match"),
+            (Some(p), Some(n)) => {
+                crate::t!(
+                    "mask.matched_but_excluded",
+                    taker = p.item,
+                    excluder = n.item
+                )
+            }
+            _ if ext.is_empty() => crate::t!("mask.no_match"),
+            _ => crate::t!("mask.ext_no_match", ext = ext),
         },
         (true, true) => match pos {
-            Some(p) => format!("name excluded: matched {}", p.item),
-            None => "name excluded".to_string(),
+            Some(p) => crate::t!("mask.excluded_by", item = p.item),
+            None => crate::t!("mask.excluded"),
         },
-        (true, false) => "not triggered".to_string(),
+        (true, false) => crate::t!("mask.not_triggered"),
     };
     ItemCheck {
         item: item.as_string(),
@@ -425,7 +428,7 @@ impl<'de> Deserialize<'de> for MaskExpr {
         impl<'de> serde::de::Visitor<'de> for V {
             type Value = MaskExpr;
             fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a mask string or a list of mask strings")
+                f.write_str(&crate::t!("mask.expecting"))
             }
             fn visit_str<E: serde::de::Error>(self, v: &str) -> std::result::Result<MaskExpr, E> {
                 MaskExpr::parse(v).map_err(E::custom)

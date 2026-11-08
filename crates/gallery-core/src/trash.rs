@@ -61,17 +61,17 @@ pub fn move_to_folder(path: &Path, source_root: &Path, run_id: &str) -> Result<T
         Some(r) => (source_root, r.to_path_buf()),
         None => {
             let parent = path.parent().unwrap_or(Path::new("."));
-            let name = path
-                .file_name()
-                .ok_or_else(|| Error::Plan(format!("no file name: {}", path.display())))?;
+            let name = path.file_name().ok_or_else(|| {
+                Error::Plan(crate::t!("content.no_file_name", path = path.display()))
+            })?;
             (parent, PathBuf::from(name))
         }
     };
     let target = root.join(".gallery-trash").join(run_id).join(rel);
     if std::fs::symlink_metadata(&target).is_ok() {
-        return Err(Error::Plan(format!(
-            "trash: already exists: {}",
-            target.display()
+        return Err(Error::Plan(crate::t!(
+            "trash.exists",
+            path = target.display()
         )));
     }
     if let Some(dir) = target.parent() {

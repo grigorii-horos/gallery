@@ -45,15 +45,16 @@ impl ContentStep for PhotoPreset {
                 Ok(StepResult {
                     path: copy,
                     ext: in_ext,
-                    warnings: vec!["not smaller than the source".into()],
+                    warnings: vec![crate::t!("content.not_smaller")],
                     fell_back: true,
                 })
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
-                Err(Error::Tool(format!(
-                    "photo {}: {e}",
-                    ctx.original.display()
+                Err(Error::Tool(crate::t!(
+                    "content.photo_failed",
+                    path = ctx.original.display(),
+                    error = e
                 )))
             }
         }
@@ -90,7 +91,7 @@ impl PhotoPreset {
             let needs_tags = self.encode_once(ctx, input, in_ext, out, q, png)?;
             let out_size = std::fs::metadata(out)?.len();
             if out_size == 0 {
-                return Err(Error::Tool("encoder produced an empty file".into()));
+                return Err(Error::Tool(crate::t!("content.empty_encoder")));
             }
             let saved = in_size.saturating_sub(out_size);
             if out_size < in_size && saved * 100 >= in_size * u64::from(self.min_saving_pct) {
@@ -175,7 +176,8 @@ impl PhotoPreset {
     fn verify(&self, ctx: &StepCtx, out: &Path) -> Result<()> {
         let mut cmd = ctx.tools.command(&ctx.tools.magick);
         cmd.arg("identify").arg(out);
-        run(cmd, "magick identify").map_err(|e| Error::Tool(format!("result unreadable: {e}")))
+        run(cmd, "magick identify")
+            .map_err(|e| Error::Tool(crate::t!("content.result_unreadable", error = e)))
     }
 }
 
@@ -186,9 +188,9 @@ fn short_side(ctx: &StepCtx, frame: &str) -> Result<u32> {
     cmd.env("MAGICK_THREAD_LIMIT", "1");
     let out = cmd.output()?;
     if !out.status.success() {
-        return Err(Error::Tool(format!(
-            "magick identify: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        return Err(Error::Tool(crate::t!(
+            "content.magick_identify",
+            error = String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
     let s = String::from_utf8_lossy(&out.stdout);
@@ -198,7 +200,10 @@ fn short_side(ctx: &StepCtx, frame: &str) -> Result<u32> {
         .collect();
     match dims[..] {
         [w, h, ..] => Ok(w.min(h)),
-        _ => Err(Error::Tool(format!("magick identify: bad output {s:?}"))),
+        _ => Err(Error::Tool(crate::t!(
+            "content.magick_bad_output",
+            output = format!("{s:?}")
+        ))),
     }
 }
 
@@ -217,7 +222,7 @@ fn run(mut cmd: Command, what: &str) -> Result<()> {
         .find(|l| !l.trim().is_empty());
     Err(Error::Tool(format!(
         "{what}: {}",
-        msg.unwrap_or("failed").trim()
+        msg.map_or_else(|| crate::t!("content.failed"), |m| m.trim().to_string())
     )))
 }
 
@@ -234,7 +239,7 @@ fn copy_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<String>
         "--ExifImageHeight".into(),
     ];
     if let Err(e) = exif::write(ctx.tools, out, &args) {
-        warnings.push(format!("metadata not copied: {e}"));
+        warnings.push(crate::t!("content.meta_not_copied", error = e));
         return;
     }
     let dto = |p: &Path| {
@@ -248,6 +253,6 @@ fn copy_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<String>
             })
     };
     if dto(input) == Some(true) && dto(out) != Some(true) {
-        warnings.push("metadata not copied: DateTimeOriginal missing in the result".into());
+        warnings.push(crate::t!("content.meta_no_dto"));
     }
 }

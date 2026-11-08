@@ -116,7 +116,7 @@ impl SkipSet {
                         .case_insensitive(true)
                         .literal_separator(true)
                         .build()
-                        .map_err(|e| Error::Config(format!("bad mask '{g}': {e}")))?;
+                        .map_err(|e| Error::Config(crate::t!("mask.bad", mask = g, detail = e)))?;
                     SkipGlob::Path(glob.compile_matcher())
                 } else {
                     SkipGlob::Name(Mask::parse(g)?)

@@ -13,7 +13,8 @@ const KEY: &str = "CLI-SECRET-KEY-77";
 
 fn gallery(tmp: &Path, cfg: &Path) -> Command {
     let mut c = Command::cargo_bin("gallery").unwrap();
-    c.env("GALLERY_TRASH", "folder")
+    c.env("LC_ALL", "C")
+        .env("GALLERY_TRASH", "folder")
         .env("GALLERY_SYNCTHING_CONFIG", cfg)
         .env("XDG_DATA_HOME", tmp.join("data"));
     c

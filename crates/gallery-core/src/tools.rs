@@ -68,7 +68,8 @@ pub fn find(name: &str) -> Option<PathBuf> {
 
 impl Tools {
     pub fn discover() -> Result<Tools> {
-        let need = |n: &str| find(n).ok_or_else(|| Error::Tool(format!("{n} not found")));
+        let need =
+            |n: &str| find(n).ok_or_else(|| Error::Tool(crate::t!("tools.not_found", name = n)));
         Ok(Tools {
             ffmpeg: need("ffmpeg")?,
             ffprobe: need("ffprobe")?,

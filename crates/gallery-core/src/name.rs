@@ -70,13 +70,13 @@ fn split_rel(rendered: &str) -> std::result::Result<(Vec<String>, String), Strin
     for (i, p) in parts.iter().chain([&name]).enumerate() {
         let folder = i < parts.len();
         let bad = if p.is_empty() {
-            Some("empty path component (leading, doubled or trailing '/')")
+            Some(crate::t!("name.empty_component"))
         } else if p == "." || p == ".." {
-            Some("'.' or '..' path component")
+            Some(crate::t!("name.dot_component"))
         } else if folder && p.contains('\\') {
-            Some("'\\' in a folder name; use '/' between folders")
+            Some(crate::t!("name.backslash_folder"))
         } else if folder && p.starts_with(RESERVED_PREFIX) {
-            Some("folder name starting with '.gallery-'")
+            Some(crate::t!("name.reserved_prefix"))
         } else {
             None
         };
@@ -91,11 +91,11 @@ fn split_rel(rendered: &str) -> std::result::Result<(Vec<String>, String), Strin
 /// it must be a safe relative path, and it may not hold `\` at all (`/` is
 /// the only folder separator). The error names the preset.
 pub fn check_template(preset_name: &str, preset: &NamePreset) -> std::result::Result<(), String> {
-    let err = |why: String| format!("name preset '{preset_name}': {why}");
+    let err = |why: String| crate::t!("name.preset_err", name = preset_name, why = why);
     if preset.template.contains('\\') {
-        return Err(err(format!(
-            "'\\' in template '{}'; use '/' between folders",
-            preset.template
+        return Err(err(crate::t!(
+            "name.backslash_template",
+            template = preset.template
         )));
     }
     let date = NaiveDateTime::parse_from_str("2026-01-02 03:04:05", "%Y-%m-%d %H:%M:%S").ok();
@@ -247,8 +247,8 @@ pub fn apply_name_pipe(
                 .is_some_and(|s| s.matches_veto(&name, scope))
             && let Some(new) = render(preset, &name, ctx)
         {
-            let (dirs, file) =
-                split_rel(&new).map_err(|why| format!("name preset '{preset_name}': {why}"))?;
+            let (dirs, file) = split_rel(&new)
+                .map_err(|why| crate::t!("name.preset_err", name = preset_name, why = why))?;
             if new.contains('/') {
                 subdir = dirs;
             }

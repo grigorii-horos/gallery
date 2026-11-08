@@ -170,19 +170,19 @@ fn file_name(p: &str) -> &str {
 fn label(outcome: Outcome, target: &Option<String>, outputs: &[OutputFate]) -> String {
     let t = target.as_deref().unwrap_or("—");
     match outcome {
-        Outcome::Unchanged if target.is_none() => "unchanged".into(),
-        Outcome::Unchanged => format!("{t}: unchanged"),
-        Outcome::Excluded => "dropped by the exclude mask".into(),
-        Outcome::Review => "for review".into(),
-        Outcome::Unmatched => "unmatched".into(),
-        Outcome::WaitingAi => "waiting for AI".into(),
+        Outcome::Unchanged if target.is_none() => crate::t!("effect.unchanged"),
+        Outcome::Unchanged => crate::t!("effect.target_unchanged", target = t),
+        Outcome::Excluded => crate::t!("effect.excluded"),
+        Outcome::Review => crate::t!("effect.review"),
+        Outcome::Unmatched => crate::t!("effect.unmatched"),
+        Outcome::WaitingAi => crate::t!("effect.waiting_ai"),
         Outcome::Compressed | Outcome::Renamed => {
             let parts: Vec<String> = outputs
                 .iter()
                 .filter(|o| o.op != OutputOp::Keep)
                 .map(|o| {
                     let what = if o.steps.is_empty() {
-                        "rename".to_string()
+                        crate::t!("effect.rename")
                     } else {
                         o.steps.join(" + ")
                     };

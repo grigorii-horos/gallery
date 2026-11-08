@@ -26,6 +26,8 @@ rayon = "1.12.0"
 trash = "5.2.9"
 blake3 = "1.8.7"
 iana-time-zone = "0.1.65"
+rust-i18n = "4.2.4"
+sys-locale = "0.3.2"
 
 [dev-dependencies]
 wiremock = "0.6.5"

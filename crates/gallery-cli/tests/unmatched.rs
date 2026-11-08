@@ -34,6 +34,7 @@ fn prints_groups_with_reasons_without_a_plan() {
     let cfg = setup(d.path());
     let out = Command::cargo_bin("gallery")
         .unwrap()
+        .env("LC_ALL", "C")
         .env("XDG_DATA_HOME", d.path().join("data"))
         .env("HOME", d.path())
         .args(["unmatched", "-c"])
@@ -65,6 +66,7 @@ fn reads_a_saved_plan() {
     std::fs::write(&plan, p.to_string()).unwrap();
     let out = Command::cargo_bin("gallery")
         .unwrap()
+        .env("LC_ALL", "C")
         .env("HOME", d.path())
         .args(["unmatched", "-c"])
         .arg(&cfg)

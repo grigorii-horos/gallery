@@ -19,9 +19,10 @@ impl ContentStep for AudioPreset {
             }),
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
-                Err(Error::Tool(format!(
-                    "audio {}: {e}",
-                    ctx.original.display()
+                Err(Error::Tool(crate::t!(
+                    "content.audio_failed",
+                    path = ctx.original.display(),
+                    error = e
                 )))
             }
         }
@@ -47,10 +48,12 @@ impl AudioPreset {
         );
         match (a, b) {
             (Some(a), Some(b)) if (a - b).abs() <= 1.0 => Ok(()),
-            (Some(a), Some(b)) => Err(Error::Tool(format!(
-                "duration mismatch: {a:.1}s -> {b:.1}s"
+            (Some(a), Some(b)) => Err(Error::Tool(crate::t!(
+                "content.duration_mismatch",
+                from = crate::i18n::decimal(a, 1),
+                to = crate::i18n::decimal(b, 1)
             ))),
-            _ => Err(Error::Tool("cannot read duration".into())),
+            _ => Err(Error::Tool(crate::t!("content.no_duration"))),
         }
     }
 }

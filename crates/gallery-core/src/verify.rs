@@ -141,13 +141,13 @@ fn probe(tools: &Tools, path: &Path) -> Result<Probe> {
         .arg(path)
         .output()?;
     if !out.status.success() {
-        return Err(crate::Error::Tool(format!(
-            "ffprobe: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        return Err(crate::Error::Tool(crate::t!(
+            "verify.ffprobe",
+            error = String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
     let v: Value = serde_json::from_slice(&out.stdout)
-        .map_err(|e| crate::Error::Tool(format!("ffprobe output: {e}")))?;
+        .map_err(|e| crate::Error::Tool(crate::t!("verify.ffprobe_output", error = e)))?;
     let size = v["streams"]
         .as_array()
         .into_iter()
@@ -201,11 +201,11 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
     let mut out = Vec::new();
     match std::fs::metadata(staged) {
         Ok(m) if m.len() > 0 => {}
-        Ok(_) => return vec![anomaly(AnomalyKind::Empty, "result is empty".into())],
+        Ok(_) => return vec![anomaly(AnomalyKind::Empty, crate::t!("verify.empty"))],
         Err(e) => {
             return vec![anomaly(
                 AnomalyKind::Unreadable,
-                format!("result is unreadable: {e}"),
+                crate::t!("verify.unreadable", error = e),
             )];
         }
     }
@@ -214,14 +214,14 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
         Err(e) => {
             return vec![anomaly(
                 AnomalyKind::Unreadable,
-                format!("result is unreadable: {e}"),
+                crate::t!("verify.unreadable", error = e),
             )];
         }
     };
     let Some(rec) = rec.filter(|r| r.get("ExifTool:Error").is_none()) else {
         return vec![anomaly(
             AnomalyKind::Unreadable,
-            "result is unreadable (exiftool)".into(),
+            crate::t!("verify.unreadable_exiftool"),
         )];
     };
     let src = expected.source_exif;
@@ -241,10 +241,12 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
         if let Some(w) = wanted {
             let got = dates(&rec);
             if !got.contains(&w) {
-                let got = got.first().map_or("none".to_string(), |d| d.to_string());
+                let got = got
+                    .first()
+                    .map_or_else(|| crate::t!("verify.none"), |d| d.to_string());
                 out.push(anomaly(
                     AnomalyKind::CaptureDate,
-                    format!("capture date: source has {w}, result has {got}"),
+                    crate::t!("verify.capture_date", source = w, result = got),
                 ));
             }
         }
@@ -255,24 +257,22 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
         Ok(m) if (secs(m) - secs(expected.mtime)).abs() <= MTIME_SLACK_SECS => {}
         Ok(m) => out.push(anomaly(
             AnomalyKind::Mtime,
-            format!(
-                "mtime: {}, expected {}",
-                chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M:%S"),
-                chrono::DateTime::<chrono::Local>::from(expected.mtime).format("%Y-%m-%d %H:%M:%S")
+            crate::t!(
+                "verify.mtime",
+                got = chrono::DateTime::<chrono::Local>::from(m).format("%Y-%m-%d %H:%M:%S"),
+                expected = chrono::DateTime::<chrono::Local>::from(expected.mtime)
+                    .format("%Y-%m-%d %H:%M:%S")
             ),
         )),
         Err(e) => out.push(anomaly(
             AnomalyKind::Unreadable,
-            format!("result mtime could not be read: {e}"),
+            crate::t!("verify.mtime_unreadable", error = e),
         )),
     }
 
     // GPS
     if carries && has_gps(src) && !has_gps(&rec) {
-        out.push(anomaly(
-            AnomalyKind::Gps,
-            "GPS is in the source, missing in the result".into(),
-        ));
+        out.push(anomaly(AnomalyKind::Gps, crate::t!("verify.gps")));
     }
 
     // Dimensions and duration.
@@ -282,12 +282,12 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
                 match image_size(&rec) {
                     Some(o) if dims_differ(s, o, expected.resizes) => out.push(anomaly(
                         AnomalyKind::Dimensions,
-                        format!("size: {}x{} -> {}x{}", s.0, s.1, o.0, o.1),
+                        crate::t!("verify.size", w1 = s.0, h1 = s.1, w2 = o.0, h2 = o.1),
                     )),
                     Some(_) => {}
                     None => out.push(anomaly(
                         AnomalyKind::Unreadable,
-                        format!("size {}x{} is unreadable in the result", s.0, s.1),
+                        crate::t!("verify.size_unreadable", w = s.0, h = s.1),
                     )),
                 }
             }
@@ -298,7 +298,7 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
                 match probe(tools, staged) {
                     Err(e) => out.push(anomaly(
                         AnomalyKind::Unreadable,
-                        format!("result is unreadable: {e}"),
+                        crate::t!("verify.unreadable", error = e),
                     )),
                     Ok(o) => {
                         if let (Some(a), Some(b)) = (s.duration, o.duration)
@@ -306,12 +306,16 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
                         {
                             out.push(anomaly(
                                 AnomalyKind::Duration,
-                                format!("duration: {a:.1} s -> {b:.1} s"),
+                                crate::t!(
+                                    "verify.duration",
+                                    from = crate::i18n::decimal(a, 1),
+                                    to = crate::i18n::decimal(b, 1)
+                                ),
                             ));
                         } else if s.duration.is_some() && o.duration.is_none() {
                             out.push(anomaly(
                                 AnomalyKind::Duration,
-                                "result duration is unknown".into(),
+                                crate::t!("verify.duration_unknown"),
                             ));
                         }
                         if kind == MediaKind::Video
@@ -320,7 +324,7 @@ pub fn compare(tools: &Tools, source: &Path, staged: &Path, expected: &Expected)
                         {
                             out.push(anomaly(
                                 AnomalyKind::Dimensions,
-                                format!("size: {}x{} -> {}x{}", a.0, a.1, b.0, b.1),
+                                crate::t!("verify.size", w1 = a.0, h1 = a.1, w2 = b.0, h2 = b.1),
                             ));
                         }
                     }

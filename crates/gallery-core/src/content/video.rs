@@ -29,15 +29,20 @@ impl ContentStep for VideoPreset {
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default();
         let in_ext = split_name(&name).1;
-        let probe = probe(ctx, input)
-            .map_err(|e| Error::Tool(format!("video {}: {e}", ctx.original.display())))?;
+        let probe = probe(ctx, input).map_err(|e| {
+            Error::Tool(crate::t!(
+                "content.video_failed",
+                path = ctx.original.display(),
+                error = e
+            ))
+        })?;
         let Some(video) = &probe.video else {
-            return fall_back(ctx, input, in_ext, "no video stream — left as is");
+            return fall_back(ctx, input, in_ext, &crate::t!("content.no_video_stream"));
         };
         // Re-encoding AV1 into AV1 only loses quality (prepare-media renames
         // by date and drops ".av1", so the name alone does not tell).
         if video.codec == "av1" {
-            return fall_back(ctx, input, in_ext, "already AV1 — left as is");
+            return fall_back(ctx, input, in_ext, &crate::t!("content.already_av1"));
         }
         let out = tmp_output(ctx.tmp_dir, input, self.output_ext())?;
         let mut trf = None;
@@ -58,18 +63,14 @@ impl ContentStep for VideoPreset {
             }
             Ok(false) => {
                 let _ = std::fs::remove_file(&out);
-                fall_back(
-                    ctx,
-                    input,
-                    in_ext,
-                    "not smaller than the source even at low",
-                )
+                fall_back(ctx, input, in_ext, &crate::t!("content.not_smaller_low"))
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
-                Err(Error::Tool(format!(
-                    "video {}: {e}",
-                    ctx.original.display()
+                Err(Error::Tool(crate::t!(
+                    "content.video_failed",
+                    path = ctx.original.display(),
+                    error = e
                 )))
             }
         }
@@ -180,7 +181,7 @@ impl VideoPreset {
             run(cmd, "ffmpeg")?;
             let out_size = std::fs::metadata(&out)?.len();
             if out_size == 0 {
-                return Err(Error::Tool("encoder produced an empty file".into()));
+                return Err(Error::Tool(crate::t!("content.empty_encoder")));
             }
             if out_size < in_size {
                 check_duration(ctx, probe.duration, &out)?;
@@ -298,7 +299,8 @@ pub(super) fn ffprobe_json(ctx: &StepCtx, path: &Path) -> Result<Value> {
             String::from_utf8_lossy(&out.stderr).trim()
         )));
     }
-    serde_json::from_slice(&out.stdout).map_err(|e| Error::Tool(format!("ffprobe output: {e}")))
+    serde_json::from_slice(&out.stdout)
+        .map_err(|e| Error::Tool(crate::t!("verify.ffprobe_output", error = e)))
 }
 
 pub(super) fn duration_of(v: &Value) -> Option<f64> {
@@ -341,10 +343,10 @@ fn check_duration(ctx: &StepCtx, input: Option<f64>, out: &Path) -> Result<()> {
     let got = duration_of(&ffprobe_json(ctx, out)?);
     match (input, got) {
         (Some(a), Some(b)) if (a - b).abs() <= 1.0 => Ok(()),
-        (a, b) => Err(Error::Tool(format!(
-            "duration mismatch: {} vs {}",
-            a.map_or("?".into(), |d| d.to_string()),
-            b.map_or("?".into(), |d| d.to_string())
+        (a, b) => Err(Error::Tool(crate::t!(
+            "content.duration_vs",
+            a = a.map_or("?".into(), |d| d.to_string()),
+            b = b.map_or("?".into(), |d| d.to_string())
         ))),
     }
 }
@@ -377,7 +379,7 @@ fn restore_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<Stri
             .and_then(|mut m| m.remove(p))
     };
     let Some(rec) = read(input) else {
-        warnings.push("metadata not copied: exiftool could not read the input".into());
+        warnings.push(crate::t!("content.meta_unreadable_input"));
         return;
     };
     let has = |r: &Value, k: &str| r.get(k).is_some_and(|v| !v.is_null());
@@ -402,7 +404,7 @@ fn restore_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<Stri
         "-Keys:Model<Keys:AndroidModel".into(),
     ];
     if let Err(e) = exif::write(ctx.tools, out, &args) {
-        warnings.push(format!("metadata not copied: {e}"));
+        warnings.push(crate::t!("content.meta_not_copied", error = e));
         return;
     }
     // Each location tag of the input must be present in the output.
@@ -419,7 +421,7 @@ fn restore_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<Stri
     let result = read(out);
     for tag in expected {
         if !result.as_ref().is_some_and(|r| has(r, tag)) {
-            warnings.push(format!("GPS not copied: {tag} missing in the result"));
+            warnings.push(crate::t!("content.gps_not_copied", tag = tag));
         }
     }
 }
@@ -436,6 +438,10 @@ pub(super) fn run(mut cmd: Command, what: &str) -> Result<()> {
     let tail = lines[lines.len().saturating_sub(5)..].join("; ");
     Err(Error::Tool(format!(
         "{what}: {}",
-        if tail.is_empty() { "failed" } else { &tail }
+        if tail.is_empty() {
+            crate::t!("content.failed")
+        } else {
+            tail
+        }
     )))
 }

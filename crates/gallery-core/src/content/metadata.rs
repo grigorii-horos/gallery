@@ -40,9 +40,10 @@ impl ContentStep for MetadataPreset {
         let mut warnings = Vec::new();
         if let Err(e) = self.apply(ctx, input, &out, &container, &mut warnings) {
             let _ = std::fs::remove_file(&out);
-            return Err(Error::Tool(format!(
-                "metadata for {}: {e}",
-                ctx.original.display()
+            return Err(Error::Tool(crate::t!(
+                "content.metadata_for",
+                path = ctx.original.display(),
+                error = e
             )));
         }
         Ok(StepResult {
@@ -74,9 +75,7 @@ impl MetadataPreset {
                 Ok(false) => copy_keep_mtime(input, out)?,
                 // Like prepare-media: a failed remux is a warning, the file goes as is.
                 Err(e) => {
-                    warnings.push(format!(
-                        "ffmpeg could not write the date: metadata not written ({e})"
-                    ));
+                    warnings.push(crate::t!("content.ffmpeg_date", error = e));
                     copy_keep_mtime(input, out)?;
                 }
             }
@@ -98,8 +97,9 @@ impl MetadataPreset {
                 match exif::write(ctx.tools, out, &all) {
                     Ok(()) => {}
                     // exiftool leaves the file untouched when it has no writer for it.
-                    Err(Error::Unwritable(_)) => warnings.push(format!(
-                        "exiftool does not write {container}: metadata not written"
+                    Err(Error::Unwritable(_)) => warnings.push(crate::t!(
+                        "content.exiftool_no_write",
+                        container = container
                     )),
                     Err(e) => return Err(e),
                 }
@@ -383,13 +383,13 @@ pub(crate) fn local_time(tools: &Tools, d: NaiveDateTime) -> Result<chrono::Date
             .from_local_datetime(&d)
             .earliest()
             .map(|t| t.fixed_offset()),
-        Some(Err(e)) => return Err(Error::Tool(format!("time zone: {e}"))),
+        Some(Err(e)) => return Err(Error::Tool(crate::t!("content.time_zone", error = e))),
         None => Local
             .from_local_datetime(&d)
             .earliest()
             .map(|t| t.fixed_offset()),
     };
-    t.ok_or_else(|| Error::Tool(format!("no such local time: {d}")))
+    t.ok_or_else(|| Error::Tool(crate::t!("content.no_local_time", time = d)))
 }
 
 fn set_mtime(tools: &Tools, path: &Path, d: NaiveDateTime) -> Result<()> {

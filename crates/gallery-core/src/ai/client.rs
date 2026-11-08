@@ -130,8 +130,9 @@ fn build_prompt(
         let lines: String = source.examples.iter().map(|l| format!("- {l}\n")).collect();
         format!("The user's past corrections:\n{lines}\n")
     };
+    // Unset: the language of the interface (the CLI's or the GUI's locale).
     let language = match source.language.trim() {
-        "" => "en",
+        "" => crate::i18n::language_name(),
         l => l,
     };
     format!(
@@ -225,7 +226,7 @@ impl AiClassifier {
         let http = reqwest::Client::builder()
             .timeout(TIMEOUT)
             .build()
-            .map_err(|e| Error::Ai(format!("http client: {e}")))?;
+            .map_err(|e| Error::Ai(crate::t!("ai.http_client", error = e)))?;
         Ok(AiClassifier {
             shared: Arc::new(Shared {
                 settings: settings.clone(),
@@ -242,8 +243,8 @@ impl AiClassifier {
 
     /// Production setup: key from env, default API base and cache path.
     pub fn from_settings(settings: &AiSettings, tools: Tools) -> Result<Self> {
-        let cache = Self::default_cache_path()
-            .ok_or_else(|| Error::Ai("no user cache directory".into()))?;
+        let cache =
+            Self::default_cache_path().ok_or_else(|| Error::Ai(crate::t!("ai.no_cache_dir")))?;
         Self::new(settings, tools, cache, DEFAULT_API_BASE.to_string())
     }
 
@@ -271,9 +272,9 @@ pub(crate) fn to_answer(stored: &Stored, categories: &[(String, String)]) -> Res
     } else if categories.iter().any(|(n, _)| *n == stored.category) {
         Some(stored.category.clone())
     } else {
-        return Err(Error::Ai(format!(
-            "model answered unknown category `{}`",
-            stored.category
+        return Err(Error::Ai(crate::t!(
+            "ai.unknown_category",
+            name = stored.category
         )));
     };
     Ok(AiAnswer {
@@ -307,13 +308,10 @@ impl Shared {
     }
 
     async fn request(&self, ctx: &GroupCtx, image_b64: &str, video: bool) -> Result<Stored> {
-        let key = self.api_key.as_deref().ok_or_else(|| {
-            Error::Ai(
-                "no key: set ANTHROPIC_API_KEY or CLAUDE_API_KEY \
-                 or put the key in ~/.config/gallery/api-key (mode 600)"
-                    .into(),
-            )
-        })?;
+        let key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| Error::Ai(crate::t!("ai.no_key")))?;
         let note = if video {
             "This is a video: three frames from the start, middle and end in one row."
         } else {
@@ -348,7 +346,7 @@ impl Shared {
             let resp = match sent {
                 Ok(r) => r,
                 Err(e) if attempt == MAX_RETRIES => {
-                    return Err(Error::Ai(format!("request failed: {e}")));
+                    return Err(Error::Ai(crate::t!("ai.request_failed", error = e)));
                 }
                 Err(_) => {
                     tokio::time::sleep(backoff(self.backoff_ms, attempt)).await;
@@ -357,11 +355,11 @@ impl Shared {
             };
             let status = resp.status();
             if status.as_u16() == 401 {
-                return Err(Error::Ai("API key rejected".into()));
+                return Err(Error::Ai(crate::t!("ai.key_rejected")));
             }
             if status.as_u16() == 429 || status.is_server_error() {
                 if attempt == MAX_RETRIES {
-                    return Err(Error::Ai(format!("API error {status} after retries")));
+                    return Err(Error::Ai(crate::t!("ai.api_retries", status = status)));
                 }
                 tokio::time::sleep(backoff(self.backoff_ms, attempt)).await;
                 continue;
@@ -369,13 +367,17 @@ impl Shared {
             let text = resp
                 .text()
                 .await
-                .map_err(|e| Error::Ai(format!("reading response: {e}")))?;
+                .map_err(|e| Error::Ai(crate::t!("ai.reading_response", error = e)))?;
             if !status.is_success() {
                 let head: String = text.chars().take(300).collect();
-                return Err(Error::Ai(format!("API error {status}: {head}")));
+                return Err(Error::Ai(crate::t!(
+                    "ai.api_error",
+                    status = status,
+                    head = head
+                )));
             }
             let v: Value = serde_json::from_str(&text)
-                .map_err(|e| Error::Ai(format!("bad response json: {e}")))?;
+                .map_err(|e| Error::Ai(crate::t!("ai.bad_response", error = e)))?;
             return self.parse(&v);
         }
         unreachable!("loop returns on the last attempt")
@@ -389,11 +391,11 @@ impl Shared {
             Some("refusal") => {
                 return Ok(Stored {
                     category: NONE_CATEGORY.into(),
-                    reason: "model refused".into(),
+                    reason: crate::t!("ai.refused"),
                     confidence: "LOW".into(),
                 });
             }
-            Some("max_tokens") => return Err(Error::Ai("answer truncated at max_tokens".into())),
+            Some("max_tokens") => return Err(Error::Ai(crate::t!("ai.truncated"))),
             _ => {}
         }
         let text = v
@@ -406,8 +408,8 @@ impl Shared {
             })
             .and_then(|b| b.get("text"))
             .and_then(Value::as_str)
-            .ok_or_else(|| Error::Ai("response has no text block".into()))?;
-        serde_json::from_str(text).map_err(|e| Error::Ai(format!("bad answer json: {e}")))
+            .ok_or_else(|| Error::Ai(crate::t!("ai.no_text")))?;
+        serde_json::from_str(text).map_err(|e| Error::Ai(crate::t!("ai.bad_answer", error = e)))
     }
 }
 
@@ -434,7 +436,7 @@ async fn run_job(
     let tools = shared.tools.clone();
     let bytes = tokio::task::spawn_blocking(move || thumb_bytes(&tools, &path, kind, &thumb_dir))
         .await
-        .map_err(|e| Error::Ai(format!("thumbnail task: {e}")))?;
+        .map_err(|e| Error::Ai(crate::t!("ai.thumbnail_task", error = e)))?;
     let bytes = match bytes {
         Ok(b) => b,
         // A file that cannot be decoded must not fail the batch (nor be
@@ -442,7 +444,7 @@ async fn run_job(
         Err(_) => {
             let stored = Stored {
                 category: NONE_CATEGORY.into(),
-                reason: "could not make a preview".into(),
+                reason: crate::t!("ai.no_preview"),
                 confidence: "LOW".into(),
             };
             return Ok((job.idx, None, stored));
@@ -602,7 +604,8 @@ impl AiClassifier {
                 });
             }
             while let Some(joined) = set.join_next().await {
-                let r = joined.map_err(|e| Error::Ai(format!("classify task: {e}")))??;
+                let r =
+                    joined.map_err(|e| Error::Ai(crate::t!("ai.classify_task", error = e)))??;
                 if let Some(r) = r {
                     record(r, &ctx)?;
                 }

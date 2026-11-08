@@ -24,7 +24,7 @@ pub struct SourcePrompt {
     /// Prompt lines of the user's corrections (see [`crate::learn`]), shown
     /// after the suffix.
     pub examples: Vec<String>,
-    /// Language the model writes `reason` in (`[ai] language`); blank is "en".
+    /// Language the model writes `reason` in (`[ai] language`); blank is the interface language.
     pub language: String,
 }
 
@@ -267,9 +267,10 @@ pub fn route_with_overrides(
                 });
                 overrides_applied += 1;
             }
-            Some(Action::Target { name }) => warnings.push(format!(
-                "manual decision for {} points at unknown target `{name}`: skipped",
-                entry.path.display()
+            Some(Action::Target { name }) => warnings.push(crate::t!(
+                "route.unknown_target",
+                path = entry.path.display(),
+                name = name
             )),
             None => {}
         }
@@ -335,19 +336,20 @@ pub fn route_with_overrides(
             batch.iter().map(|r| r.categories.clone()).collect();
         let answers = ai.classify_with(batch, progress, cancel)?;
         if answers.len() != idx.len() {
-            return Err(Error::Ai(format!(
-                "classifier returned {} answers for {} requests",
-                answers.len(),
-                idx.len()
+            return Err(Error::Ai(crate::t!(
+                "route.answer_count",
+                answers = answers.len(),
+                requests = idx.len()
             )));
         }
         for ((i, cands), answer) in idx.into_iter().zip(candidates).zip(answers) {
             if let Some(cat) = &answer.category
                 && !cands.iter().any(|(n, _)| n == cat)
             {
-                return Err(Error::Ai(format!(
-                    "classifier answered unknown category `{cat}` for {}",
-                    files[i].path.display()
+                return Err(Error::Ai(crate::t!(
+                    "route.unknown_category",
+                    cat = cat,
+                    path = files[i].path.display()
                 )));
             }
             if answer.confidence == Confidence::Low && !accept_low {
@@ -606,14 +608,14 @@ mod tests {
                 prefix: Some("before".into()),
                 suffix: Some("after".into()),
                 examples: vec![],
-                language: "en".into(),
+                language: String::new(),
             }
         );
         // `[ai] language` reaches every request; nothing else is set here.
         assert_eq!(
             seen[1].prompt,
             SourcePrompt {
-                language: "en".into(),
+                language: String::new(),
                 ..Default::default()
             }
         );

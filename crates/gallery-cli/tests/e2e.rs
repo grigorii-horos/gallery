@@ -75,7 +75,8 @@ fn gallery() -> Gallery {
         .unwrap();
     let data = root.path().join("data");
     std::fs::create_dir(&data).unwrap();
-    cmd.env("GALLERY_TRASH", "folder")
+    cmd.env("LC_ALL", "C")
+        .env("GALLERY_TRASH", "folder")
         .env("GALLERY_DATA_DIR", data);
     Gallery { cmd, _root: root }
 }

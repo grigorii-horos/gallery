@@ -89,18 +89,24 @@ pub fn lookup_in(env: impl Fn(&str) -> Option<String>, file: Option<&Path>) -> A
 /// be swapped between the check and the read.
 fn read_key_file(path: &Path) -> (Option<String>, Option<String>) {
     use std::io::Read;
-    let ignored = |why: String| Some(format!("key file {} is not used: {why}", path.display()));
+    let ignored = |why: String| {
+        Some(crate::t!(
+            "ai.key_ignored",
+            path = path.display(),
+            why = why
+        ))
+    };
     let link = match std::fs::symlink_metadata(path) {
         Ok(m) => m,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return (None, None),
         Err(e) => return (None, ignored(e.to_string())),
     };
     if link.file_type().is_symlink() {
-        return (None, ignored("it is a symlink".into()));
+        return (None, ignored(crate::t!("ai.key_symlink")));
     }
     // Before opening: opening a FIFO would block.
     if !link.is_file() {
-        return (None, ignored("it is not a file".into()));
+        return (None, ignored(crate::t!("ai.key_not_file")));
     }
     let mut file = match std::fs::File::open(path) {
         Ok(f) => f,
@@ -111,22 +117,20 @@ fn read_key_file(path: &Path) -> (Option<String>, Option<String>) {
         Err(e) => return (None, ignored(e.to_string())),
     };
     if !meta.is_file() {
-        return (None, ignored("it is not a file".into()));
+        return (None, ignored(crate::t!("ai.key_not_file")));
     }
     #[cfg(unix)]
     {
         use std::os::unix::fs::{MetadataExt, PermissionsExt};
         // The path was replaced (e.g. by a symlink) after the first look.
         if (meta.dev(), meta.ino()) != (link.dev(), link.ino()) {
-            return (None, ignored("file was replaced while reading".into()));
+            return (None, ignored(crate::t!("ai.key_replaced")));
         }
         let mode = meta.permissions().mode() & 0o777;
         if mode & 0o077 != 0 {
             return (
                 None,
-                ignored(format!(
-                    "permissions {mode:o} expose it to others, 600 required (chmod 600)"
-                )),
+                ignored(crate::t!("ai.key_perms", mode = format!("{mode:o}"))),
             );
         }
     }

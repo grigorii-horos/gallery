@@ -189,7 +189,7 @@ fn locate(
         Side::Server => match src.and_then(|s| s.server_path.clone()) {
             Some(root) => (root.join(&e.rel), root),
             None => {
-                missing.insert(format!("source '{}': no server_path", e.source_id));
+                missing.insert(crate::t!("plan.no_server_path", source = e.source_id));
                 (e.path.clone(), PathBuf::new())
             }
         },
@@ -439,7 +439,7 @@ pub fn build_plan_with(
             }
         };
         let outputs_cfg = target_outputs(cfg, &target)
-            .ok_or_else(|| plan_err(format!("unknown target '{target}'")))?;
+            .ok_or_else(|| plan_err(crate::t!("plan.unknown_target", target = target)))?;
 
         let capture = capture();
         let ctx = NameCtx {
@@ -501,7 +501,7 @@ pub fn build_plan_with(
                 Side::Server => match &o.server_dir {
                     Some(d) => d.as_str(),
                     None => {
-                        missing.insert(format!("target '{target}' output {oi}: no server_dir"));
+                        missing.insert(crate::t!("plan.no_server_dir", target = target, n = oi));
                         continue;
                     }
                 },
@@ -634,9 +634,9 @@ pub fn build_plan_with(
 
     if !missing.is_empty() {
         let list: Vec<String> = missing.into_iter().collect();
-        return Err(plan_err(format!(
-            "server plan needs paths: {}",
-            list.join("; ")
+        return Err(plan_err(crate::t!(
+            "plan.server_needs_paths",
+            list = list.join("; ")
         )));
     }
 
@@ -838,17 +838,17 @@ impl Plan {
         let plan: Plan = serde_json::from_str(text).map_err(|e| {
             let msg = e.to_string();
             let hint = if msg.contains("unknown variant") {
-                " — plan was created by a newer version: update gallery"
+                crate::t!("plan.newer_version")
             } else {
-                ""
+                String::new()
             };
             plan_err(format!("{}: {msg}{hint}", path.display()))
         })?;
         if plan.version != PLAN_VERSION {
-            return Err(plan_err(format!(
-                "{}: unsupported plan version {}",
-                path.display(),
-                plan.version
+            return Err(plan_err(crate::t!(
+                "plan.unsupported_version",
+                path = path.display(),
+                version = plan.version
             )));
         }
         Ok(plan)

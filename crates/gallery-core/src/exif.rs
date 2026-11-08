@@ -47,9 +47,10 @@ pub fn read_with(
             .output()?;
         // exiftool exits 1 when some file is unreadable but still prints the rest.
         let parsed: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).map_err(|e| {
-            Error::Tool(format!(
-                "exiftool output: {e}: {}",
-                String::from_utf8_lossy(&out.stderr)
+            Error::Tool(crate::t!(
+                "exif.output",
+                error = e,
+                stderr = String::from_utf8_lossy(&out.stderr)
             ))
         })?;
         for v in parsed {
@@ -91,11 +92,11 @@ pub fn write(tools: &Tools, path: &Path, args: &[String]) -> Result<()> {
                 stderr.trim()
             )));
         }
-        return Err(Error::Tool(format!(
-            "exiftool write {}: {} {}",
-            path.display(),
-            String::from_utf8_lossy(&out.stderr).trim(),
-            stdout.trim()
+        return Err(Error::Tool(crate::t!(
+            "exif.write",
+            path = path.display(),
+            stderr = String::from_utf8_lossy(&out.stderr).trim(),
+            stdout = stdout.trim()
         )));
     }
     Ok(())

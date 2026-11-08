@@ -227,16 +227,18 @@ impl EstimateSource {
     /// The line the UI and CLI show.
     pub fn label(&self) -> String {
         match self {
-            EstimateSource::Defaults => "rough estimate".into(),
+            EstimateSource::Defaults => crate::t!("estimate.rough"),
             EstimateSource::History {
                 samples,
                 guessed_files: 0,
-            } => format!("from past runs ({samples} files)"),
+            } => crate::t!("estimate.from_runs", samples = samples),
             EstimateSource::History {
                 samples,
                 guessed_files,
-            } => format!(
-                "from past runs ({samples} files); for {guessed_files} files — rough estimate"
+            } => crate::t!(
+                "estimate.from_runs_guessed",
+                samples = samples,
+                guessed = guessed_files
             ),
         }
     }
@@ -366,9 +368,13 @@ impl Model {
 pub fn duration_text(secs: f64) -> String {
     let s = secs.max(0.0).round() as u64;
     match s {
-        0..=59 => format!("{s} s"),
-        60..=3599 => format!("{} min", (s + 30) / 60),
-        _ => format!("{} h {:02} min", s / 3600, (s % 3600) / 60),
+        0..=59 => crate::t!("duration.s", n = s),
+        60..=3599 => crate::t!("duration.min", n = (s + 30) / 60),
+        _ => crate::t!(
+            "duration.h_min",
+            h = s / 3600,
+            min = format!("{:02}", (s % 3600) / 60)
+        ),
     }
 }
 
@@ -552,7 +558,7 @@ pub fn ai_estimate(dry: &AiDry, model: &str, rows: &[UsageRow]) -> AiEstimate {
     let requests: u64 = past.iter().map(|r| r.requests).sum();
     let (per_request, source_label) = if per_row.is_empty() {
         let mid = DEFAULT_REQUEST.cost(model).map(|c| [c * 0.7, c, c * 1.5]);
-        (mid, "rough estimate".to_string())
+        (mid, crate::t!("estimate.rough"))
     } else {
         let total: f64 = past
             .iter()
@@ -564,7 +570,10 @@ pub fn ai_estimate(dry: &AiDry, model: &str, rows: &[UsageRow]) -> AiEstimate {
         } else {
             [mid * 0.8, mid, mid * 1.25]
         };
-        (Some(q), format!("from past scans ({requests} requests)"))
+        (
+            Some(q),
+            crate::t!("estimate.from_scans", requests = requests),
+        )
     };
     let n = dry.to_send as f64;
     let usd = per_request.map(|q| Range {
@@ -573,13 +582,16 @@ pub fn ai_estimate(dry: &AiDry, model: &str, rows: &[UsageRow]) -> AiEstimate {
         high: q[2] * n,
     });
     let label = match &usd {
-        Some(r) => format!(
-            "≈ ${:.2} ({} files, {} cached)",
-            r.mid, dry.to_send, dry.cached
+        Some(r) => crate::t!(
+            "estimate.ai_cost",
+            usd = crate::i18n::decimal(r.mid, 2),
+            files = dry.to_send,
+            cached = dry.cached
         ),
-        None => format!(
-            "model price unknown ({} files, {} cached)",
-            dry.to_send, dry.cached
+        None => crate::t!(
+            "estimate.ai_unknown",
+            files = dry.to_send,
+            cached = dry.cached
         ),
     };
     AiEstimate {

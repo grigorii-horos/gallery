@@ -42,7 +42,9 @@ const TMP_PREFIX: &str = ".gallery-tmp-";
 /// The report on disk is refreshed after this many finished items.
 const REPORT_EVERY: usize = 50;
 /// Item error of a target without outputs.
-const NO_OUTPUTS: &str = "target without outputs";
+fn no_outputs() -> String {
+    crate::t!("apply.no_outputs")
+}
 
 #[derive(Debug, Clone)]
 pub struct ApplyOptions {
@@ -335,12 +337,8 @@ fn apply_impl(
     let mut tools = tools.clone();
     match plan.tz.as_deref() {
         Some(z) if z.parse::<chrono_tz::Tz>().is_ok() => tools.tz = Some(z.to_string()),
-        Some(z) => tool_warnings.push(format!(
-            "unknown plan time zone '{z}': dates use this machine's zone"
-        )),
-        None => {
-            tool_warnings.push("plan has no time zone: dates use this machine's zone".to_string())
-        }
+        Some(z) => tool_warnings.push(crate::t!("apply.bad_tz", zone = z)),
+        None => tool_warnings.push(crate::t!("apply.no_tz")),
     }
     let tools = &tools;
     // A dry run writes nothing, so it needs no lock.
@@ -350,7 +348,7 @@ fn apply_impl(
     if let (Some(sync), false) = (&opts.pause_sync, opts.dry_run) {
         // Before the first file moves; never a reason not to run.
         if let Err(e) = sync.pause_for(plan_path, &plan) {
-            tool_warnings.push(format!("Syncthing not paused: {e}"));
+            tool_warnings.push(crate::t!("apply.sync_not_paused", error = e));
         }
     }
 
@@ -383,7 +381,7 @@ fn apply_impl(
     let pool = rayon::ThreadPoolBuilder::new()
         .num_threads(opts.jobs.max(1))
         .build()
-        .map_err(|e| Error::Tool(format!("thread pool: {e}")))?;
+        .map_err(|e| Error::Tool(crate::t!("apply.thread_pool", error = e)))?;
     let run = Run {
         plan: &plan,
         tools,
@@ -507,7 +505,11 @@ impl Journal {
             self.errors
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .push(format!("journal: {}: {e}", item.source.display()));
+                .push(crate::t!(
+                    "apply.journal",
+                    path = item.source.display(),
+                    error = e
+                ));
         }
     }
 
@@ -576,21 +578,21 @@ pub fn check_capabilities(
         let preset = plan
             .content_presets
             .get(name)
-            .ok_or_else(|| Error::Plan(format!("unknown content preset '{name}'")))?;
+            .ok_or_else(|| Error::Plan(crate::t!("apply.unknown_preset", name = name)))?;
         match preset {
             ContentPreset::Video(v) => {
                 if !caps.svtav1 {
-                    missing.push(format!("ffmpeg without libsvtav1 (preset '{name}')"));
+                    missing.push(crate::t!("apply.no_svtav1", name = name));
                 }
                 if v.stabilize && !caps.vidstab {
-                    missing.push(format!("ffmpeg without vidstabdetect (preset '{name}')"));
+                    missing.push(crate::t!("apply.no_vidstab", name = name));
                 }
             }
             ContentPreset::Audio(a) if a.codec == AudioCodec::Opus && !caps.opus => {
-                missing.push(format!("ffmpeg without libopus (preset '{name}')"));
+                missing.push(crate::t!("apply.no_opus", name = name));
             }
             ContentPreset::Png(_) if !has_optipng => {
-                missing.push(format!("optipng not found (preset '{name}')"));
+                missing.push(crate::t!("apply.no_optipng", name = name));
             }
             _ => {}
         }
@@ -692,8 +694,8 @@ pub(crate) fn file_hash(path: &Path) -> std::io::Result<String> {
 
 /// Atomic report write: a temp file next to it, then rename over it.
 pub(crate) fn write_report(path: &Path, report: &Report) -> Result<()> {
-    let json =
-        serde_json::to_string_pretty(report).map_err(|e| Error::Plan(format!("report: {e}")))?;
+    let json = serde_json::to_string_pretty(report)
+        .map_err(|e| Error::Plan(crate::t!("apply.report", error = e)))?;
     let dir = match path.parent() {
         Some(d) if !d.as_os_str().is_empty() => d,
         _ => Path::new("."),
@@ -805,7 +807,7 @@ impl Run<'_> {
             }
         };
         if !meta.is_file() {
-            res.error = Some("not a regular file".into());
+            res.error = Some(crate::t!("apply.not_regular"));
             return res;
         }
         if !same_file_state(item, &meta) {
@@ -814,7 +816,7 @@ impl Run<'_> {
         }
         if item.outputs.is_empty() {
             // Vacuously "all outputs done" must never trash a source.
-            res.error = Some(NO_OUTPUTS.into());
+            res.error = Some(no_outputs());
             return res;
         }
         if self.opts.dry_run {
@@ -837,14 +839,13 @@ impl Run<'_> {
         let exif = if writes {
             let read =
                 exif::read(self.tools, std::slice::from_ref(&item.source)).and_then(|mut m| {
-                    m.remove(&item.source).ok_or_else(|| {
-                        Error::Tool("exiftool returned no data for the file".to_string())
-                    })
+                    m.remove(&item.source)
+                        .ok_or_else(|| Error::Tool(crate::t!("apply.exif_no_data")))
                 });
             match read {
                 Ok(v) => v,
                 Err(e) => {
-                    res.error = Some(format!("EXIF not read: {e}; source untouched"));
+                    res.error = Some(crate::t!("apply.exif_not_read", error = e));
                     return;
                 }
             }
@@ -873,7 +874,7 @@ impl Run<'_> {
         for (k, o) in item.outputs.iter().enumerate() {
             let out = &mut res.outputs[k];
             if failed {
-                out.error = Some("skipped: an earlier output failed".into());
+                out.error = Some(crate::t!("apply.earlier_failed"));
                 continue;
             }
             match o.op {
@@ -881,8 +882,7 @@ impl Run<'_> {
                 // Renamed once every write is in place.
                 OutputOp::Rename => continue,
                 OutputOp::Keep => {
-                    out.warnings
-                        .push("kept in place: the source already has this name".into());
+                    out.warnings.push(crate::t!("apply.kept_in_place"));
                     continue;
                 }
             }
@@ -906,27 +906,25 @@ impl Run<'_> {
                     Ok(found) if self.opts.allow_anomalies => {
                         for a in &found {
                             out.warnings
-                                .push(format!("discrepancy allowed: {}", a.message));
+                                .push(crate::t!("apply.discrepancy_allowed", message = a.message));
                         }
                         out.anomalies = found.into_iter().map(|a| a.message).collect();
                     }
                     Ok(found) => {
                         let _ = std::fs::remove_file(&staged.path);
                         let msgs: Vec<String> = found.into_iter().map(|a| a.message).collect();
-                        out.error = Some(format!(
-                            "result differs from the source: {}; not placed, source untouched",
-                            msgs.join("; ")
-                        ));
+                        out.error =
+                            Some(crate::t!("apply.result_differs", details = msgs.join("; ")));
                         out.anomalies = msgs;
                         failed = true;
                         continue;
                     }
                     Err(e) => {
                         let _ = std::fs::remove_file(&staged.path);
-                        let msg = format!("check not performed: {e}");
+                        let msg = crate::t!("apply.check_not_performed", error = e);
                         // A tool failure counts toward max_anomalies too.
                         out.anomalies = vec![msg.clone()];
-                        out.error = Some(format!("{msg}; source untouched"));
+                        out.error = Some(crate::t!("apply.source_untouched", message = msg));
                         failed = true;
                         continue;
                     }
@@ -940,11 +938,12 @@ impl Run<'_> {
                 };
                 let err = match want {
                     Ok(h) if h == staged.hash => None,
-                    Ok(h) => Some(format!(
-                        "copy differs from the source: blake3 {}, expected {h}",
-                        staged.hash
+                    Ok(h) => Some(crate::t!(
+                        "apply.copy_differs",
+                        got = staged.hash,
+                        expected = h
                     )),
-                    Err(e) => Some(format!("source blake3: {e}")),
+                    Err(e) => Some(crate::t!("apply.source_blake3", error = e)),
                 };
                 if let Some(err) = err {
                     let _ = std::fs::remove_file(&staged.path);
@@ -986,7 +985,7 @@ impl Run<'_> {
                 out.error = err;
                 let rest: Vec<(usize, Staged)> = ready.collect();
                 for (j, _) in &rest {
-                    res.outputs[*j].error = Some("skipped: an earlier output failed".into());
+                    res.outputs[*j].error = Some(crate::t!("apply.earlier_failed"));
                 }
                 discard(&rest);
                 discard(&in_place);
@@ -1010,7 +1009,7 @@ impl Run<'_> {
             Ok(m) if same_file_state(item, &m) => {}
             _ => {
                 discard(&in_place);
-                res.error = Some("source changed during apply".into());
+                res.error = Some(crate::t!("apply.source_changed"));
                 return;
             }
         }
@@ -1025,7 +1024,7 @@ impl Run<'_> {
                     status: ItemStatus::Failed {
                         trashed: Some(t.clone()),
                     },
-                    error: Some("interrupted after moving to the trash".into()),
+                    error: Some(crate::t!("apply.interrupted_trash")),
                     ..res.clone()
                 });
                 #[cfg(test)]
@@ -1036,7 +1035,7 @@ impl Run<'_> {
             }
             Err(e) => {
                 discard(&in_place);
-                res.error = Some(format!("trash: {e}"));
+                res.error = Some(crate::t!("apply.trash", error = e));
                 return;
             }
         };
@@ -1070,7 +1069,7 @@ impl Run<'_> {
                 trashed: Some(trashed),
             }
         } else {
-            res.error = Some("output not placed; the source is in the trash".into());
+            res.error = Some(crate::t!("apply.not_placed_trashed"));
             ItemStatus::Failed {
                 trashed: Some(trashed),
             }
@@ -1090,15 +1089,15 @@ impl Run<'_> {
         let (Some(src_dir), Some(dest_dir), Some(wanted)) =
             (item.source.parent(), dest.parent(), dest.file_name())
         else {
-            res.outputs[k].error = Some(format!("bad rename: {}", dest.display()));
+            res.outputs[k].error = Some(crate::t!("apply.bad_rename", dest = dest.display()));
             return;
         };
         // A move never leaves the source's root: it stays a source file.
         if dest_dir.as_os_str().is_empty() || !inside_root(dest_dir, &item.source_root, true) {
-            res.outputs[k].error = Some(format!(
-                "rename outside the source root {}: {}",
-                item.source_root.display(),
-                dest.display()
+            res.outputs[k].error = Some(crate::t!(
+                "apply.rename_outside_root",
+                root = item.source_root.display(),
+                dest = dest.display()
             ));
             return;
         }
@@ -1112,7 +1111,7 @@ impl Run<'_> {
         let hash = match source_hash.map_or_else(|| file_hash(&item.source), Ok) {
             Ok(h) => h,
             Err(e) => {
-                res.outputs[k].error = Some(format!("source blake3: {e}"));
+                res.outputs[k].error = Some(crate::t!("apply.source_blake3", error = e));
                 return;
             }
         };
@@ -1134,7 +1133,7 @@ impl Run<'_> {
             // Undo must find the new name even if the run dies now.
             self.journal(&ItemResult {
                 status: ItemStatus::Failed { trashed: None },
-                error: Some("interrupted after renaming".into()),
+                error: Some(crate::t!("apply.interrupted_rename")),
                 ..res.clone()
             });
         }
@@ -1221,7 +1220,12 @@ impl Run<'_> {
     ) -> Result<(Staged, Vec<String>, bool)> {
         let (dir, planned_name) = match (o.dest.parent(), o.dest.file_name()) {
             (Some(d), Some(n)) if !d.as_os_str().is_empty() => (d, n.to_string_lossy()),
-            _ => return Err(Error::Plan(format!("bad dest: {}", o.dest.display()))),
+            _ => {
+                return Err(Error::Plan(crate::t!(
+                    "apply.bad_dest",
+                    dest = o.dest.display()
+                )));
+            }
         };
         std::fs::create_dir_all(dir)?;
         let prefix = format!("{TMP_PREFIX}{}-", self.run_id);
@@ -1233,7 +1237,7 @@ impl Run<'_> {
                 self.plan
                     .content_presets
                     .get(s)
-                    .ok_or_else(|| Error::Plan(format!("unknown content preset '{s}'")))
+                    .ok_or_else(|| Error::Plan(crate::t!("apply.unknown_preset", name = s)))
             })
             .collect::<Result<Vec<_>>>()?;
         let ctx = StepCtx {
@@ -1350,7 +1354,7 @@ impl Run<'_> {
                 self.plan
                     .content_presets
                     .get(s)
-                    .ok_or_else(|| Error::Plan(format!("unknown content preset '{s}'")))
+                    .ok_or_else(|| Error::Plan(crate::t!("apply.unknown_preset", name = s)))
             })
             .collect::<Result<Vec<_>>>()?;
         let resizes = steps.iter().any(|s| match s {
@@ -1419,11 +1423,11 @@ impl Run<'_> {
         let _ = std::fs::remove_file(&staged.path);
         let err = match std::fs::metadata(&target) {
             Ok(m) if m.len() == staged.len => None,
-            Ok(m) => Some(format!(
-                "{}: size {}, expected {}",
-                target.display(),
-                m.len(),
-                staged.len
+            Ok(m) => Some(crate::t!(
+                "apply.size_differs",
+                path = target.display(),
+                got = m.len(),
+                expected = staged.len
             )),
             Err(e) => Some(format!("{}: {e}", target.display())),
         };
@@ -1561,10 +1565,10 @@ pub(crate) fn rename_noreplace(from: &Path, to: &Path) -> std::io::Result<()> {
         Err(e) if e.kind() == std::io::ErrorKind::CrossesDevices => {
             return Err(std::io::Error::new(
                 e.kind(),
-                format!(
-                    "not moved: {} is on another file system than {}",
-                    to.parent().unwrap_or(to).display(),
-                    from.display()
+                crate::t!(
+                    "apply.other_fs",
+                    dir = to.parent().unwrap_or(to).display(),
+                    from = from.display()
                 ),
             ));
         }
@@ -1664,8 +1668,9 @@ fn link_verdict(
         _ => match listed_both() {
             Ok(true) => Ok(()),
             Ok(false) => Err(std::io::ErrorKind::AlreadyExists.into()),
-            Err(e) => Err(std::io::Error::other(format!(
-                "cannot verify the new name: {e}"
+            Err(e) => Err(std::io::Error::other(crate::t!(
+                "apply.cannot_verify_name",
+                error = e
             ))),
         },
     }

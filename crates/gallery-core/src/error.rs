@@ -1,23 +1,23 @@
 /// Errors produced by gallery-core.
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
-    #[error("config: {0}")]
+    #[error("{}", crate::t!("error.config", detail = .0))]
     Config(String),
-    #[error("tool: {0}")]
+    #[error("{}", crate::t!("error.tool", detail = .0))]
     Tool(String),
     #[error(transparent)]
     Io(#[from] std::io::Error),
-    #[error("syncthing: {0}")]
+    #[error("{}", crate::t!("error.syncthing", detail = .0))]
     Sync(String),
-    #[error("ai: {0}")]
+    #[error("{}", crate::t!("error.ai", detail = .0))]
     Ai(String),
-    #[error("plan: {0}")]
+    #[error("{}", crate::t!("error.plan", detail = .0))]
     Plan(String),
     /// exiftool cannot write this file type at all (mp3, ogg, txt, ...).
-    #[error("exiftool cannot write: {0}")]
+    #[error("{}", crate::t!("error.unwritable", detail = .0))]
     Unwritable(String),
     /// The operation was cancelled (see `progress::Cancel`).
-    #[error("cancelled")]
+    #[error("{}", crate::t!("error.cancelled"))]
     Cancelled,
 }
 

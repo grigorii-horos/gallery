@@ -679,7 +679,7 @@ pub struct AiSettings {
     /// its AI prompt as examples; 0 turns the learning off.
     pub examples: usize,
     /// Language the model writes each `reason` in: a name or code ("en",
-    /// "ru", "Ukrainian"); blank means "en".
+    /// "ru", "Ukrainian"); blank means the language of the interface.
     pub language: String,
 }
 
@@ -690,7 +690,7 @@ impl Default for AiSettings {
             effort: "low".into(),
             jobs: 8,
             examples: 20,
-            language: "en".into(),
+            language: String::new(),
         }
     }
 }
@@ -706,15 +706,20 @@ fn load_ai_text(
 ) -> std::result::Result<Option<String>, String> {
     let text = match (text, file) {
         (Some(_), Some(_)) => {
-            return Err(format!(
-                "source '{id}': both {slot} and {slot}_file are set"
-            ));
+            return Err(crate::t!("config.ai_both", id = id, slot = slot));
         }
         (Some(t), None) => t,
         (None, Some(f)) => {
             let f = dir.join(expand_tilde(&f));
-            std::fs::read_to_string(&f)
-                .map_err(|e| format!("source '{id}': {slot}_file {}: {e}", f.display()))?
+            std::fs::read_to_string(&f).map_err(|e| {
+                crate::t!(
+                    "config.ai_file",
+                    id = id,
+                    slot = slot,
+                    path = f.display(),
+                    error = e
+                )
+            })?
         }
         (None, None) => return Ok(None),
     };
@@ -724,9 +729,17 @@ fn load_ai_text(
 /// The error for a step that names no preset; an old (pre-rename) built-in
 /// name gets a hint with the new one.
 pub(crate) fn unknown_preset(target: &str, kind: &str, name: &str) -> String {
-    let mut m = format!("target '{target}': unknown {kind} preset '{name}'");
+    let mut m = if kind == "name" {
+        crate::t!("config.unknown_name_preset", target = target, name = name)
+    } else {
+        crate::t!(
+            "config.unknown_content_preset",
+            target = target,
+            name = name
+        )
+    };
     if let Some(new) = crate::presets::renamed_builtin(name) {
-        m.push_str(&format!(" (built-in presets were renamed: use '{new}')"));
+        m.push_str(&crate::t!("config.preset_renamed", new = new));
     }
     m
 }
@@ -760,34 +773,27 @@ impl Config {
                 if !m.ends_with('\n') {
                     m.push('\n');
                 }
-                m.push_str(
-                    "[ai] instructions and instructions_file were removed: \
-use ai_prefix / ai_suffix (or ai_prefix_file / ai_suffix_file) of [[sources]]",
-                );
+                m.push_str(&crate::t!("config.hint_instructions"));
             }
             if m.contains("unknown field `kinds`") {
                 if !m.ends_with('\n') {
                     m.push('\n');
                 }
-                m.push_str(
-                    "`kinds` was removed from filters and prefilters: \
-list the extensions in `match`: match = \"@photo\", match = \"@video\", \
-or both: match = [\"@photo\", \"@video\"]",
-                );
+                m.push_str(&crate::t!("config.hint_kinds"));
             }
             if m.contains("unknown field `name`, expected") {
                 let hint = if m.contains("`rename`") {
-                    "`name` was renamed in outputs: use `rename`"
+                    crate::t!("config.hint_name_rename")
                 } else if m.contains("`match`") {
-                    "`name` was renamed in filters and prefilters: use `match`"
+                    crate::t!("config.hint_name_match")
                 } else {
-                    ""
+                    String::new()
                 };
                 if !hint.is_empty() {
                     if !m.ends_with('\n') {
                         m.push('\n');
                     }
-                    m.push_str(hint);
+                    m.push_str(&hint);
                 }
             }
             Error::Config(m)
@@ -864,38 +870,37 @@ or both: match = [\"@photo\", \"@video\"]",
     ) -> std::result::Result<(), String> {
         let name = st.preset.as_str();
         if st.mask.is_some() {
-            return Err(format!(
-                "bundle '{name}' used with a mask: a bundle has no mask, put masks on its steps"
-            ));
+            return Err(crate::t!("config.bundle_with_mask", name = name));
         }
         let Some(ContentPreset::Bundle(b)) = self.content_preset(name) else {
-            return Err(format!("unknown bundle '{name}'"));
+            return Err(crate::t!("config.unknown_bundle", name = name));
         };
         if b.mask.is_some() {
-            return Err(format!(
-                "bundle '{name}': a bundle has no mask, put masks on its steps"
-            ));
+            return Err(crate::t!("config.bundle_has_mask", name = name));
         }
         if b.steps.is_empty() {
-            return Err(format!("bundle '{name}': no steps"));
+            return Err(crate::t!("config.bundle_no_steps", name = name));
         }
         for inner in &b.steps {
             match self.content_preset(&inner.preset) {
                 None => {
-                    return Err(format!(
-                        "bundle '{name}': unknown content preset '{}'",
-                        inner.preset
+                    return Err(crate::t!(
+                        "config.bundle_unknown_preset",
+                        name = name,
+                        preset = inner.preset
                     ));
                 }
                 Some(ContentPreset::Bundle(_)) => {
                     if let Some(i) = open.iter().position(|n| *n == inner.preset) {
                         let mut cycle = open[i..].to_vec();
                         cycle.push(&inner.preset);
-                        return Err(format!("bundle cycle: {}", cycle.join(" -> ")));
+                        return Err(crate::t!("config.bundle_cycle", cycle = cycle.join(" -> ")));
                     }
                     if open.len() >= MAX_REF_DEPTH {
-                        return Err(format!(
-                            "bundle '{name}': nested deeper than {MAX_REF_DEPTH} levels"
+                        return Err(crate::t!(
+                            "config.bundle_too_deep",
+                            name = name,
+                            depth = MAX_REF_DEPTH
                         ));
                     }
                     open.push(&inner.preset);
@@ -914,7 +919,12 @@ or both: match = [\"@photo\", \"@video\"]",
     /// A user preset must not reuse the name of a built-in one.
     fn check_builtin_clash(&self) -> std::result::Result<(), String> {
         let clash = |kind: &str, name: &str| {
-            format!("{kind} preset '{name}': this is a built-in preset — give yours another name")
+            let kind = if kind == "name" {
+                crate::t!("config.kind_name")
+            } else {
+                crate::t!("config.kind_content")
+            };
+            crate::t!("config.builtin_preset_clash", kind = kind, name = name)
         };
         if let Some(n) = self
             .name_presets
@@ -935,9 +945,7 @@ or both: match = [\"@photo\", \"@video\"]",
             .keys()
             .find(|n| crate::presets::builtin_mask(n).is_some())
         {
-            Some(n) => Err(format!(
-                "mask '{n}': this is a built-in mask — give yours another name"
-            )),
+            Some(n) => Err(crate::t!("config.builtin_mask_clash", name = n)),
             None => Ok(()),
         }
     }
@@ -952,10 +960,11 @@ or both: match = [\"@photo\", \"@video\"]",
         expr: &MaskExpr,
     ) -> std::result::Result<(), String> {
         if let Some(i) = expr.0.iter().find(|i| i.is_negated()) {
-            return Err(format!(
-                "{whose}: '{}' in {field} is not allowed: {field} only turns files away, \
-                 a '!' item would take more. Put the exception into match instead",
-                i.as_string()
+            return Err(crate::t!(
+                "config.veto_negated",
+                whose = whose,
+                item = i.as_string(),
+                field = field
             ));
         }
         self.check_mask_refs(whose, expr)
@@ -963,10 +972,10 @@ or both: match = [\"@photo\", \"@video\"]",
 
     fn check_mask_refs(&self, whose: &str, expr: &MaskExpr) -> std::result::Result<(), String> {
         if expr.is_empty() {
-            return Err(format!("{whose}: empty mask list"));
+            return Err(crate::t!("config.empty_mask_list", whose = whose));
         }
         match expr.refs().find(|n| self.named_mask(n).is_none()) {
-            Some(n) => Err(format!("{whose}: unknown mask '@{n}'")),
+            Some(n) => Err(crate::t!("config.unknown_mask", whose = whose, name = n)),
             None => Ok(()),
         }
     }
@@ -985,10 +994,10 @@ or both: match = [\"@photo\", \"@video\"]",
     /// accepted, and no reference cycle.
     fn check_masks(&self) -> std::result::Result<(), String> {
         if self.masks.keys().any(|n| n.is_empty() || n.contains('@')) {
-            return Err("masks: a mask name must be non-empty and have no '@'".into());
+            return Err(crate::t!("config.bad_mask_name"));
         }
         for (name, e) in &self.masks {
-            self.check_mask_refs(&format!("mask '{name}'"), e)?;
+            self.check_mask_refs(&crate::t!("config.who_mask", name = name), e)?;
         }
         // Depth-first walk over `@` references; a name met again while it is
         // still open is a cycle.
@@ -1001,12 +1010,13 @@ or both: match = [\"@photo\", \"@video\"]",
             if let Some(i) = open.iter().position(|n| *n == name) {
                 let mut cycle = open[i..].to_vec();
                 cycle.push(name);
-                return Err(format!("mask cycle: {}", cycle.join(" -> ")));
+                return Err(crate::t!("config.mask_cycle", cycle = cycle.join(" -> ")));
             }
             if open.len() + 1 >= MAX_REF_DEPTH {
-                return Err(format!(
-                    "mask '{name}': reference chain deeper than {} levels",
-                    MAX_REF_DEPTH - 1
+                return Err(crate::t!(
+                    "config.mask_too_deep",
+                    name = name,
+                    depth = MAX_REF_DEPTH - 1
                 ));
             }
             if !done.insert(name) {
@@ -1026,7 +1036,7 @@ or both: match = [\"@photo\", \"@video\"]",
             walk(self, name, &mut Vec::new(), &mut done)?;
         }
         for (name, p) in &self.name_presets {
-            let whose = format!("name preset '{name}'");
+            let whose = crate::t!("config.who_name_preset", name = name);
             if let Some(m) = &p.mask {
                 self.check_mask_refs(&whose, m)?;
             }
@@ -1044,22 +1054,26 @@ or both: match = [\"@photo\", \"@video\"]",
                 ContentPreset::Bundle(p) => {
                     for st in &p.steps {
                         if let Some(m) = &st.mask {
-                            self.check_mask_refs(&format!("bundle '{name}'"), m)?;
+                            self.check_mask_refs(&crate::t!("config.who_bundle", name = name), m)?;
                         }
                     }
                     &p.mask
                 }
             };
             if let Some(m) = m {
-                self.check_mask_refs(&format!("content preset '{name}'"), m)?;
+                self.check_mask_refs(&crate::t!("config.who_content_preset", name = name), m)?;
             }
         }
         let t = &self.targets;
         for m in t.before_ai.iter().chain(&t.after_ai) {
             for f in &m.filters {
-                let whose = format!("target '{}'", m.name);
+                let whose = crate::t!("config.who_target", name = m.name);
                 if !f.exclude.is_empty() {
-                    self.check_veto_mask(&format!("{whose} filter"), "exclude", &f.exclude)?;
+                    self.check_veto_mask(
+                        &crate::t!("config.who_filter", whose = whose),
+                        "exclude",
+                        &f.exclude,
+                    )?;
                 }
                 if let Some(n) = &f.matches {
                     self.check_mask_refs(&whose, n)?;
@@ -1067,10 +1081,14 @@ or both: match = [\"@photo\", \"@video\"]",
             }
         }
         for a in &t.ai {
-            let whose = format!("target '{}'", a.name);
+            let whose = crate::t!("config.who_target", name = a.name);
             if let Some(p) = &a.prefilter {
                 if !p.exclude.is_empty() {
-                    self.check_veto_mask(&format!("{whose} prefilter"), "exclude", &p.exclude)?;
+                    self.check_veto_mask(
+                        &crate::t!("config.who_prefilter", whose = whose),
+                        "exclude",
+                        &p.exclude,
+                    )?;
                 }
                 if let Some(n) = &p.matches {
                     self.check_mask_refs(&whose, n)?;
@@ -1089,7 +1107,7 @@ or both: match = [\"@photo\", \"@video\"]",
                 .flat_map(|o| o.content.iter().chain(&o.rename));
             for st in steps {
                 if let Some(m) = &st.mask {
-                    self.check_mask_refs(&format!("target '{name}'"), m)?;
+                    self.check_mask_refs(&crate::t!("config.who_target", name = name), m)?;
                 }
             }
         }
@@ -1104,13 +1122,7 @@ or both: match = [\"@photo\", \"@video\"]",
         self.name_presets
             .iter()
             .filter(|(_, p)| p.template.contains('/') && p.skip_if.is_some())
-            .map(|(name, _)| {
-                format!(
-                    "name preset '{name}': template makes folders and has skip_if; \
-a skipped file gets no folders (in a recursive source that is its own target \
-it moves back out of its folder)"
-                )
-            })
+            .map(|(name, _)| crate::t!("config.warn_folders_skip_if", name = name))
             .collect()
     }
 
@@ -1120,9 +1132,7 @@ it moves back out of its folder)"
         for s in &self.sources {
             let id = s.id.as_str();
             if id.is_empty() || id == "." || id == ".." || id.contains(['/', '\\']) {
-                return Err(format!(
-                    "source id '{id}': must be a non-empty name without '/' or '\\', not '.' or '..'"
-                ));
+                return Err(crate::t!("config.bad_source_id", id = id));
             }
         }
         self.name_presets
@@ -1140,8 +1150,10 @@ it moves back out of its folder)"
         let sources: BTreeSet<&str> = self.sources.iter().map(|s| s.id.as_str()).collect();
         let check_sources = |target: &str, ids: &[String]| -> Result<()> {
             match ids.iter().find(|id| !sources.contains(id.as_str())) {
-                Some(id) => Err(Error::Config(format!(
-                    "target '{target}': unknown source '{id}'"
+                Some(id) => Err(Error::Config(crate::t!(
+                    "config.unknown_source",
+                    target = target,
+                    id = id
                 ))),
                 None => Ok(()),
             }
@@ -1164,7 +1176,10 @@ it moves back out of its folder)"
         let mask_targets = t.before_ai.iter().chain(&t.after_ai);
         for m in mask_targets {
             if !seen.insert(m.name.as_str()) {
-                return Err(Error::Config(format!("duplicate target name '{}'", m.name)));
+                return Err(Error::Config(crate::t!(
+                    "config.duplicate_target",
+                    name = m.name
+                )));
             }
             for f in &m.filters {
                 check_sources(&m.name, &f.sources)?;
@@ -1173,13 +1188,16 @@ it moves back out of its folder)"
         }
         for a in &t.ai {
             if !seen.insert(a.name.as_str()) {
-                return Err(Error::Config(format!("duplicate target name '{}'", a.name)));
+                return Err(Error::Config(crate::t!(
+                    "config.duplicate_target",
+                    name = a.name
+                )));
             }
             check_sources(&a.name, &a.sources)?;
             if a.description.trim().is_empty() {
-                return Err(Error::Config(format!(
-                    "ai target '{}': empty description",
-                    a.name
+                return Err(Error::Config(crate::t!(
+                    "config.empty_description",
+                    name = a.name
                 )));
             }
             check_outputs(&a.name, &a.outputs)?;

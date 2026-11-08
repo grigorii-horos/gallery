@@ -20,9 +20,10 @@ fn run_ok(cmd: &mut Command, what: &str) -> Result<()> {
     if out.status.success() {
         Ok(())
     } else {
-        Err(Error::Tool(format!(
-            "{what} failed: {}",
-            String::from_utf8_lossy(&out.stderr).trim()
+        Err(Error::Tool(crate::t!(
+            "thumbs.tool_failed",
+            what = what,
+            error = String::from_utf8_lossy(&out.stderr).trim()
         )))
     }
 }
@@ -122,9 +123,9 @@ fn video(tools: &Tools, src: &Path, out: &Path, work: &Path) -> Result<PathBuf> 
     }
     let frames = frames_in(work);
     if frames.is_empty() {
-        return Err(Error::Tool(format!(
-            "no frames extracted from {}",
-            src.display()
+        return Err(Error::Tool(crate::t!(
+            "thumbs.no_frames",
+            path = src.display()
         )));
     }
     let res = run_ok(

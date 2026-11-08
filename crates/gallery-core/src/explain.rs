@@ -228,7 +228,7 @@ fn file_name_of(p: &Path) -> &str {
 fn ext_text(name: &str) -> String {
     let (_, ext) = split_name(name);
     if ext.is_empty() {
-        "file without an extension".to_string()
+        crate::t!("explain.no_ext_file")
     } else {
         format!(".{ext}")
     }
@@ -415,12 +415,9 @@ fn output_checks(
             let skipped = preset
                 .filter(|_| t.matched)
                 .and_then(|p| name_skip(cfg, p, &cur, ctx))
-                .map(|s| {
-                    match s {
-                        NameSkip::SkipIf => "skip_if fired",
-                        NameSkip::NoDate => "no date for the template",
-                    }
-                    .to_string()
+                .map(|s| match s {
+                    NameSkip::SkipIf => crate::t!("explain.skip_if"),
+                    NameSkip::NoDate => crate::t!("explain.no_date"),
                 });
             rename.push(StepCheck {
                 index: t.index,
@@ -467,11 +464,8 @@ fn missing_text(path: &Path) -> String {
         .filter(|n| !want.is_empty() && *n != own && n.split('.').next() == Some(want.as_str()))
         .min();
     match sibling {
-        Some(n) => format!(
-            "File not found: {}; {n} is nearby — maybe already processed",
-            path.display()
-        ),
-        None => format!("File not found: {}", path.display()),
+        Some(n) => crate::t!("explain.missing_nearby", path = path.display(), name = n),
+        None => crate::t!("explain.missing", path = path.display()),
     }
 }
 
@@ -511,19 +505,11 @@ pub fn explain(
         }
     };
     if !meta.is_file() {
-        return Ok(base(
-            &path,
-            Scope::NotFile,
-            "This is not a regular file (a folder or a link): Gallery does not take such".into(),
-        ));
+        return Ok(base(&path, Scope::NotFile, crate::t!("explain.not_file")));
     }
     let found = locate(cfg, &path);
     if found.is_empty() {
-        return Ok(base(
-            &path,
-            Scope::NoSource,
-            "The file is in none of the config's sources: add its folder to [[sources]]".into(),
-        ));
+        return Ok(base(&path, Scope::NoSource, crate::t!("explain.no_source")));
     }
     // The first source that lists the file; else the first rejection.
     let mut first_reject = None;
@@ -545,15 +531,11 @@ pub fn explain(
         let id = cfg.sources[i].id.clone();
         let (scope, verdict) = match r {
             Rejection::Hidden(part) => {
-                let v = format!(
-                    "Hidden path element `{part}`: the scan skips files and folders whose name starts with a dot"
-                );
+                let v = crate::t!("explain.hidden", part = part);
                 (Scope::Hidden { source: id, part }, v)
             }
             Rejection::Skip { part, glob } => {
-                let v = format!(
-                    "`{part}` matches the skip `{glob}` of source {id}: such files and folders are not scanned. Remove the mask from skip"
-                );
+                let v = crate::t!("explain.skipped", part = part, glob = glob, id = id);
                 (
                     Scope::Skip {
                         source: id,
@@ -564,9 +546,7 @@ pub fn explain(
                 )
             }
             Rejection::NotRecursive => {
-                let v = format!(
-                    "Source {id} is not recursive: files in nested folders are not scanned. Set recursive = true"
-                );
+                let v = crate::t!("explain.not_recursive", id = id);
                 (Scope::NotRecursive { source: id }, v)
             }
         };
@@ -824,12 +804,9 @@ fn replay_output(
                 .matched
                 .then(|| name_skip(cfg, preset, &cur, ctx))
                 .flatten()
-                .map(|s| {
-                    match s {
-                        NameSkip::SkipIf => "skip_if fired",
-                        NameSkip::NoDate => "no date for the template",
-                    }
-                    .to_string()
+                .map(|s| match s {
+                    NameSkip::SkipIf => crate::t!("explain.skip_if"),
+                    NameSkip::NoDate => crate::t!("explain.no_date"),
                 });
             let (m, x) = mask_texts(mask, cfg);
             rename.push(StepCheck {
@@ -904,43 +881,61 @@ fn excluded_by(items: &[ItemCheck]) -> Option<(String, String, String)> {
     None
 }
 
-fn why_filter_misses(t: &TargetCheck, name: &str) -> Option<String> {
+/// Why target `t`'s filter does not take `name`; the flag is set when a `!`
+/// item cut the name off, the most telling miss.
+fn why_filter_misses(t: &TargetCheck, name: &str) -> Option<(bool, String)> {
     let f = t.filters.iter().find(|f| f.source_ok)?;
     let ext = ext_text(name);
     if let Some(m) = &f.matches
         && !m.matched
     {
         if let Some(neg) = m.items.iter().find(|i| i.negated && i.hit) {
-            return Some(format!(
-                "Name `{name}` cuts off item {} in the match of target {}: {}",
-                neg.item,
-                t.name,
-                items_text(m)
+            return Some((
+                true,
+                crate::t!(
+                    "explain.cut_off",
+                    name = name,
+                    item = neg.item,
+                    target = t.name,
+                    items = items_text(m)
+                ),
             ));
         }
         if let Some((taker, neg, owner)) = excluded_by(&m.items) {
             let pattern = neg.trim_start_matches('!');
             let lead = if pattern == "*.av1.mp4" {
-                format!(
-                    "The file is already compressed to AV1 (.av1.mp4): {owner} excludes it on purpose."
-                )
+                crate::t!("explain.excl_av1", owner = owner)
             } else {
-                format!("The file fits {taker}, but {owner} excludes it ({neg}).")
+                crate::t!(
+                    "explain.excl_other",
+                    taker = taker,
+                    owner = owner,
+                    neg = neg
+                )
             };
-            return Some(format!(
-                "{lead} If you want it, add \"{pattern}\" to the match of target {}",
-                t.name
+            return Some((
+                false,
+                crate::t!(
+                    "explain.excl_hint",
+                    lead = lead,
+                    pattern = pattern,
+                    target = t.name
+                ),
             ));
         }
-        return Some(format!(
-            "{} is not in the match {} of target {}",
-            if ext.starts_with('.') {
-                format!("Extension {ext}")
-            } else {
-                "File without an extension".to_string()
-            },
-            items_text(m),
-            t.name
+        let what = if ext.starts_with('.') {
+            crate::t!("explain.extension", ext = ext)
+        } else {
+            crate::t!("explain.file_no_ext")
+        };
+        return Some((
+            false,
+            crate::t!(
+                "explain.not_in_match",
+                what = what,
+                items = items_text(m),
+                target = t.name
+            ),
         ));
     }
     None
@@ -958,19 +953,14 @@ fn verdict(
     let target = d.target.clone().unwrap_or_default();
     match d.kind {
         DecisionKind::Kept => {
-            return "Manual decision: leave the file as it is. Reset it in Triage to let the file be sorted again".into();
+            return crate::t!("explain.kept");
         }
         DecisionKind::Review => {
             let r = d.detail.clone().unwrap_or_default();
             if let Some(it) = plan.review.first().filter(|r| r.name_error) {
-                return format!(
-                    "The name could not be built for target {target}: {}",
-                    it.reason
-                );
+                return crate::t!("explain.name_error", target = target, reason = it.reason);
             }
-            return format!(
-                "The AI is unsure: suggests {target} ({r}). The file waits for a decision in the review screen"
-            );
+            return crate::t!("explain.ai_unsure", target = target, reason = r);
         }
         DecisionKind::Excluded => {
             let hit = ex.stages.iter().find_map(|t| {
@@ -988,33 +978,26 @@ fn verdict(
                         .iter()
                         .find(|i| i.hit && !i.negated)
                         .map_or_else(|| x.source.clone(), |i| i.item.clone());
-                    format!(
-                        "The file fits target {t}, but is excluded by the exclude mask ({by}): by design, nothing is done"
-                    )
+                    crate::t!("explain.excluded_fits", target = t, by = by)
                 }
-                None => "The file is excluded by the exclude mask: nothing is done".into(),
+                None => crate::t!("explain.excluded"),
             };
         }
         DecisionKind::Unmatched => {
             match &ex.ai {
                 AiState::NotAsked { candidates } => {
-                    return format!(
-                        "The file fits the AI targets [{}], but the AI was not asked (no cached answer): run a scan with AI. The file is not sorted yet",
-                        candidates.join(", ")
-                    );
+                    return crate::t!("explain.ai_not_asked", targets = candidates.join(", "));
                 }
                 AiState::Cached {
                     category: None,
                     reason,
                     ..
                 } => {
-                    return format!(
-                        "The AI answered \"no category fits\" ({reason}), and no filter took the file after the AI. Add a target or widen its match"
-                    );
+                    return crate::t!("explain.ai_none", reason = reason);
                 }
                 _ => {}
             }
-            let mut why: Vec<String> = ex
+            let mut why: Vec<(bool, String)> = ex
                 .stages
                 .iter()
                 .filter(|t| t.stage != StageKind::Ai)
@@ -1022,35 +1005,38 @@ fn verdict(
                 .collect();
             if why.is_empty() {
                 let srcs = &entry.source_id;
-                return format!(
-                    "No target filter takes source {srcs}: add it to the sources of the filter you need"
-                );
+                return crate::t!("explain.no_filter", source = srcs);
             }
             // A name cut by a `!` item is the most telling miss.
-            if let Some(i) = why.iter().position(|w| w.contains("cuts off")) {
+            if let Some(i) = why.iter().position(|w| w.0) {
                 why.swap(0, i);
             }
-            let first = why.remove(0);
+            let first = why.remove(0).1;
             return if why.is_empty() {
                 first
             } else {
-                format!("{first} (and {} more targets)", why.len())
+                crate::tn!("explain.and_more", why.len(), first = first)
             };
         }
         DecisionKind::Target => {}
     }
 
     let via = match &d.via {
-        Some(Via::Manual) => "manual decision",
-        Some(Via::Ai { .. }) => "AI",
-        _ => "mask",
+        Some(Via::Manual) => crate::t!("explain.via_manual"),
+        Some(Via::Ai { .. }) => crate::t!("explain.via_ai"),
+        _ => crate::t!("explain.via_mask"),
     };
     if ex.outcome == Outcome::Process {
         let dest = ex
             .outputs
             .first()
             .map_or_else(String::new, |o| o.dest.display().to_string());
-        return format!("Will be processed: target {target} ({via}) → {dest}");
+        return crate::t!(
+            "explain.will_process",
+            target = target,
+            via = via,
+            dest = dest
+        );
     }
     // Routed, nothing to do. Did any output's content steps all miss?
     let _ = overrides;
@@ -1060,50 +1046,54 @@ fn verdict(
         {
             let used: Vec<&str> = o.content.iter().map(|s| s.preset.as_str()).collect();
             let tip = match suggest_preset(cfg, &first.preset, name, &used) {
-                Some(p) => format!("Add {p}."),
-                None => format!("Add a content step whose mask takes {}.", ext_text(name)),
+                Some(p) => crate::t!("explain.tip_add", preset = p),
+                None => crate::t!("explain.tip_add_step", ext = ext_text(name)),
             };
-            return format!(
-                "The file passes the filter of target {target}, but no content step fits: mask {} = {} does not take {}. {tip}",
-                first.preset,
-                if first.mask_expanded.is_empty() || first.mask_expanded == first.mask {
+            return crate::t!(
+                "explain.no_content_step",
+                target = target,
+                preset = first.preset,
+                mask = if first.mask_expanded.is_empty() || first.mask_expanded == first.mask {
                     first.mask.clone()
                 } else {
                     format!("{} ({})", first.mask, first.mask_expanded)
                 },
-                ext_text(name),
+                ext = ext_text(name),
+                tip = tip
             );
         }
     }
-    format!(
-        "Target {target} ({via}) changes nothing: the file already sits where it should under the right name. Nothing to do"
-    )
+    crate::t!("explain.nothing_to_do", target = target, via = via)
 }
 
 impl Explanation {
-    /// The explanation as a compact Russian tree, for the terminal.
+    /// The explanation as a compact tree, for the terminal.
     pub fn to_text(&self) -> String {
         use std::fmt::Write;
         let mut o = String::new();
         let _ = writeln!(o, "{}", self.path.display());
-        let _ = writeln!(o, "├─ Source: {}", scope_text(&self.scope));
+        let _ = writeln!(
+            o,
+            "├─ {}",
+            crate::t!("explain.tree.source", scope = scope_text(&self.scope))
+        );
         let mut last_stage = None;
         for t in &self.stages {
             if last_stage != Some(t.stage) {
                 let title = match t.stage {
-                    StageKind::BeforeAi => "before AI",
-                    StageKind::Ai => "AI",
-                    StageKind::AfterAi => "after AI",
+                    StageKind::BeforeAi => crate::t!("explain.stage_before_ai"),
+                    StageKind::Ai => crate::t!("explain.stage_ai"),
+                    StageKind::AfterAi => crate::t!("explain.stage_after_ai"),
                 };
-                let _ = writeln!(o, "├─ Stage {title}");
+                let _ = writeln!(o, "├─ {}", crate::t!("explain.tree.stage", title = title));
                 last_stage = Some(t.stage);
             }
             let mark = if t.taken {
-                "took"
+                crate::t!("explain.mark_took")
             } else if t.candidate {
-                "fits"
+                crate::t!("explain.mark_fits")
             } else {
-                "no"
+                crate::t!("explain.mark_no")
             };
             let _ = writeln!(o, "│  ├─ {} — {mark}", t.name);
             for f in &t.filters {
@@ -1123,8 +1113,11 @@ impl Explanation {
             AiState::NotAsked { candidates } => {
                 let _ = writeln!(
                     o,
-                    "├─ AI: not asked (candidates: {})",
-                    candidates.join(", ")
+                    "├─ {}",
+                    crate::t!(
+                        "explain.tree.ai_not_asked",
+                        candidates = candidates.join(", ")
+                    )
                 );
             }
             AiState::Cached {
@@ -1132,39 +1125,59 @@ impl Explanation {
                 reason,
                 low,
             } => {
+                let none = crate::t!("explain.tree.no_category");
                 let _ = writeln!(
                     o,
-                    "├─ AI (from cache): {}{} — {reason}",
-                    category.as_deref().unwrap_or("no category"),
-                    if *low { " (unsure)" } else { "" }
+                    "├─ {}",
+                    crate::t!(
+                        "explain.tree.ai_cached",
+                        category = category.as_deref().unwrap_or(&none),
+                        unsure = if *low {
+                            crate::t!("explain.tree.unsure")
+                        } else {
+                            String::new()
+                        },
+                        reason = reason
+                    )
                 );
             }
         }
         if let Some(d) = &self.decision {
             let text = match d.kind {
-                DecisionKind::Target => format!("target {}", d.target.clone().unwrap_or_default()),
-                DecisionKind::Review => "for review".into(),
-                DecisionKind::Excluded => "excluded by the exclude mask".into(),
-                DecisionKind::Kept => "keep (manual decision)".into(),
-                DecisionKind::Unmatched => "not sorted".into(),
+                DecisionKind::Target => {
+                    crate::t!(
+                        "explain.tree.d_target",
+                        target = d.target.clone().unwrap_or_default()
+                    )
+                }
+                DecisionKind::Review => crate::t!("explain.tree.d_review"),
+                DecisionKind::Excluded => crate::t!("explain.tree.d_excluded"),
+                DecisionKind::Kept => crate::t!("explain.tree.d_kept"),
+                DecisionKind::Unmatched => crate::t!("explain.tree.d_unmatched"),
             };
-            let _ = writeln!(o, "├─ Decision: {text}");
+            let _ = writeln!(o, "├─ {}", crate::t!("explain.tree.decision", text = text));
         }
         for (i, out) in self.outputs.iter().enumerate() {
             let _ = writeln!(
                 o,
-                "├─ Output {}: {} [{}]",
-                i + 1,
-                out.dest.display(),
-                op_text(out.op)
+                "├─ {}",
+                crate::t!(
+                    "explain.tree.output",
+                    n = i + 1,
+                    dest = out.dest.display(),
+                    op = op_text(out.op)
+                )
             );
-            for (kind, steps) in [("content", &out.content), ("name", &out.rename)] {
+            for (kind, steps) in [
+                (crate::t!("explain.kind_content"), &out.content),
+                (crate::t!("explain.kind_name"), &out.rename),
+            ] {
                 for s in steps {
                     let state = match (&s.skipped, s.matched) {
-                        (Some(why), _) => format!("skipped ({why})"),
-                        (None, true) if s.before == s.after => "applied, same name".into(),
-                        (None, true) => "applied".into(),
-                        (None, false) => "mask did not match".into(),
+                        (Some(why), _) => crate::t!("explain.step_skipped", why = why),
+                        (None, true) if s.before == s.after => crate::t!("explain.step_same"),
+                        (None, true) => crate::t!("explain.step_applied"),
+                        (None, false) => crate::t!("explain.step_no_match"),
                     };
                     let mask = if s.mask_expanded.is_empty() || s.mask_expanded == s.mask {
                         s.mask.clone()
@@ -1177,8 +1190,16 @@ impl Explanation {
                     };
                     let _ = writeln!(
                         o,
-                        "│  ├─ {kind} {preset}: {state}; mask {mask}; {} → {}",
-                        s.before, s.after
+                        "│  ├─ {}",
+                        crate::t!(
+                            "explain.tree.step",
+                            kind = kind,
+                            preset = preset,
+                            state = state,
+                            mask = mask,
+                            before = s.before,
+                            after = s.after
+                        )
                     );
                 }
             }
@@ -1214,62 +1235,78 @@ fn item_lines(it: &ItemCheck, depth: usize, out: &mut String) {
 /// "23 more targets not for source screenshots".
 pub fn other_targets_text(ex: &Explanation) -> String {
     let n = ex.other_targets.len();
-    let word = if n == 1 { "target" } else { "targets" };
     let source = match &ex.scope {
         Scope::Scanned { source } => source.as_str(),
         _ => "",
     };
-    format!("{n} more {word} not for source {source}")
+    crate::tn!("explain.other_targets", n, source = source)
 }
 
-fn op_text(op: OutputOp) -> &'static str {
+fn op_text(op: OutputOp) -> String {
     match op {
-        OutputOp::Write => "write",
-        OutputOp::Rename => "rename",
-        OutputOp::Keep => "no change",
+        OutputOp::Write => crate::t!("explain.op_write"),
+        OutputOp::Rename => crate::t!("explain.op_rename"),
+        OutputOp::Keep => crate::t!("explain.op_keep"),
     }
 }
 
 fn scope_text(s: &Scope) -> String {
     match s {
-        Scope::Scanned { source } => format!("{source}, the scan sees it"),
-        Scope::Missing => "no such file".into(),
-        Scope::NotFile => "not a regular file".into(),
-        Scope::NoSource => "no source contains the file".into(),
-        Scope::Hidden { source, part } => format!("{source}, hidden element `{part}`"),
-        Scope::Skip { source, part, glob } => {
-            format!("{source}, `{part}` under skip `{glob}`")
+        Scope::Scanned { source } => crate::t!("explain.scope.scanned", source = source),
+        Scope::Missing => crate::t!("explain.scope.missing"),
+        Scope::NotFile => crate::t!("explain.scope.not_file"),
+        Scope::NoSource => crate::t!("explain.scope.no_source"),
+        Scope::Hidden { source, part } => {
+            crate::t!("explain.scope.hidden", source = source, part = part)
         }
-        Scope::NotRecursive { source } => format!("{source}, not recursive"),
+        Scope::Skip { source, part, glob } => {
+            crate::t!(
+                "explain.scope.skip",
+                source = source,
+                part = part,
+                glob = glob
+            )
+        }
+        Scope::NotRecursive { source } => crate::t!("explain.scope.not_recursive", source = source),
     }
 }
 
 fn filter_text(stage: StageKind, f: &FilterCheck) -> String {
     let what = if stage == StageKind::Ai {
-        "prefilter".to_string()
+        crate::t!("explain.prefilter")
     } else {
-        format!("filter {}", f.index + 1)
+        crate::t!("explain.filter_n", n = f.index + 1)
     };
     if !f.source_ok {
-        return format!("{what}: source not in the list [{}]", f.sources.join(", "));
+        return crate::t!(
+            "explain.filter_source",
+            what = what,
+            sources = f.sources.join(", ")
+        );
     }
     let m = match &f.matches {
-        None => "match: any file".to_string(),
-        Some(m) => format!(
-            "match {} {}",
-            items_text(m),
-            if m.matched { "took" } else { "did not take" }
+        None => crate::t!("explain.match_any"),
+        Some(m) => crate::t!(
+            if m.matched {
+                "explain.match_took"
+            } else {
+                "explain.match_not_took"
+            },
+            items = items_text(m)
         ),
     };
     let x = match &f.exclude {
         None => String::new(),
-        Some(x) => format!(
-            "; exclude {} {}",
-            items_text(x),
-            if x.matched { "fired" } else { "did not fire" }
+        Some(x) => crate::t!(
+            if x.matched {
+                "explain.exclude_fired"
+            } else {
+                "explain.exclude_not_fired"
+            },
+            items = items_text(x)
         ),
     };
-    format!("{what}: {m}{x}")
+    crate::t!("explain.filter_line", what = what, m = m, x = x)
 }
 
 #[cfg(test)]

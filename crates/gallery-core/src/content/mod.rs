@@ -55,9 +55,7 @@ impl ContentStep for ContentPreset {
             ContentPreset::Video(p) => p.run(ctx, input),
             ContentPreset::Audio(p) => p.run(ctx, input),
             ContentPreset::Png(p) => p.run(ctx, input),
-            ContentPreset::Bundle(_) => Err(Error::Plan(
-                "a bundle is expanded at plan time, it cannot run as a step".into(),
-            )),
+            ContentPreset::Bundle(_) => Err(Error::Plan(crate::t!("content.bundle_step"))),
         }
     }
 }
@@ -67,14 +65,19 @@ impl ContentStep for ContentPreset {
 /// With no steps the original is copied into `tmp_dir` under its own name.
 pub fn run_pipe(ctx: &StepCtx, steps: &[&ContentPreset]) -> Result<StepResult> {
     if steps.is_empty() {
-        let name = ctx
-            .original
-            .file_name()
-            .ok_or_else(|| Error::Plan(format!("no file name: {}", ctx.original.display())))?;
+        let name = ctx.original.file_name().ok_or_else(|| {
+            Error::Plan(crate::t!(
+                "content.no_file_name",
+                path = ctx.original.display()
+            ))
+        })?;
         let path = ctx.tmp_dir.join(name);
         if path.exists() {
             // Never copy over an existing file (it could be the original itself).
-            return Err(Error::Plan(format!("already exists: {}", path.display())));
+            return Err(Error::Plan(crate::t!(
+                "content.already_exists",
+                path = path.display()
+            )));
         }
         copy_keep_mtime(ctx.original, &path)?;
         let ext = split_name(&name.to_string_lossy()).1;

@@ -7,7 +7,8 @@ use std::path::Path;
 
 fn gallery(tmp: &Path) -> Command {
     let mut c = Command::cargo_bin("gallery").unwrap();
-    c.env("HOME", tmp)
+    c.env("LC_ALL", "C")
+        .env("HOME", tmp)
         .env("XDG_DATA_HOME", tmp.join("data"))
         .env("XDG_CACHE_HOME", tmp.join("cache"))
         .env("XDG_CONFIG_HOME", tmp.join("config"));

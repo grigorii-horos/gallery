@@ -11,6 +11,7 @@ pub mod error;
 pub mod estimate;
 pub mod exif;
 pub mod explain;
+pub mod i18n;
 pub mod learn;
 pub mod lock;
 pub mod mask;

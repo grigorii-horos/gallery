@@ -74,9 +74,9 @@ impl Overrides {
         let bad = |msg: String| Error::Config(format!("{}: {msg}", label.display()));
         let file: FileFormat = serde_json::from_str(text).map_err(|e| bad(e.to_string()))?;
         if file.version != VERSION {
-            return Err(bad(format!(
-                "unsupported overrides version {}",
-                file.version
+            return Err(bad(crate::t!(
+                "overrides.unsupported_version",
+                version = file.version
             )));
         }
         Ok(Overrides {
@@ -147,14 +147,20 @@ impl Overrides {
                 .chain(t.after_ai.iter().map(|m| &m.name))
                 .any(|n| n == name);
             if !known {
-                return Err(Error::Config(format!("unknown target '{name}'")));
+                return Err(Error::Config(crate::t!(
+                    "overrides.unknown_target",
+                    name = name
+                )));
             }
         }
         let shown = || path.display().to_string();
         let meta = std::fs::symlink_metadata(path)
             .map_err(|e| Error::Config(format!("{}: {e}", shown())))?;
         if !meta.file_type().is_file() {
-            return Err(Error::Config(format!("{}: not a regular file", shown())));
+            return Err(Error::Config(crate::t!(
+                "overrides.not_regular",
+                path = shown()
+            )));
         }
         let real = path.canonicalize()?;
         for src in &cfg.sources {
@@ -186,9 +192,9 @@ impl Overrides {
             // The scan does not follow symlinked folders: a file reached
             // through one below the root would never get this decision.
             if !direct_below(path, &real_root) {
-                return Err(Error::Config(format!(
-                    "{}: reached through a symlinked folder",
-                    shown()
+                return Err(Error::Config(crate::t!(
+                    "overrides.symlinked",
+                    path = shown()
                 )));
             }
             let key = root.join(rel);
@@ -196,9 +202,9 @@ impl Overrides {
             self.set(key.clone(), meta.len(), mtime, action);
             return Ok(key);
         }
-        Err(Error::Config(format!(
-            "{}: not a file of any configured source",
-            shown()
+        Err(Error::Config(crate::t!(
+            "overrides.not_in_source",
+            path = shown()
         )))
     }
 

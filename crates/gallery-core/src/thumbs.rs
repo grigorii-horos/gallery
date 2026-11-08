@@ -59,7 +59,7 @@ pub fn cache_name(path: &Path, size: u64, mtime_ns: i128) -> String {
 
 /// The thumbnail of `path` in the default cache directory.
 pub fn thumb_for(tools: &Tools, path: &Path) -> Result<PathBuf> {
-    let dir = default_dir().ok_or_else(|| Error::Tool("no user cache directory".into()))?;
+    let dir = default_dir().ok_or_else(|| Error::Tool(crate::t!("ai.no_cache_dir")))?;
     thumb_for_in(tools, path, &dir)
 }
 
@@ -67,14 +67,17 @@ pub fn thumb_for(tools: &Tools, path: &Path) -> Result<PathBuf> {
 pub fn thumb_for_in(tools: &Tools, path: &Path, dir: &Path) -> Result<PathBuf> {
     let kind = kind_of(path);
     if matches!(kind, MediaKind::Audio | MediaKind::Other) {
-        return Err(Error::Tool(format!(
-            "no thumbnail for this file type: {}",
-            path.display()
+        return Err(Error::Tool(crate::t!(
+            "thumbs.no_type",
+            path = path.display()
         )));
     }
     let meta = std::fs::metadata(path)?;
     if !meta.is_file() {
-        return Err(Error::Tool(format!("not a file: {}", path.display())));
+        return Err(Error::Tool(crate::t!(
+            "thumbs.not_file",
+            path = path.display()
+        )));
     }
     let cached = dir.join(cache_name(path, meta.len(), mtime_ns(&meta)?));
     if cached.is_file() {

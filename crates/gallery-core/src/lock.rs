@@ -87,7 +87,7 @@ pub fn acquire_apply_at(path: &Path) -> Result<FileLock> {
 
 /// [`acquire_apply_at`] at the default place.
 pub fn acquire_apply() -> Result<FileLock> {
-    let p = apply_lock_path().ok_or_else(|| Error::Plan("no user data directory".into()))?;
+    let p = apply_lock_path().ok_or_else(|| Error::Plan(crate::t!("lock.no_data_dir")))?;
     acquire_apply_at(&p)
 }
 
