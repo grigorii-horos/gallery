@@ -291,11 +291,11 @@ mod tests {
         eprintln!("scan {} ms, diff {} ms", first.scan_ms, second.diff_ms);
         assert!(!second.rescanned);
         // Debug build; release is about three times faster.
-        // macOS/Windows runners stat 5000 files several times slower (1.5 s seen).
-        let limit = if cfg!(target_os = "linux") {
-            1000
-        } else {
+        // Shared CI runners are several times slower (1.5 s seen on macOS).
+        let limit = if std::env::var_os("CI").is_some() {
             5000
+        } else {
+            1000
         };
         assert!(second.scan_ms + second.diff_ms < limit, "{second:?}");
     }
