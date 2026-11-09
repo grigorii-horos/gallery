@@ -306,6 +306,54 @@ pub fn needs(cfg: &Config) -> Needs {
     n
 }
 
+/// Everything [`compute`] reads from a config besides the files.
+#[derive(PartialEq)]
+struct ComputeInputs<'a> {
+    needs: Needs,
+    /// In config order: it ranks the original of a duplicate group.
+    sources: Vec<(&'a str, &'a Path)>,
+    output_roots: BTreeSet<PathBuf>,
+    series: Option<SeriesParams>,
+    series_sources: BTreeSet<&'a str>,
+    sharpness_sources: BTreeSet<&'a str>,
+}
+
+impl<'a> ComputeInputs<'a> {
+    fn of(cfg: &'a Config) -> Self {
+        let sources_of = |pick: fn(&Filter) -> bool| {
+            filters(cfg)
+                .filter(|f| pick(f))
+                .flat_map(|f| f.sources.iter().map(String::as_str))
+                .collect()
+        };
+        ComputeInputs {
+            needs: needs(cfg),
+            sources: cfg
+                .sources
+                .iter()
+                .map(|s| (s.id.as_str(), s.path.as_path()))
+                .collect(),
+            output_roots: cfg
+                .targets
+                .iter()
+                .filter(|t| t.kind.is_folders())
+                .flat_map(|t| t.outputs.iter())
+                .filter_map(|o| output_root(&o.dir))
+                .collect(),
+            series: series_params(cfg),
+            series_sources: sources_of(|f| f.series.is_some()),
+            sharpness_sources: sources_of(|f| {
+                f.props.as_ref().is_some_and(|p| p.sharpness.is_some())
+            }),
+        }
+    }
+}
+
+/// [`compute`] gives `a` and `b` the same groups over the same files.
+pub fn same_groups(a: &Config, b: &Config) -> bool {
+    ComputeInputs::of(a) == ComputeInputs::of(b)
+}
+
 // ---------------------------------------------------------------- groups
 
 /// Files of one event, in capture order.

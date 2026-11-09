@@ -449,6 +449,9 @@ struct Walk {
     answer: Option<AiAnswer>,
     /// Confirmed best shot of its series (a manual decision).
     best: bool,
+    /// Targets where the file, the suggested best of its series, was held
+    /// alone for a series review: there its series filters skip it.
+    alone_at: Vec<usize>,
 }
 
 /// What one target does with one file.
@@ -509,7 +512,7 @@ impl Router<'_> {
             };
             // Shots matched through `series` always go to review first.
             if f.series.as_ref().is_some_and(|c| !c.not) && self.ctx.groups.series_of(i).is_some() {
-                series = true;
+                series |= !w.alone_at.contains(&t);
                 continue;
             }
             // A doubtful answer that would take the file: the user decides.
@@ -578,6 +581,33 @@ impl Router<'_> {
         }
     }
 
+    /// Suggested best shots held for a series review that holds no other
+    /// shot of their series (the others are decided otherwise, or the
+    /// filter does not take them): a review of one shot offers no choice.
+    fn alone_bests(&self, decisions: &[Option<Decision>], walks: &[Walk]) -> Vec<usize> {
+        let held_for = |i: usize| match &decisions[i] {
+            Some(Decision::Review {
+                suggested,
+                series: Some(_),
+                ..
+            }) => Some(suggested),
+            _ => None,
+        };
+        (0..decisions.len())
+            .filter(|&i| {
+                let (Some(target), Some(s)) = (held_for(i), self.ctx.groups.series_of(i)) else {
+                    return false;
+                };
+                s.best == i
+                    && !walks[i].best
+                    && !s
+                        .members
+                        .iter()
+                        .any(|&m| m != i && held_for(m) == Some(target))
+            })
+            .collect()
+    }
+
     /// Limit every series review to the shots held in it (same target):
     /// shots decided otherwise (a manual decision, an earlier target) are
     /// not offered again. The best is kept when held, else the first held.
@@ -635,6 +665,8 @@ impl Router<'_> {
                 continue;
             };
             let mut set = HashSet::new();
+            // Events taken in whole already: another seed in one adds nothing.
+            let mut seeded = HashSet::new();
             for i in (0..self.files.len()).filter(|&i| waiting(i)) {
                 if !self.holds(f, i, &walks[i]) {
                     continue;
@@ -643,6 +675,9 @@ impl Router<'_> {
                 let Some(ev) = self.ctx.groups.event(&key, i) else {
                     continue;
                 };
+                if !seeded.insert(std::ptr::from_ref(ev)) {
+                    continue;
+                }
                 set.extend(ev.members.iter().copied().filter(|&m| {
                     waiting(m) && filter_fit(self.cfg, f, &self.files[m]) == Fit::Match
                 }));
@@ -693,89 +728,19 @@ impl Router<'_> {
     }
 }
 
-/// Route every file: manual decisions first (a fresh entry of `overrides`,
-/// same size and mtime, decides the file; an entry naming a target the
-/// config does not have is ignored with a warning, stale entries silently;
-/// `SeriesBest` only marks the file). Then every file walks the targets in
-/// order, and the first target with a matching filter takes it:
-///
-/// - A filter matches when its sources, masks and conditions hold and, with
-///   `ai`, the AI's answer is this target. A file reaching such a filter
-///   before it has an answer pauses; when no file can move on, the paused
-///   ones go to the AI as one batch, each with every category it could
-///   still reach (this and later targets), and their walks resume. A file
-///   is asked at most once. Unless `accept_low`, a low-confidence "none"
-///   sends it to review at once, and a low-confidence category does when
-///   an AI filter would take the file through it (strict order first).
-/// - `expand = "event"`: once every undecided file stands at the target,
-///   the files its other conditions hold for seed their events, and every
-///   undecided file of those events in its sources and masks matches.
-/// - A match through `series` goes to review with the whole series, the
-///   suggested best shot included (unless the user confirmed it as best).
-///
-/// A file nothing takes is `Excluded` when an exclude mask turned it away
-/// and the AI did not judge it, else `Unmatched`. A cancel ends routing with
-/// `Error::Cancelled` (the classifier stops between requests); the AI
-/// batches report [`Stage::Ai`] progress.
-#[allow(clippy::too_many_arguments)]
-pub fn route_with_overrides(
-    cfg: &Config,
-    files: &[FileEntry],
-    ctx: &RouteCtx,
+/// Walk the undecided files through the targets until each is decided or
+/// has walked off the end: paused files go to the AI as one batch, targets
+/// that expand to events settle once every undecided file stands at them.
+fn walk(
+    router: &mut Router,
+    decisions: &mut [Option<Decision>],
+    walks: &mut [Walk],
     ai: &dyn Classifier,
     accept_low: bool,
-    overrides: &Overrides,
     progress: &dyn Progress,
     cancel: &Cancel,
-) -> Result<Routed> {
-    cancel.check()?;
-    assert_eq!(
-        ctx.facts.len(),
-        files.len(),
-        "routing context built for another file list"
-    );
-    let mut decisions: Vec<Option<Decision>> = vec![None; files.len()];
-    let mut walks: Vec<Walk> = files.iter().map(|_| Walk::default()).collect();
-    let mut warnings = Vec::new();
-    let mut overrides_applied = 0;
-
-    for (i, entry) in files.iter().enumerate() {
-        match overrides.get(entry) {
-            Some(Action::Keep) => {
-                decisions[i] = Some(Decision::Kept);
-                overrides_applied += 1;
-            }
-            Some(Action::Target { name }) if target_known(cfg, name) => {
-                decisions[i] = Some(Decision::Target {
-                    name: name.clone(),
-                    via: Via::Manual,
-                    ai_meta: None,
-                });
-                overrides_applied += 1;
-            }
-            Some(Action::Target { name }) => warnings.push(crate::t!(
-                "route.unknown_target",
-                path = entry.path.display(),
-                name = name
-            )),
-            Some(Action::SeriesBest) => walks[i].best = true,
-            None => {}
-        }
-    }
-
-    let n = cfg.targets.len();
-    let mut router = Router {
-        cfg,
-        files,
-        ctx,
-        accept_low,
-        resolved: cfg
-            .targets
-            .iter()
-            .map(|t| t.filters.iter().all(|f| f.expand.is_none()))
-            .collect(),
-        expanded: HashMap::new(),
-    };
+) -> Result<()> {
+    let (files, n) = (router.files, router.cfg.targets.len());
     loop {
         cancel.check()?;
         for i in 0..files.len() {
@@ -854,8 +819,118 @@ pub fn route_with_overrides(
             .map(|i| walks[i].cursor)
             .min();
         match waiting {
-            Some(t) => router.resolve_expand(t, &decisions, &walks),
-            None => break,
+            Some(t) => router.resolve_expand(t, decisions, walks),
+            None => return Ok(()),
+        }
+    }
+}
+
+/// Route every file: manual decisions first (a fresh entry of `overrides`,
+/// same size and mtime, decides the file; an entry naming a target the
+/// config does not have is ignored with a warning, stale entries silently;
+/// `SeriesBest` only marks the file). Then every file walks the targets in
+/// order, and the first target with a matching filter takes it:
+///
+/// - A filter matches when its sources, masks and conditions hold and, with
+///   `ai`, the AI's answer is this target. A file reaching such a filter
+///   before it has an answer pauses; when no file can move on, the paused
+///   ones go to the AI as one batch, each with every category it could
+///   still reach (this and later targets), and their walks resume. A file
+///   is asked at most once. Unless `accept_low`, a low-confidence "none"
+///   sends it to review at once, and a low-confidence category does when
+///   an AI filter would take the file through it (strict order first).
+/// - `expand = "event"`: once every undecided file stands at the target,
+///   the files its other conditions hold for seed their events, and every
+///   undecided file of those events in its sources and masks matches.
+/// - A match through `series` goes to review with the whole series, the
+///   suggested best shot included (unless the user confirmed it as best,
+///   or no other shot of its series is held there: then it walks on).
+///
+/// A file nothing takes is `Excluded` when an exclude mask turned it away
+/// and the AI did not judge it, else `Unmatched`. A cancel ends routing with
+/// `Error::Cancelled` (the classifier stops between requests); the AI
+/// batches report [`Stage::Ai`] progress.
+#[allow(clippy::too_many_arguments)]
+pub fn route_with_overrides(
+    cfg: &Config,
+    files: &[FileEntry],
+    ctx: &RouteCtx,
+    ai: &dyn Classifier,
+    accept_low: bool,
+    overrides: &Overrides,
+    progress: &dyn Progress,
+    cancel: &Cancel,
+) -> Result<Routed> {
+    cancel.check()?;
+    assert_eq!(
+        ctx.facts.len(),
+        files.len(),
+        "routing context built for another file list"
+    );
+    let mut decisions: Vec<Option<Decision>> = vec![None; files.len()];
+    let mut walks: Vec<Walk> = files.iter().map(|_| Walk::default()).collect();
+    let mut warnings = Vec::new();
+    let mut overrides_applied = 0;
+
+    for (i, entry) in files.iter().enumerate() {
+        match overrides.get(entry) {
+            Some(Action::Keep) => {
+                decisions[i] = Some(Decision::Kept);
+                overrides_applied += 1;
+            }
+            Some(Action::Target { name }) if target_known(cfg, name) => {
+                decisions[i] = Some(Decision::Target {
+                    name: name.clone(),
+                    via: Via::Manual,
+                    ai_meta: None,
+                });
+                overrides_applied += 1;
+            }
+            Some(Action::Target { name }) => warnings.push(crate::t!(
+                "route.unknown_target",
+                path = entry.path.display(),
+                name = name
+            )),
+            Some(Action::SeriesBest) => walks[i].best = true,
+            None => {}
+        }
+    }
+
+    let mut router = Router {
+        cfg,
+        files,
+        ctx,
+        accept_low,
+        resolved: cfg
+            .targets
+            .iter()
+            .map(|t| t.filters.iter().all(|f| f.expand.is_none()))
+            .collect(),
+        expanded: HashMap::new(),
+    };
+    loop {
+        walk(
+            &mut router,
+            &mut decisions,
+            &mut walks,
+            ai,
+            accept_low,
+            progress,
+            cancel,
+        )?;
+        // A suggested best held alone walks on past that target; targets
+        // after it that expand to events settle again, now with it.
+        let alone = router.alone_bests(&decisions, &walks);
+        if alone.is_empty() {
+            break;
+        }
+        for i in alone {
+            let t = walks[i].cursor;
+            decisions[i] = None;
+            walks[i].alone_at.push(t);
+            for (u, r) in router.resolved.iter_mut().enumerate().skip(t + 1) {
+                *r = cfg.targets[u].filters.iter().all(|f| f.expand.is_none());
+            }
         }
     }
 
@@ -2070,6 +2145,37 @@ sources = ["a"]
         let mut o = Overrides::default();
         o.set(files[1].path.clone(), 1, 0, all);
         assert_eq!(held(&o), [review(&[0, 2], 0), None, review(&[0, 2], 0)]);
+    }
+
+    #[test]
+    fn a_suggested_best_with_no_other_shot_held_walks_on() {
+        let c = toml_cfg(&format!(
+            r#"{SOURCES}
+[[targets]]
+name = "Retakes"
+kind = "trash"
+[[targets.filters]]
+sources = ["a"]
+match = "s2*"
+series = {{ keep = "best" }}
+
+[[targets]]
+name = "All"
+[[targets.filters]]
+sources = ["a"]
+"#
+        ));
+        let files = [
+            file("a", "s1.jpg"),
+            file("a", "s2.jpg"),
+            file("a", "s3.jpg"),
+        ];
+        let ctx = series_ctx(&files);
+        // The mask takes no other shot: the best is not held alone.
+        let r = route(&c, &files, &ctx, &Panics, false).unwrap();
+        for d in &r {
+            assert_eq!(d.1, target("All", Via::Mask), "{}", d.0.path.display());
+        }
     }
 
     #[test]

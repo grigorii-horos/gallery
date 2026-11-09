@@ -153,7 +153,9 @@ fn run(
     };
     let cache = Cache::load(env.ai_cache);
     let t1 = Instant::now();
-    let diff = effect::diff(old, new, &files, &exif_map, &ov, &cache, progress, cancel)?;
+    let diff = effect::diff(
+        old, new, &files, &exif_map, env.tools, &ov, &cache, progress, cancel,
+    )?;
     Ok(EffectView {
         diff,
         rescanned: fresh,

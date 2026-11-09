@@ -4,6 +4,7 @@
 //! answer is counted as waiting for the AI), then the fate of every file is
 //! compared. Reads only.
 
+use std::borrow::Cow;
 use std::cell::RefCell;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -23,6 +24,7 @@ use crate::route::{
     AiAnswer, AiRequest, Classifier, Confidence, Decision, RouteCtx, route_with_overrides,
 };
 use crate::scan::FileEntry;
+use crate::tools::Tools;
 
 /// Examples kept per outcome bucket.
 pub const EXAMPLES_PER_BUCKET: usize = 5;
@@ -220,11 +222,35 @@ fn fate(outcome: Outcome, target: Option<String>, outputs: Vec<OutputFate>) -> F
     }
 }
 
+/// The routing context of `new` next to `old`'s: the facts are shared, and
+/// so are the groups when both configs compute the same ones.
+#[allow(clippy::too_many_arguments)]
+fn ctx_beside<'b>(
+    old: &Config,
+    new: &Config,
+    old_ctx: &'b RouteCtx<'_>,
+    files: &[FileEntry],
+    exif: &'b HashMap<PathBuf, Value>,
+    tools: Option<&Tools>,
+    progress: &dyn Progress,
+    cancel: &Cancel,
+) -> Result<RouteCtx<'b>> {
+    if !crate::filter::same_groups(old, new) {
+        return RouteCtx::build(new, files, exif, tools, progress, cancel);
+    }
+    Ok(RouteCtx {
+        facts: Cow::Borrowed(&old_ctx.facts),
+        exif: Cow::Borrowed(exif),
+        groups: Cow::Borrowed(&old_ctx.groups),
+        now: old_ctx.now,
+    })
+}
+
 /// Fate of every routed file under one config.
 fn fates(
     cfg: &Config,
     files: &[FileEntry],
-    exif: &HashMap<PathBuf, Value>,
+    ctx: &RouteCtx,
     overrides: &Overrides,
     cache: &Cache,
     progress: &dyn Progress,
@@ -235,10 +261,8 @@ fn fates(
         model: &cfg.ai.model,
         pending: RefCell::new(HashSet::new()),
     };
-    // No tools here: conditions needing thumbnails (sharpness, similar
-    // series) do not hold, as without them in a scan.
-    let ctx = RouteCtx::build(cfg, files, exif, None, progress, cancel)?;
-    let routed = route_with_overrides(cfg, files, &ctx, &ai, false, overrides, progress, cancel)?;
+    let exif = ctx.exif.as_ref();
+    let routed = route_with_overrides(cfg, files, ctx, &ai, false, overrides, progress, cancel)?;
     let decisions = routed.decisions;
     let mut plan: Plan =
         build_plan_with(cfg, decisions.clone(), exif, Side::Local, progress, cancel)?;
@@ -298,19 +322,24 @@ fn fates(
 }
 
 /// Compare what `old` and `new` do to `files` (see the module doc).
+/// Without `tools` no thumbnails are made, so conditions needing them
+/// (sharpness, similar series) do not hold, as without them in a scan.
 #[allow(clippy::too_many_arguments)]
 pub fn diff(
     old: &Config,
     new: &Config,
     files: &[FileEntry],
     exif: &HashMap<PathBuf, Value>,
+    tools: Option<&Tools>,
     overrides: &Overrides,
     ai_cache: &Cache,
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<EffectDiff> {
-    let (fo, po) = fates(old, files, exif, overrides, ai_cache, progress, cancel)?;
-    let (fn_, pn) = fates(new, files, exif, overrides, ai_cache, progress, cancel)?;
+    let old_ctx = RouteCtx::build(old, files, exif, tools, progress, cancel)?;
+    let new_ctx = ctx_beside(old, new, &old_ctx, files, exif, tools, progress, cancel)?;
+    let (fo, po) = fates(old, files, &old_ctx, overrides, ai_cache, progress, cancel)?;
+    let (fn_, pn) = fates(new, files, &new_ctx, overrides, ai_cache, progress, cancel)?;
     let waiting = |p: &PathBuf, f: &Fate, pending: &HashSet<PathBuf>| {
         if pending.contains(p) {
             fate(Outcome::WaitingAi, None, vec![])
@@ -402,6 +431,7 @@ pub fn diff_simple(
         new,
         files,
         exif,
+        None,
         &Overrides::default(),
         ai_cache,
         &NoProgress,
@@ -726,11 +756,34 @@ mod tests {
             &c,
             &f.files,
             &HashMap::new(),
+            None,
             &Overrides::default(),
             &Cache::load(&f.dir.path().join("n")),
             &NoProgress,
             &cancel,
         );
         assert!(matches!(r, Err(crate::Error::Cancelled)));
+    }
+
+    #[test]
+    fn groups_are_computed_once_when_the_change_leaves_them_alone() {
+        let f = fx();
+        let old = load(&f.dir, "", "*.png", "", &[], "");
+        let renamed = load(&f.dir, "", "*.jpg", "keep_*", &[], "");
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
+             [[targets]]\nname = \"Junk\"\nkind = \"trash\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nduplicate = {{ of = [\"sources\"] }}\n"
+        );
+        let dup = Config::from_str_at(&toml, f.dir.path(), Path::new("t.toml")).unwrap();
+        let exif = HashMap::new();
+        let (p, c) = (&NoProgress, &Cancel::new());
+        let ctx = RouteCtx::build(&old, &f.files, &exif, None, p, c).unwrap();
+        let same = ctx_beside(&old, &renamed, &ctx, &f.files, &exif, None, p, c).unwrap();
+        assert!(matches!(same.groups, Cow::Borrowed(_)));
+        assert!(matches!(same.facts, Cow::Borrowed(_)));
+        let other = ctx_beside(&old, &dup, &ctx, &f.files, &exif, None, p, c).unwrap();
+        assert!(matches!(other.groups, Cow::Owned(_)));
     }
 }

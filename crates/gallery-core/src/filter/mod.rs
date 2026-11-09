@@ -9,6 +9,6 @@ pub mod range;
 pub use facts::{Facts, Miss, check_file, facts_of};
 pub use groups::{
     DupScope, Event, EventKey, Groups, NearIndex, Needs, Series, check_groups, compute, near_count,
-    needs,
+    needs, same_groups,
 };
 pub use range::{DateRange, NumRange, TimeOfDay, Unit, parse_duration};
