@@ -261,7 +261,8 @@ event = { sources = ["camera", "olga"],    # which files form events (default: t
 ```
 
 Events are computed on the whole frozen file list, per set of event parameters. A file without a
-capture date belongs to no event.
+capture date belongs to no event. Capture times are compared as plan-zone wall-clock times, the
+same as in [`near`](#near).
 
 `expand = "event"` is a filter-level flag. If the filter's **other** conditions hold for at least
 one file of an event, the filter matches **every file of that event** that is in its `sources`
@@ -301,9 +302,11 @@ near = { sources = ["olga"], time = "2h", km = 1, min = 1 }
 | `min` | Neighbours needed (default 1). |
 | `require_gps` | `true`: a pair where either file has no GPS does not count. |
 
-Times are compared in the plan's time zone, the same as the name presets, so two phones set to
-different zones are compared by the real moment, not by the clock on the screen. Explain shows a
-miss as `near: 0 files of olga within 2h / 1.0 km, at least 1 needed`.
+Capture times are compared as naive local wall-clock times in the plan's time zone, the same as
+the name presets: a photo's time is the EXIF `DateTimeOriginal` as the phone wrote it; QuickTime
+dates (stored in UTC) and Unix-time file names are converted to the plan's zone first.
+`OffsetTimeOriginal` is not used, so two phones set to different zones differ by whole hours (the
+difference between their clocks), not by the real moment. Explain shows a miss as `near: 0 files of olga within 2h / 1.0 km, at least 1 needed`.
 
 **Photos taken together** (two phones, `camera` and `olga`): both people's photos go to a shared
 folder, frames with neither person in them included, and the private ones stay with their owner.
