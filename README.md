@@ -38,7 +38,7 @@ doubtful files, run.
 
 | | |
 |---|---|
-| ![Decide step](docs/screenshots/decide.png) **Decide** — the AI's unsure answers, grouped into series of shots taken together; accept or change them with the keyboard. Your corrections are remembered and shown to the AI next time. | ![Trace](docs/screenshots/trace.png) **Trace** — for any file: its content pipe step by step (`meta-full`, then which `compress-all` step fired) and where each output will land. |
+| ![Decide step](docs/screenshots/decide.png) **Decide** — the AI's unsure answers, grouped into series of shots taken together, plus series to review (pick the best shot) and last copies held back from the trash; accept or change them with the keyboard. Your corrections are remembered and shown to the AI next time. | ![Trace](docs/screenshots/trace.png) **Trace** — for any file: its content pipe step by step (`meta-full`, then which `compress-all` step fired) and where each output will land. |
 | ![Explain](docs/screenshots/explain.png) **"Why?"** — why a file went to this target and not another: every filter, mask and `!` exclusion, what the AI said, and a one-line verdict. Also `gallery explain`. | ![Unmatched](docs/screenshots/unmatched.png) **Unmatched triage** — files no target takes, grouped by folder and extension, with the reason and one-click fixes: add to a target, ignore in the source, or create a target. |
 | ![Pilot](docs/screenshots/pilot.png) **Pilot run** — apply a few files per target first and compare before → after: size, capture date, mtime, GPS. Continue with the rest or undo the pilot. | ![Targets editor](docs/screenshots/targets-effect.png) **Targets editor with live effect** — change a mask and see, before saving, how many of your real files move between targets. |
 | ![Presets](docs/screenshots/presets-bundles.png) **Presets** — built-in encoders and *bundles* such as `compress-all` (AVIF for photos, PNG and WebP; AV1 for video) with one-click copy-and-edit. | ![History](docs/screenshots/history.png) **History** — every run with its report; undo a run, or retry only the files that failed. |
@@ -215,7 +215,9 @@ dir = "~/Sync/Shared/{YYYY}"
    trace (every step and the final path) and **Why?** to see why it went there. Fix the config in
    **Sources / Targets / Presets** (the editor shows the effect of an unsaved change on your real
    files) and press **Reload**.
-3. **Decide** (only if there are unsure AI answers): apply a category to each series of shots.
+3. **Decide** (only if there is something to decide: unsure AI answers, series to review, or last
+   copies held back from the trash): apply a category to each series of shots, pick the best shot of
+   a series, and decide where a held copy goes.
 4. **Run.** Read the estimate, pick **Pilot** (5 files per target) and run it, compare before → after,
    then **Continue with the rest**. Something wrong? **Undo pilot**, or later **History → Undo**.
 
