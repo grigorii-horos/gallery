@@ -981,6 +981,9 @@ fn verdict(
     let d = ex.decision.as_ref().expect("scanned file has a decision");
     let target = d.target.clone().unwrap_or_default();
     if let Some(it) = plan.review.iter().find(|r| r.source == entry.path) {
+        if it.name_error {
+            return crate::t!("explain.name_error", target = target, reason = it.reason);
+        }
         if it.series.is_some() {
             return crate::t!("explain.series_held", target = target);
         }
@@ -994,9 +997,6 @@ fn verdict(
         }
         DecisionKind::Review => {
             let r = d.detail.clone().unwrap_or_default();
-            if let Some(it) = plan.review.first().filter(|r| r.name_error) {
-                return crate::t!("explain.name_error", target = target, reason = it.reason);
-            }
             return crate::t!("explain.ai_unsure", target = target, reason = r);
         }
         DecisionKind::Excluded => {

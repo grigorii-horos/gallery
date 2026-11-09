@@ -703,3 +703,69 @@ sources = ["s"]
         crate::t!("explain.last_copy_held", target = "Everything")
     );
 }
+
+#[test]
+fn a_review_verdict_reads_this_files_item_not_another() {
+    // Two files held for review: README (its name cannot be built) and
+    // cat.webp (the AI is unsure). Each verdict is about its own file.
+    let fx = fixture_with(
+        &[("s/README", b"r"), ("s/cat.webp", b"c")],
+        r#"
+[[sources]]
+id = "s"
+path = "{r}/s"
+
+[name_presets."By extension"]
+template = "{ext}/{stem}"
+
+[[targets]]
+name = "cats"
+[[targets.filters]]
+sources = ["s"]
+match = "*.webp"
+ai = "cats"
+
+[[targets]]
+name = "plain"
+[[targets.filters]]
+sources = ["s"]
+match = "README"
+[[targets.outputs]]
+dir = "{r}/out"
+rename = ["By extension"]
+"#,
+    );
+    let cats = vec![("cats".to_string(), "cats".to_string())];
+    let system = system_prompt(&cats, &crate::route::SourcePrompt::default());
+    let path = fx.p("s/cat.webp");
+    let (size, mtime_ns) = stat(&path);
+    let entry = FileEntry {
+        source_id: "s".into(),
+        path,
+        rel: PathBuf::from("cat.webp"),
+        size,
+        mtime_ns,
+    };
+    let key = cache::key(&entry, &fx.cfg.ai.model, &cache::prompt_hash(&system));
+    Cache::load(&fx.p("ai-cache.jsonl"))
+        .put(
+            key,
+            Stored {
+                category: "cats".into(),
+                reason: "a cat".into(),
+                confidence: "LOW".into(),
+            },
+        )
+        .unwrap();
+    let readme = fx.explain("s/README");
+    assert_eq!(readme.outcome, Outcome::Review);
+    assert!(
+        readme.verdict.contains("By extension"),
+        "{}",
+        readme.verdict
+    );
+    let cat = fx.explain("s/cat.webp");
+    assert_eq!(cat.outcome, Outcome::Review);
+    assert!(cat.verdict.contains("a cat"), "{}", cat.verdict);
+    assert!(!cat.verdict.contains("By extension"), "{}", cat.verdict);
+}
