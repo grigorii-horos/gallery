@@ -678,5 +678,18 @@
   "filter.miss.tag_mismatch": "%{tag} “%{value}” does not match",
   "filter.miss.prop_range": "%{prop} %{value} does not fit %{wanted}",
   "filter.miss.prop_value": "%{prop} is %{value}, expected %{wanted}",
-  "filter.miss.path": "path %{path} does not match"
+  "filter.miss.path": "path %{path} does not match",
+  "filter.image_unreadable": "cannot read image %{path}: %{error}",
+  "filter.miss.no_event": "not in any event",
+  "filter.miss.event_small": "the event has %{files}, fewer than %{min}",
+  "filter.miss.event_short": "the event lasts %{length}, less than %{wanted}",
+  "filter.miss.event_long": "the event lasts %{length}, more than %{wanted}",
+  "filter.miss.event_at_place": "the whole event is within %{place}",
+  "filter.miss.near": "%{found} of %{sources} within %{wanted}, at least %{min} needed",
+  "filter.miss.no_duplicate": "no identical copy",
+  "filter.miss.not_in_series": "not part of a series",
+  "filter.miss.series_best": "the best shot of its series",
+  "config.near_no_sources": "target '%{target}': `near` needs `sources`",
+  "config.bad_away_from": "target '%{target}': `event.away_from` “%{value}” is not a place from [places] (write it as @name)",
+  "config.series_mismatch": "target '%{target}': every `series` condition must use the same gap, similar and by as the first one"
 }

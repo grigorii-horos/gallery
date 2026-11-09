@@ -692,5 +692,18 @@
   "filter.miss.tag_mismatch": "%{tag} „%{value}” nie pasuje",
   "filter.miss.prop_range": "%{prop} %{value} nie mieści się w %{wanted}",
   "filter.miss.prop_value": "%{prop} to %{value}, oczekiwano %{wanted}",
-  "filter.miss.path": "ścieżka %{path} nie pasuje"
+  "filter.miss.path": "ścieżka %{path} nie pasuje",
+  "filter.image_unreadable": "nie można odczytać obrazu %{path}: %{error}",
+  "filter.miss.no_event": "nie należy do żadnego wydarzenia",
+  "filter.miss.event_small": "wydarzenie ma %{files}, mniej niż %{min}",
+  "filter.miss.event_short": "wydarzenie trwa %{length}, krócej niż %{wanted}",
+  "filter.miss.event_long": "wydarzenie trwa %{length}, dłużej niż %{wanted}",
+  "filter.miss.event_at_place": "całe wydarzenie mieści się w %{place}",
+  "filter.miss.near": "%{found} z %{sources} w granicach %{wanted}, potrzeba co najmniej %{min}",
+  "filter.miss.no_duplicate": "brak identycznej kopii",
+  "filter.miss.not_in_series": "nie należy do serii",
+  "filter.miss.series_best": "najlepsze ujęcie swojej serii",
+  "config.near_no_sources": "cel '%{target}': `near` wymaga `sources`",
+  "config.bad_away_from": "cel '%{target}': `event.away_from` „%{value}” nie jest miejscem z [places] (zapisz jako @nazwa)",
+  "config.series_mismatch": "cel '%{target}': wszystkie warunki `series` muszą używać tych samych gap, similar i by co pierwszy"
 }

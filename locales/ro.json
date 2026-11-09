@@ -685,5 +685,18 @@
   "filter.miss.tag_mismatch": "%{tag} „%{value}” nu se potrivește",
   "filter.miss.prop_range": "%{prop} %{value} nu se încadrează în %{wanted}",
   "filter.miss.prop_value": "%{prop} este %{value}, se aștepta %{wanted}",
-  "filter.miss.path": "calea %{path} nu se potrivește"
+  "filter.miss.path": "calea %{path} nu se potrivește",
+  "filter.image_unreadable": "imaginea %{path} nu poate fi citită: %{error}",
+  "filter.miss.no_event": "nu face parte din niciun eveniment",
+  "filter.miss.event_small": "evenimentul are %{files}, mai puțin de %{min}",
+  "filter.miss.event_short": "evenimentul durează %{length}, mai puțin de %{wanted}",
+  "filter.miss.event_long": "evenimentul durează %{length}, mai mult de %{wanted}",
+  "filter.miss.event_at_place": "întregul eveniment este în %{place}",
+  "filter.miss.near": "%{found} din %{sources} în limita %{wanted}, sunt necesare cel puțin %{min}",
+  "filter.miss.no_duplicate": "nicio copie identică",
+  "filter.miss.not_in_series": "nu face parte dintr-o serie",
+  "filter.miss.series_best": "cea mai bună fotografie din seria sa",
+  "config.near_no_sources": "ținta '%{target}': `near` are nevoie de `sources`",
+  "config.bad_away_from": "ținta '%{target}': `event.away_from` „%{value}” nu este un loc din [places] (scrieți-l ca @nume)",
+  "config.series_mismatch": "ținta '%{target}': toate condițiile `series` trebuie să folosească aceleași gap, similar și by ca prima"
 }

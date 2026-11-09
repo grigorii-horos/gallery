@@ -692,5 +692,18 @@
   "filter.miss.tag_mismatch": "%{tag} «%{value}» не підходить",
   "filter.miss.prop_range": "%{prop} %{value} не входить до %{wanted}",
   "filter.miss.prop_value": "%{prop}: %{value}, очікувалося %{wanted}",
-  "filter.miss.path": "шлях %{path} не підходить"
+  "filter.miss.path": "шлях %{path} не підходить",
+  "filter.image_unreadable": "не вдалося прочитати зображення %{path}: %{error}",
+  "filter.miss.no_event": "не входить у жодну подію",
+  "filter.miss.event_small": "у події %{files}, менше ніж %{min}",
+  "filter.miss.event_short": "подія триває %{length}, менше ніж %{wanted}",
+  "filter.miss.event_long": "подія триває %{length}, більше ніж %{wanted}",
+  "filter.miss.event_at_place": "уся подія відбувається в межах %{place}",
+  "filter.miss.near": "%{found} з %{sources} у межах %{wanted}, потрібно щонайменше %{min}",
+  "filter.miss.no_duplicate": "однакових копій немає",
+  "filter.miss.not_in_series": "не входить у серію",
+  "filter.miss.series_best": "найкращий кадр своєї серії",
+  "config.near_no_sources": "ціль '%{target}': у `near` потрібно вказати `sources`",
+  "config.bad_away_from": "ціль '%{target}': `event.away_from` «%{value}» — не місце з [places] (пишіть як @назва)",
+  "config.series_mismatch": "ціль '%{target}': усі умови `series` мають використовувати ті самі gap, similar і by, що й перша"
 }
