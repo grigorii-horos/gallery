@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -88,9 +89,22 @@ pub fn fixture_mp4(dir: &Path, name: &str, secs: u32, create_date_utc: Option<&s
 
 /// Run `exiftool -overwrite_original -q <args> <path>` on a fixture.
 pub fn exiftool_set(path: &Path, args: &[&str]) {
+    // Through a UTF-8 argfile: on Windows exiftool reads argv in the ANSI
+    // code page, so non-ASCII values on the command line become `?`.
+    let mut argfile = tempfile::NamedTempFile::new().unwrap();
+    for a in args {
+        writeln!(argfile, "{a}").unwrap();
+    }
+    argfile.flush().unwrap();
     run(Command::new("exiftool")
-        .args(["-overwrite_original", "-q"])
-        .args(args)
+        .args([
+            "-overwrite_original",
+            "-q",
+            "-charset",
+            "filename=utf8",
+            "-@",
+        ])
+        .arg(argfile.path())
         .arg(path));
 }
 
