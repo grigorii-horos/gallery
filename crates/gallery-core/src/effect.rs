@@ -232,11 +232,12 @@ fn ctx_beside<'b>(
     files: &[FileEntry],
     exif: &'b HashMap<PathBuf, Value>,
     tools: Option<&Tools>,
+    cache: Option<&Path>,
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<RouteCtx<'b>> {
     if !crate::filter::same_groups(old, new) {
-        return RouteCtx::build(new, files, exif, tools, progress, cancel);
+        return RouteCtx::build_in(new, files, exif, tools, cache, progress, cancel);
     }
     Ok(RouteCtx {
         facts: Cow::Borrowed(&old_ctx.facts),
@@ -336,8 +337,39 @@ pub fn diff(
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<EffectDiff> {
-    let old_ctx = RouteCtx::build(old, files, exif, tools, progress, cancel)?;
-    let new_ctx = ctx_beside(old, new, &old_ctx, files, exif, tools, progress, cancel)?;
+    let cache = crate::paths::cache_dir();
+    diff_in(
+        old,
+        new,
+        files,
+        exif,
+        tools,
+        cache.as_deref(),
+        overrides,
+        ai_cache,
+        progress,
+        cancel,
+    )
+}
+
+/// [`diff`] with thumbnails, scores and hashes kept in `cache`.
+#[allow(clippy::too_many_arguments)]
+fn diff_in(
+    old: &Config,
+    new: &Config,
+    files: &[FileEntry],
+    exif: &HashMap<PathBuf, Value>,
+    tools: Option<&Tools>,
+    cache: Option<&Path>,
+    overrides: &Overrides,
+    ai_cache: &Cache,
+    progress: &dyn Progress,
+    cancel: &Cancel,
+) -> Result<EffectDiff> {
+    let old_ctx = RouteCtx::build_in(old, files, exif, tools, cache, progress, cancel)?;
+    let new_ctx = ctx_beside(
+        old, new, &old_ctx, files, exif, tools, cache, progress, cancel,
+    )?;
     let (fo, po) = fates(old, files, &old_ctx, overrides, ai_cache, progress, cancel)?;
     let (fn_, pn) = fates(new, files, &new_ctx, overrides, ai_cache, progress, cancel)?;
     let waiting = |p: &PathBuf, f: &Fate, pending: &HashSet<PathBuf>| {
@@ -779,11 +811,55 @@ mod tests {
         let dup = Config::from_str_at(&toml, f.dir.path(), Path::new("t.toml")).unwrap();
         let exif = HashMap::new();
         let (p, c) = (&NoProgress, &Cancel::new());
-        let ctx = RouteCtx::build(&old, &f.files, &exif, None, p, c).unwrap();
-        let same = ctx_beside(&old, &renamed, &ctx, &f.files, &exif, None, p, c).unwrap();
+        let ctx = RouteCtx::build_in(&old, &f.files, &exif, None, None, p, c).unwrap();
+        let same = ctx_beside(&old, &renamed, &ctx, &f.files, &exif, None, None, p, c).unwrap();
         assert!(matches!(same.groups, Cow::Borrowed(_)));
         assert!(matches!(same.facts, Cow::Borrowed(_)));
-        let other = ctx_beside(&old, &dup, &ctx, &f.files, &exif, None, p, c).unwrap();
+        let other = ctx_beside(&old, &dup, &ctx, &f.files, &exif, None, None, p, c).unwrap();
         assert!(matches!(other.groups, Cow::Owned(_)));
+    }
+
+    /// With the tools, thumbnails are made and `props.sharpness` can hold;
+    /// without them it cannot.
+    #[test]
+    fn a_diff_with_tools_scores_sharpness() {
+        let Ok(tools) = crate::tools::Tools::discover() else {
+            return;
+        };
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        crate::filter::image_metrics::testing::sharp(256)
+            .save(src.join("sharp.jpg"))
+            .unwrap();
+        let old = load(&dir, "", "*.png", "", &[], "");
+        let r = dir.path().to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
+             [[targets]]\nname = \"Sharp\"\nkind = \"keep\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nprops = {{ sharpness = \">=0\" }}\n"
+        );
+        let new = Config::from_str_at(&toml, dir.path(), Path::new("t.toml")).unwrap();
+        let files = scan_sources(&new.sources).unwrap();
+        let cache = Cache::load(&dir.path().join("none"));
+        // A cache of its own per diff: a score cached by one is not reused.
+        let diff_with = |t: Option<&Tools>| {
+            let thumbs = tempfile::tempdir().unwrap();
+            diff_in(
+                &old,
+                &new,
+                &files,
+                &HashMap::new(),
+                t,
+                Some(thumbs.path()),
+                &Overrides::default(),
+                &cache,
+                &NoProgress,
+                &Cancel::new(),
+            )
+            .unwrap()
+        };
+        assert_eq!(diff_with(Some(&tools)).after.kept, 1);
+        assert_eq!(diff_with(None).after.kept, 0);
     }
 }
