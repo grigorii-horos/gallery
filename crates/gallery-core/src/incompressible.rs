@@ -66,6 +66,21 @@ pub fn stamp() -> Option<(u64, i128)> {
     Some((meta.len(), mtime_ns(&meta).ok()?))
 }
 
+/// The entry `e` of file `p` is of no use any more: the file changed
+/// (another size or mtime), or it is gone from a folder that is still
+/// there. A file whose folder is missing too (an SD card or a share not
+/// mounted now) keeps its entry for when it is back; so does a file that
+/// cannot be read now.
+fn stale(p: &Path, e: &Entry) -> bool {
+    match std::fs::metadata(p) {
+        Ok(m) => m.len() != e.size || mtime_ns(&m).map_or(true, |t| t != e.mtime_ns),
+        Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+            p.parent().is_some_and(Path::is_dir)
+        }
+        Err(_) => false,
+    }
+}
+
 fn key(path: &Path) -> Option<String> {
     std::fs::canonicalize(path)
         .ok()
@@ -125,11 +140,7 @@ pub fn remember(path: &Path, pipe: &str) {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = load(&store);
     s.version = VERSION;
-    s.files.retain(|p, e| {
-        std::fs::metadata(p)
-            .ok()
-            .is_some_and(|m| m.len() == e.size && mtime_ns(&m).is_ok_and(|t| t == e.mtime_ns))
-    });
+    s.files.retain(|p, e| !stale(Path::new(p), e));
     s.files.insert(
         k,
         Entry {
@@ -183,5 +194,45 @@ mod tests {
         assert!(!k.contains(&f, 6, t + 1, "p"));
         // Another name of the same folder still finds it (canonical key).
         assert!(k.contains(&d.path().join(".").join("shot.png"), 6, t, "p"));
+    }
+
+    fn stored() -> BTreeMap<String, Entry> {
+        load(&store_path().unwrap()).files
+    }
+
+    /// Entries of a folder that is not there now (an unmounted card or
+    /// share) survive other writes; a file gone from a folder that is
+    /// there, or changed, is dropped.
+    #[test]
+    fn pruning_keeps_entries_of_missing_folders() {
+        let d = tempfile::tempdir().unwrap();
+        let card = d.path().join("card");
+        let here = d.path().join("here");
+        std::fs::create_dir_all(&card).unwrap();
+        std::fs::create_dir_all(&here).unwrap();
+        let (on_card, gone, changed, other) = (
+            card.join("a.png"),
+            here.join("gone.png"),
+            here.join("changed.png"),
+            here.join("other.png"),
+        );
+        for f in [&on_card, &gone, &changed, &other] {
+            std::fs::write(f, b"pixels").unwrap();
+            remember(f, "p");
+        }
+        let keys: Vec<String> = [&on_card, &gone, &changed]
+            .iter()
+            .map(|f| key(f).unwrap())
+            .collect();
+        // The card is unplugged, one file deleted, one edited.
+        std::fs::remove_dir_all(&card).unwrap();
+        std::fs::remove_file(&gone).unwrap();
+        std::fs::write(&changed, b"other pixels").unwrap();
+        remember(&other, "p");
+        let s = stored();
+        assert!(s.contains_key(&keys[0]), "unmounted folder's entry kept");
+        assert!(!s.contains_key(&keys[1]), "deleted file's entry dropped");
+        assert!(!s.contains_key(&keys[2]), "changed file's entry dropped");
+        assert!(s.contains_key(&key(&other).unwrap()));
     }
 }
