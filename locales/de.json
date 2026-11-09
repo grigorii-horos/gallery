@@ -409,7 +409,7 @@
   "cli.presets.about": "Die integrierten Voreinstellungen anzeigen",
   "cli.presets.long": "Gibt die integrierten Namens- und Inhalts-Voreinstellungen mit ihren Schlüsselparametern aus. Sie lassen sich in der Konfiguration ohne Definition per Namen verwenden; eine eigene Voreinstellung mit demselben Namen ist ein Fehler.",
   "cli.undo.about": "Einen Lauf anhand seines Berichts rückgängig machen",
-  "cli.undo.long": "Stellt die Quellen aus dem Papierkorb wieder her und löscht die vom Lauf erzeugten Ausgaben. Nach dem Lauf geänderte Ausgaben bleiben. Ein Bericht lässt sich einmal rückgängig machen.",
+  "cli.undo.long": "Stellt die Quellen aus dem Papierkorb wieder her und löscht die vom Lauf erzeugten Ausgaben. Nach dem Lauf geänderte Ausgaben bleiben. Ein Bericht lässt sich einmal rückgängig machen. Mit --file oder --target werden nur diese Dateien rückgängig gemacht (ein späteres vollständiges Rückgängigmachen überspringt sie).",
   "cli.undo.report": "Berichtsdatei (<plan>.report.json)",
   "cli.h.usage": "Verwendung:",
   "cli.h.commands": "Befehle:",
@@ -717,5 +717,11 @@
   "cli.check_config_ok": "Konfiguration %{path}: in Ordnung (%{sources} Quellen, %{targets} Ziele)",
   "cli.check.config": "Zusätzlich diese Konfigurationsdatei laden und prüfen (TOML)",
   "overrides.changed": "%{path}: Die Datei hat sich seit dem Erstellen des Plans geändert; Plan neu erstellen",
-  "overrides.best_not_member": "%{path}: gehört nicht zu den Dateien der Serie"
+  "overrides.best_not_member": "%{path}: gehört nicht zu den Dateien der Serie",
+  "undo.no_plan": "kein Plan neben dem Bericht, um die Ziele zu bestimmen",
+  "undo.no_such_target": "keine Datei des Ziels „%{target}“ im Bericht",
+  "undo.no_such_file": "keine Datei dieses Laufs: %{path}",
+  "history.no_files_selected": "Wähle mindestens eine Datei zum Rückgängigmachen.",
+  "cli.undo.files": "Nur diese Quelldatei des Laufs rückgängig machen (wiederholbar)",
+  "cli.undo.targets": "Nur die Dateien dieses Ziels rückgängig machen (wiederholbar)"
 }

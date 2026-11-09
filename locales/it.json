@@ -411,7 +411,7 @@
   "cli.presets.about": "Mostra i preset integrati",
   "cli.presets.long": "Stampa i preset integrati di nome e di contenuto con i loro parametri chiave. Si possono usare nella configurazione per nome senza definirli; un preset dell’utente con lo stesso nome è un errore.",
   "cli.undo.about": "Annulla un’esecuzione dal suo rapporto",
-  "cli.undo.long": "Ripristina le origini dal cestino ed elimina le uscite create dall’esecuzione. Le uscite modificate dopo l’esecuzione restano. Un rapporto si può annullare una volta sola.",
+  "cli.undo.long": "Ripristina le origini dal cestino ed elimina le uscite create dall’esecuzione. Le uscite modificate dopo l’esecuzione restano. Un rapporto si può annullare una volta sola. Con --file o --target vengono annullati solo quei file (un successivo annullamento completo li salta).",
   "cli.undo.report": "File del rapporto (<plan>.report.json)",
   "cli.h.usage": "Uso:",
   "cli.h.commands": "Comandi:",
@@ -724,5 +724,11 @@
   "cli.check_config_ok": "configurazione %{path}: ok (%{sources} sorgenti, %{targets} destinazioni)",
   "cli.check.config": "Carica e convalida anche questo file di configurazione (TOML)",
   "overrides.changed": "%{path}: il file è cambiato dopo la creazione del piano; ricrea il piano",
-  "overrides.best_not_member": "%{path}: non è uno dei file della serie"
+  "overrides.best_not_member": "%{path}: non è uno dei file della serie",
+  "undo.no_plan": "nessun piano accanto al rapporto per conoscere le destinazioni",
+  "undo.no_such_target": "nessun file della destinazione «%{target}» nel rapporto",
+  "undo.no_such_file": "non è un file di questa esecuzione: %{path}",
+  "history.no_files_selected": "Scegli almeno un file da annullare.",
+  "cli.undo.files": "Annulla solo questo file sorgente dell'esecuzione (ripetibile)",
+  "cli.undo.targets": "Annulla solo i file di questa destinazione (ripetibile)"
 }

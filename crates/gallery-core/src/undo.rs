@@ -68,8 +68,75 @@ pub fn undo_with(
 /// undone without trouble are recorded in `undone_sources` (a later full
 /// undo skips them); the report is marked `undone` only once every item is.
 pub fn undo_items(report_path: &Path, sources: &[PathBuf]) -> Result<UndoSummary> {
+    undo_items_with(report_path, sources, &NoProgress, &Cancel::new())
+}
+
+/// [`undo_items`] with progress and cancellation, as [`undo_with`].
+pub fn undo_items_with(
+    report_path: &Path,
+    sources: &[PathBuf],
+    progress: &dyn Progress,
+    cancel: &Cancel,
+) -> Result<UndoSummary> {
     let only: HashSet<PathBuf> = sources.iter().cloned().collect();
-    undo_selected(report_path, Some(&only), &NoProgress, &Cancel::new())
+    undo_selected(report_path, Some(&only), progress, cancel)
+}
+
+/// An error naming the first of `sources` that is not an item of the report
+/// (a typo or another run's file): [`undo_items`] alone ignores such a path.
+pub fn ensure_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<()> {
+    let mut report = read_report(report_path)?;
+    merge_journal(report_path, &mut report)?;
+    let known: HashSet<&PathBuf> = report.items.iter().map(|it| &it.source).collect();
+    match sources.iter().find(|s| !known.contains(s)) {
+        Some(s) => Err(Error::Plan(crate::t!(
+            "undo.no_such_file",
+            path = s.display()
+        ))),
+        None => Ok(()),
+    }
+}
+
+/// The sources of the report's items that the plan routed to `target`
+/// (`folders` and `trash` targets alike; a `keep` target's files are not in
+/// a report). The plan is the one the report names, else the file next to
+/// the report. An error when no item of the report belongs to the target.
+pub fn target_sources(
+    report_path: &Path,
+    plan: Option<&Path>,
+    target: &str,
+) -> Result<Vec<PathBuf>> {
+    let report = read_report(report_path)?;
+    let plan = match plan {
+        Some(p) => Plan::load(p)?,
+        None if report.plan.is_file() => Plan::load(&report.plan)?,
+        None => {
+            let name = report_path.file_name().and_then(|n| n.to_str());
+            let sibling = name
+                .and_then(|n| n.rfind(".report.").map(|i| &n[..i]))
+                .map(|stem| report_path.with_file_name(format!("{stem}.json")));
+            Plan::load(&sibling.ok_or_else(|| Error::Plan(crate::t!("undo.no_plan")))?)?
+        }
+    };
+    let in_target: HashSet<&PathBuf> = plan
+        .items
+        .iter()
+        .filter(|it| it.target == target)
+        .map(|it| &it.source)
+        .collect();
+    let sources: Vec<PathBuf> = report
+        .items
+        .iter()
+        .filter(|it| in_target.contains(&it.source))
+        .map(|it| it.source.clone())
+        .collect();
+    if sources.is_empty() {
+        return Err(Error::Plan(crate::t!(
+            "undo.no_such_target",
+            target = target
+        )));
+    }
+    Ok(sources)
 }
 
 fn read_report(report_path: &Path) -> Result<Report> {

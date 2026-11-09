@@ -411,7 +411,7 @@
   "cli.presets.about": "Mostrar as predefinições integradas",
   "cli.presets.long": "Imprime as predefinições integradas de nome e de conteúdo com seus parâmetros principais. Podem ser usadas na configuração pelo nome, sem definição; uma predefinição do usuário com o mesmo nome é um erro.",
   "cli.undo.about": "Desfazer uma execução a partir do seu relatório",
-  "cli.undo.long": "Restaura as origens da lixeira e apaga as saídas criadas pela execução. Saídas alteradas depois da execução permanecem. Um relatório só pode ser desfeito uma vez.",
+  "cli.undo.long": "Restaura as origens da lixeira e apaga as saídas criadas pela execução. Saídas alteradas depois da execução permanecem. Um relatório só pode ser desfeito uma vez. Com --file ou --target, somente esses arquivos são desfeitos (um desfazer completo posterior os ignora).",
   "cli.undo.report": "Arquivo de relatório (<plan>.report.json)",
   "cli.h.usage": "Uso:",
   "cli.h.commands": "Comandos:",
@@ -724,5 +724,11 @@
   "cli.check_config_ok": "configuração %{path}: ok (%{sources} fontes, %{targets} destinos)",
   "cli.check.config": "Carregar e validar também este arquivo de configuração (TOML)",
   "overrides.changed": "%{path}: o arquivo mudou desde que o plano foi criado; crie o plano de novo",
-  "overrides.best_not_member": "%{path}: não é um dos arquivos da série"
+  "overrides.best_not_member": "%{path}: não é um dos arquivos da série",
+  "undo.no_plan": "nenhum plano ao lado do relatório para saber os destinos",
+  "undo.no_such_target": "nenhum arquivo do destino \"%{target}\" no relatório",
+  "undo.no_such_file": "não é um arquivo desta execução: %{path}",
+  "history.no_files_selected": "Escolha pelo menos um arquivo para desfazer.",
+  "cli.undo.files": "Desfazer somente este arquivo de origem da execução (repetível)",
+  "cli.undo.targets": "Desfazer somente os arquivos deste destino (repetível)"
 }

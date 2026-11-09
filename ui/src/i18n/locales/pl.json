@@ -1052,5 +1052,11 @@
   "decide_series_hint": "Kliknij ujęcie, aby wybrać inne jako najlepsze. Najlepsze ujęcie wychodzi spod reguł serii; pozostałe idą do proponowanego celu.",
   "decide_series_suggested": "proponowane",
   "decide_series_best": "najlepsze",
-  "decide_series_confirm": "Potwierdź najlepsze, resztę wyślij do „{{target}}”"
+  "decide_series_confirm": "Potwierdź najlepsze, resztę wyślij do „{{target}}”",
+  "history_targets": "Cele",
+  "history_undo_target": "Cofnij cel {{target}}…",
+  "history_undo_file": "Cofnij ten plik…",
+  "undo_file_title": "Cofnąć ten plik?",
+  "undo_target_title": "Cofnąć cel „{{target}}”?",
+  "undo_partial_note": "Cofnięte zostaną tylko te pliki: reszta uruchomienia zostaje bez zmian, a późniejsze cofnięcie całego uruchomienia je pominie."
 }

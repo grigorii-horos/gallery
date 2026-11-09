@@ -2403,6 +2403,21 @@ kbd {
   cursor: default;
 }
 
+.history-targets {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.history-targets li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--line);
+}
+
 .history-items {
   margin: 0;
   padding: 0;

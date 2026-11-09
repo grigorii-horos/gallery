@@ -411,7 +411,7 @@
   "cli.presets.about": "Mostrar los preajustes integrados",
   "cli.presets.long": "Imprime los preajustes integrados de nombre y de contenido con sus parámetros clave. Se pueden usar en la configuración por nombre sin definirlos; un preajuste propio con el mismo nombre es un error.",
   "cli.undo.about": "Deshacer una ejecución a partir de su informe",
-  "cli.undo.long": "Restaura los orígenes desde la papelera y elimina las salidas que creó la ejecución. Las salidas modificadas tras la ejecución se quedan. Un informe se puede deshacer una vez.",
+  "cli.undo.long": "Restaura los orígenes desde la papelera y elimina las salidas que creó la ejecución. Las salidas modificadas tras la ejecución se quedan. Un informe se puede deshacer una vez. Con --file o --target solo se deshacen esos archivos (un deshacer completo posterior los omite).",
   "cli.undo.report": "Archivo de informe (<plan>.report.json)",
   "cli.h.usage": "Uso:",
   "cli.h.commands": "Comandos:",
@@ -724,5 +724,11 @@
   "cli.check_config_ok": "configuración %{path}: correcta (%{sources} fuentes, %{targets} destinos)",
   "cli.check.config": "Cargar y validar además este archivo de configuración (TOML)",
   "overrides.changed": "%{path}: el archivo cambió desde que se creó el plan; vuelve a crear el plan",
-  "overrides.best_not_member": "%{path}: no es uno de los archivos de la serie"
+  "overrides.best_not_member": "%{path}: no es uno de los archivos de la serie",
+  "undo.no_plan": "no hay plan junto al informe para saber los destinos",
+  "undo.no_such_target": "ningún archivo del destino «%{target}» en el informe",
+  "undo.no_such_file": "no es un archivo de esta ejecución: %{path}",
+  "history.no_files_selected": "Elige al menos un archivo para deshacer.",
+  "cli.undo.files": "Deshacer solo este archivo de origen de la ejecución (repetible)",
+  "cli.undo.targets": "Deshacer solo los archivos de este destino (repetible)"
 }

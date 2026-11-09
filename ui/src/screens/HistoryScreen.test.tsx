@@ -37,6 +37,11 @@ const item = (source: string, status: string, error: string | null = null) => ({
   trashed: status === "done" ? "/s/.gallery-trash/x" : null,
   renamed: false,
   undone: false,
+  target: source.endsWith(".jpg") ? "pics" : "clips",
+  undo:
+    status === "done"
+      ? { items: 1, restore: 1, rename_back: 0, remove_outputs: 2 }
+      : { items: 0, restore: 0, rename_back: 0, remove_outputs: 0 },
   error,
   outputs: [],
 });
@@ -85,6 +90,8 @@ const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (c
     case "undo_status":
     case "scan_status":
     case "start_undo":
+    case "undo_files":
+    case "undo_target":
       return null;
     case "start_retry":
       return {
@@ -179,6 +186,37 @@ describe("history screen", () => {
     );
     expect(await within(detail).findByText("The run was undone")).toBeInTheDocument();
     await vi.waitFor(() => expect(calls("list_reports").length).toBe(lists + 1));
+  });
+
+  it("undoes one file or one target after a confirm with its own counts", async () => {
+    const user = userEvent.setup();
+    render(<App />);
+    const list = await screen.findByRole("region", { name: "Runs" });
+    await user.click((await within(list).findAllByRole("button"))[1]);
+    const detail = screen.getByRole("region", { name: "Details" });
+    const files = await within(detail).findByRole("list", { name: "Run files" });
+
+    // Only a.jpg has something to undo: one file button, one target row.
+    expect(within(files).getAllByRole("button", { name: "Undo this file…" })).toHaveLength(1);
+    const targets = within(detail).getByRole("list", { name: "Targets" });
+    expect(within(targets).getAllByRole("listitem")).toHaveLength(1);
+
+    await user.click(within(targets).getByRole("button", { name: "Undo target pics…" }));
+    const dialog = screen.getByRole("dialog", { name: "Undo target “pics”?" });
+    expect(within(dialog).getByText("1 source is restored from the trash.")).toBeInTheDocument();
+    expect(within(dialog).getByText(/a later undo of the whole run skips them/)).toBeInTheDocument();
+    await user.click(within(dialog).getByRole("button", { name: "Undo" }));
+    expect(calls("undo_target")).toEqual([["undo_target", { reportPath: local.path, target: "pics" }]]);
+    act(() =>
+      handlers.get("undo-done")!({
+        payload: { report_path: local.path, restored: 1, removed_outputs: 2, problems: [], cancelled: false, undone: false },
+      }),
+    );
+
+    await user.click(within(files).getByText("/s/a.jpg"));
+    await user.click(within(files).getByRole("button", { name: "Undo this file…" }));
+    await user.click(within(screen.getByRole("dialog", { name: "Undo this file?" })).getByRole("button", { name: "Undo" }));
+    expect(calls("undo_files")).toEqual([["undo_files", { reportPath: local.path, sources: ["/s/a.jpg"] }]]);
   });
 
   it("prepares a retry after confirmation and offers it on the main screen", async () => {

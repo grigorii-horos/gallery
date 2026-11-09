@@ -1016,5 +1016,11 @@
   "decide_series_hint": "Cliquez sur une prise pour en choisir une autre comme meilleure. La meilleure prise échappe aux règles de série ; les autres vont dans la cible suggérée.",
   "decide_series_suggested": "suggérée",
   "decide_series_best": "meilleure",
-  "decide_series_confirm": "Confirmer la meilleure, envoyer les autres vers « {{target}} »"
+  "decide_series_confirm": "Confirmer la meilleure, envoyer les autres vers « {{target}} »",
+  "history_targets": "Cibles",
+  "history_undo_target": "Annuler la cible {{target}}…",
+  "history_undo_file": "Annuler ce fichier…",
+  "undo_file_title": "Annuler ce fichier ?",
+  "undo_target_title": "Annuler la cible « {{target}} » ?",
+  "undo_partial_note": "Seuls ces fichiers sont annulés : le reste de l'exécution reste en l'état, et une annulation ultérieure de toute l'exécution les ignore."
 }

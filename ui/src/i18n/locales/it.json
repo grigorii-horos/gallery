@@ -1016,5 +1016,11 @@
   "decide_series_hint": "Fai clic su uno scatto per sceglierne un altro come migliore. Lo scatto migliore resta fuori dalle regole di serie; gli altri vanno alla destinazione suggerita.",
   "decide_series_suggested": "suggerito",
   "decide_series_best": "migliore",
-  "decide_series_confirm": "Conferma il migliore, invia gli altri a «{{target}}»"
+  "decide_series_confirm": "Conferma il migliore, invia gli altri a «{{target}}»",
+  "history_targets": "Destinazioni",
+  "history_undo_target": "Annulla la destinazione {{target}}…",
+  "history_undo_file": "Annulla questo file…",
+  "undo_file_title": "Annullare questo file?",
+  "undo_target_title": "Annullare la destinazione «{{target}}»?",
+  "undo_partial_note": "Vengono annullati solo questi file: il resto dell'esecuzione resta com'è e un successivo annullamento dell'intera esecuzione li salta."
 }

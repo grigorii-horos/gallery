@@ -82,6 +82,10 @@ pub struct ItemView {
     pub renamed: bool,
     /// Already undone (restored, outputs removed).
     pub undone: bool,
+    /// The plan's target that routed the file; `None` when the plan is gone.
+    pub target: Option<String>,
+    /// What undoing just this file would do (all zero: nothing to undo).
+    pub undo: UndoPreview,
     pub error: Option<String>,
     pub outputs: Vec<OutputView>,
 }
@@ -284,8 +288,15 @@ fn shown(p: &Path) -> String {
     p.display().to_string()
 }
 
-fn item_view(it: &ItemResult, undone: bool) -> ItemView {
+fn item_view(it: &ItemResult, undone: bool, target: Option<String>) -> ItemView {
+    let undo = if undone {
+        UndoPreview::default()
+    } else {
+        item_preview(it)
+    };
     ItemView {
+        target,
+        undo,
         source: shown(&it.source),
         status: status_name(&it.status),
         trashed: trashed_of(it).map(|t| match t {
@@ -323,32 +334,49 @@ pub fn undo_preview(r: &Report) -> UndoPreview {
         .iter()
         .filter(|it| !r.undone_sources.contains(&it.source))
     {
-        let renamed = it
-            .outputs
-            .iter()
-            .any(|o| o.renamed_from.is_some() && o.actual.is_some());
-        let outputs = it
-            .outputs
-            .iter()
-            .filter(|o| o.renamed_from.is_none())
-            .filter(|o| o.actual.as_deref().is_some_and(|a| a != it.source))
-            .count();
-        let restore = !renamed && trashed_of(it).is_some();
-        // An in-place output sits where the source comes back: removed too.
-        let in_place = restore
-            && it
-                .outputs
-                .iter()
-                .any(|o| o.actual.as_deref() == Some(it.source.as_path()));
-        if !(renamed || restore || outputs > 0) {
-            continue;
-        }
-        u.items += 1;
-        u.rename_back += usize::from(renamed);
-        u.restore += usize::from(restore);
-        u.remove_outputs += outputs + usize::from(in_place);
+        u.add(&item_preview(it));
     }
     u
+}
+
+impl UndoPreview {
+    fn add(&mut self, o: &UndoPreview) {
+        self.items += o.items;
+        self.restore += o.restore;
+        self.rename_back += o.rename_back;
+        self.remove_outputs += o.remove_outputs;
+    }
+}
+
+/// What undoing the one item would do, as recorded; all zero when there is
+/// nothing to undo (a stale or missing file, a `keep`-like item).
+fn item_preview(it: &ItemResult) -> UndoPreview {
+    let renamed = it
+        .outputs
+        .iter()
+        .any(|o| o.renamed_from.is_some() && o.actual.is_some());
+    let outputs = it
+        .outputs
+        .iter()
+        .filter(|o| o.renamed_from.is_none())
+        .filter(|o| o.actual.as_deref().is_some_and(|a| a != it.source))
+        .count();
+    let restore = !renamed && trashed_of(it).is_some();
+    // An in-place output sits where the source comes back: removed too.
+    let in_place = restore
+        && it
+            .outputs
+            .iter()
+            .any(|o| o.actual.as_deref() == Some(it.source.as_path()));
+    if !(renamed || restore || outputs > 0) {
+        return UndoPreview::default();
+    }
+    UndoPreview {
+        items: 1,
+        rename_back: usize::from(renamed),
+        restore: usize::from(restore),
+        remove_outputs: outputs + usize::from(in_place),
+    }
 }
 
 /// `'…'` for a shell, unless the text needs no quoting.
@@ -384,6 +412,20 @@ pub fn server_command(report: &Report, file_name: &str) -> String {
     }
 }
 
+/// The target of each file of the plan next to the report (empty when the
+/// plan cannot be read).
+fn plan_targets(report: &Path) -> HashMap<PathBuf, String> {
+    plan_of_report(report)
+        .and_then(|p| gallery_core::plan::Plan::load(&p).ok())
+        .map(|p| {
+            p.items
+                .into_iter()
+                .map(|it| (it.source, it.target))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The report at `path` with its files, for the detail view; `export_dir`
 /// marks a report found there as the server's. Reads only.
 pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, String> {
@@ -403,6 +445,7 @@ pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, Stri
         side,
         head.as_ref().map(|h| h.items.len()),
     );
+    let targets = plan_targets(path);
     let items = report
         .items
         .iter()
@@ -410,6 +453,7 @@ pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, Stri
             item_view(
                 it,
                 report.undone || report.undone_sources.contains(&it.source),
+                targets.get(&it.source).cloned(),
             )
         })
         .collect();
@@ -535,6 +579,68 @@ pub fn undo(
         cancelled: s.cancelled,
         undone,
     })
+}
+
+/// Which items of a run an undo takes.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Selection {
+    /// Every item not undone yet.
+    All,
+    /// These files only.
+    Files(Vec<PathBuf>),
+    /// Every file the plan routed to the target.
+    Target(String),
+}
+
+/// Undo `selection` of the local report at `path` (checked again here, a
+/// server report is refused as in [`undo`]). A partial undo records its
+/// items in the report; a later full undo skips them.
+pub fn undo_selected(
+    path: &Path,
+    plans_dir: Option<&Path>,
+    selection: &Selection,
+    on_progress: &(dyn Fn(UndoProgress) + Sync),
+    cancel: &Cancel,
+) -> Result<UndoDone, UndoError> {
+    let sources = match selection {
+        Selection::All => return undo(path, plans_dir, on_progress, cancel),
+        Selection::Files(f) => f.clone(),
+        Selection::Target(t) => selection_sources(path, plans_dir, t)?,
+    };
+    guard_undo(path, plans_dir)?;
+    if sources.is_empty() {
+        return Err(gallery_core::t!("history.no_files_selected").into());
+    }
+    gallery_core::undo::ensure_in_report(path, &sources).map_err(|e| e.to_string())?;
+    let progress = |ev: ProgressEvent| {
+        on_progress(UndoProgress {
+            done: ev.done,
+            total: ev.total,
+            current: ev.current.map(|p| shown(&p)),
+        })
+    };
+    let s = gallery_core::undo::undo_items_with(path, &sources, &progress, cancel)
+        .map_err(|e| e.to_string())?;
+    let undone = read_report(path).map(|r| r.undone).unwrap_or(false);
+    Ok(UndoDone {
+        report_path: shown(path),
+        restored: s.restored,
+        removed_outputs: s.removed_outputs,
+        problems: s.problems,
+        cancelled: s.cancelled,
+        undone,
+    })
+}
+
+/// The files of `target` in the local report (after the local checks).
+fn selection_sources(
+    path: &Path,
+    plans_dir: Option<&Path>,
+    target: &str,
+) -> Result<Vec<PathBuf>, String> {
+    guard_undo(path, plans_dir)?;
+    let plan = plan_of_report(path);
+    gallery_core::undo::target_sources(path, plan.as_deref(), target).map_err(|e| e.to_string())
 }
 
 /// `start_retry` payload.
@@ -890,6 +996,181 @@ mod tests {
             crate::apply::preview(&plan).unwrap().applied,
             Some(crate::apply::Applied::Undone)
         );
+    }
+
+    /// A fixture with three targets: `pics` (jpg, outputs), `rest` (text,
+    /// outputs) and `junk` (tmp, trash kind).
+    fn three_targets(d: &Path) -> (PathBuf, PathBuf) {
+        let src = d.join("src");
+        std::fs::create_dir(&src).unwrap();
+        for f in ["cat.jpg", "dog.jpg", "note.txt", "junk.tmp"] {
+            std::fs::write(src.join(f), f).unwrap();
+        }
+        let q = |p: PathBuf| p.to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            r#"
+[[sources]]
+id = "s"
+path = "{src}"
+
+[[targets]]
+name = "junk"
+kind = "trash"
+filters = [{{ sources = ["s"], match = "*.tmp" }}]
+
+[[targets]]
+name = "pics"
+filters = [{{ sources = ["s"], match = "*.jpg" }}]
+outputs = [{{ dir = "{out}/pics" }}]
+
+[[targets]]
+name = "rest"
+filters = [{{ sources = ["s"], match = "*" }}]
+outputs = [{{ dir = "{out}/rest" }}]
+"#,
+            src = q(src),
+            out = q(d.join("out"))
+        );
+        let cfg = d.join("gallery.toml");
+        std::fs::write(&cfg, toml).unwrap();
+        let plans = d.join("plans");
+        let tools = Tools::discover().unwrap();
+        let env = ScanEnv {
+            config: &cfg,
+            plans_dir: &plans,
+            overrides: None,
+            tools: &tools,
+        };
+        let done =
+            crate::scan::tests::run(&env, None, &|_: ProgressEvent| {}, &Cancel::new()).unwrap();
+        let req = ApplyRequest {
+            plan_path: done.plan_path,
+            dry_run: false,
+            jobs: Some(1),
+            allow_anomalies: false,
+            pause_sync: false,
+        };
+        let out = apply_run(&req, &tools, TrashMode::Folder, &|_| {}, &Cancel::new()).unwrap();
+        (PathBuf::from(out.report_path.unwrap()), plans)
+    }
+
+    fn out_names(d: &Path, sub: &str) -> Vec<String> {
+        let mut v: Vec<String> = std::fs::read_dir(d.join("out").join(sub))
+            .map(|r| {
+                r.filter_map(|e| e.ok())
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
+    }
+
+    /// Undo of one target restores only its files; another target's outputs
+    /// stay; one file of another target undoes alone; the later full undo
+    /// finishes the rest; a server-side report is refused.
+    #[test]
+    fn undo_one_target_then_one_file_then_the_rest() {
+        let d = tempfile::tempdir().unwrap();
+        let (rp, plans) = three_targets(d.path());
+        assert!(src_files(d.path()).is_empty());
+        assert_eq!(out_names(d.path(), "pics").len(), 2);
+        assert_eq!(out_names(d.path(), "rest").len(), 1);
+
+        let detail = load(&rp, None).unwrap();
+        let of = |t: &str| {
+            detail
+                .items
+                .iter()
+                .filter(|i| i.target.as_deref() == Some(t))
+                .count()
+        };
+        assert_eq!((of("pics"), of("rest"), of("junk")), (2, 1, 1));
+        let junk = detail
+            .items
+            .iter()
+            .find(|i| i.target.as_deref() == Some("junk"))
+            .unwrap();
+        assert_eq!(
+            junk.undo,
+            UndoPreview {
+                items: 1,
+                restore: 1,
+                rename_back: 0,
+                remove_outputs: 0
+            }
+        );
+
+        // The trash target: its source comes back, nothing else moves.
+        let r = undo_selected(
+            &rp,
+            Some(&plans),
+            &Selection::Target("junk".into()),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!((r.restored, r.removed_outputs, r.undone), (1, 0, false));
+        assert_eq!(src_files(d.path()), ["junk.tmp"]);
+        assert_eq!(out_names(d.path(), "pics").len(), 2);
+
+        // The pics target: its sources come back and its outputs go.
+        let r = undo_selected(
+            &rp,
+            Some(&plans),
+            &Selection::Target("pics".into()),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!((r.restored, r.removed_outputs), (2, 2));
+        assert_eq!(src_files(d.path()), ["cat.jpg", "dog.jpg", "junk.tmp"]);
+        assert!(out_names(d.path(), "pics").is_empty());
+        assert_eq!(out_names(d.path(), "rest").len(), 1, "other target stays");
+        assert!(!read_report(&rp).unwrap().undone);
+        assert_eq!(load(&rp, None).unwrap().undo.items, 1);
+
+        // Already undone files are no work for a second try.
+        let again = undo_selected(
+            &rp,
+            Some(&plans),
+            &Selection::Files(vec![d.path().join("src/cat.jpg")]),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!((again.restored, again.removed_outputs), (0, 0));
+
+        // A path outside the run and an unknown target are errors.
+        let bad = Selection::Files(vec![d.path().join("src/nope.jpg")]);
+        assert!(undo_selected(&rp, Some(&plans), &bad, &|_| {}, &Cancel::new()).is_err());
+        let bad = Selection::Target("nope".into());
+        assert!(undo_selected(&rp, Some(&plans), &bad, &|_| {}, &Cancel::new()).is_err());
+
+        // The full undo skips what is done and finishes the run.
+        let done = undo(&rp, Some(&plans), &|_| {}, &Cancel::new()).unwrap();
+        assert_eq!((done.restored, done.removed_outputs), (1, 1));
+        assert!(done.undone);
+        assert_eq!(src_files(d.path()).len(), 4);
+        assert!(out_names(d.path(), "rest").is_empty());
+    }
+
+    #[test]
+    fn partial_undo_of_a_server_report_is_refused() {
+        let d = tempfile::tempdir().unwrap();
+        let (rp, _plans) = three_targets(d.path());
+        let other = d.path().join("elsewhere");
+        std::fs::create_dir(&other).unwrap();
+        let e = undo_selected(
+            &rp,
+            Some(&other),
+            &Selection::Target("pics".into()),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap_err();
+        assert!(!e.message.is_empty());
+        assert_eq!(out_names(d.path(), "pics").len(), 2);
     }
 
     #[test]

@@ -9,7 +9,9 @@ import {
   retryConfirmLines,
   runTime,
   undoBlock,
+  partialUndoConfirmLines,
   undoConfirmLines,
+  undoTargets,
 } from "./model";
 
 export const entry = (over: Partial<ReportEntry> = {}): ReportEntry => ({
@@ -36,6 +38,8 @@ const item = (source: string, status: ItemView["status"]): ItemView => ({
   trashed: null,
   renamed: false,
   undone: false,
+  target: null,
+  undo: { items: 0, restore: 0, rename_back: 0, remove_outputs: 0 },
   error: null,
   outputs: [],
 });
@@ -110,6 +114,22 @@ describe("history model", () => {
     ]);
     const none = undoConfirmLines(entry(), { items: 0, restore: 0, rename_back: 0, remove_outputs: 0 });
     expect(none.lines[0]).toMatch(/Nothing to restore/);
+  });
+
+  it("groups the files still to undo by target and sums what undoing each does", () => {
+    const it2 = (source: string, target: string | null, restore: number, out: number): ItemView => ({
+      ...item(source, "done"),
+      target,
+      undo: { items: restore + out > 0 ? 1 : 0, restore, rename_back: 0, remove_outputs: out },
+    });
+    const g = undoTargets([it2("/a", "pics", 1, 2), it2("/b", "texts", 1, 1), it2("/c", "pics", 1, 1), it2("/d", "pics", 0, 0), it2("/e", null, 1, 0)]);
+    expect(g.map((x) => [x.target, x.sources])).toEqual([
+      ["pics", ["/a", "/c"]],
+      ["texts", ["/b"]],
+    ]);
+    expect(g[0].preview).toEqual({ items: 2, restore: 2, rename_back: 0, remove_outputs: 3 });
+    expect(partialUndoConfirmLines("pics", g[0].preview).title).toBe("Undo target “pics”?");
+    expect(partialUndoConfirmLines(null, g[0].preview).title).toBe("Undo this file?");
   });
 
   it("the retry confirmation says what happens before anything runs", () => {

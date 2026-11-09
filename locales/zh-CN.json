@@ -407,7 +407,7 @@
   "cli.presets.about": "显示内置预设",
   "cli.presets.long": "输出内置的名称预设和内容预设及其关键参数。它们可以在配置中直接按名称使用而无需定义；与之同名的用户预设会报错。",
   "cli.undo.about": "根据报告撤销一次运行",
-  "cli.undo.long": "从回收站恢复来源，并删除本次运行创建的输出。运行之后被修改的输出会保留。一份报告只能撤销一次。",
+  "cli.undo.long": "从回收站恢复来源，并删除本次运行创建的输出。运行之后被修改的输出会保留。一份报告只能撤销一次。 使用 --file 或 --target 时只撤销这些文件（之后的完整撤销会跳过它们）。",
   "cli.undo.report": "报告文件（<plan>.report.json）",
   "cli.h.usage": "用法：",
   "cli.h.commands": "命令：",
@@ -710,5 +710,11 @@
   "cli.check_config_ok": "配置 %{path}：正常（%{sources} 个来源，%{targets} 个目标）",
   "cli.check.config": "同时加载并校验此配置文件（TOML）",
   "overrides.changed": "%{path}：文件在生成计划后已更改；请重新生成计划",
-  "overrides.best_not_member": "%{path}：不是该系列中的文件"
+  "overrides.best_not_member": "%{path}：不是该系列中的文件",
+  "undo.no_plan": "报告旁没有计划，无法得知目标",
+  "undo.no_such_target": "报告中没有目标“%{target}”的文件",
+  "undo.no_such_file": "不是此次运行的文件：%{path}",
+  "history.no_files_selected": "请至少选择一个要撤销的文件。",
+  "cli.undo.files": "只撤销运行中的这个源文件（可重复）",
+  "cli.undo.targets": "只撤销此目标的文件（可重复）"
 }

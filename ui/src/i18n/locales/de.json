@@ -980,5 +980,11 @@
   "decide_series_hint": "Auf ein Foto klicken, um ein anderes als bestes zu wählen. Das beste Foto bleibt außerhalb der Serienregeln; die übrigen gehen ins vorgeschlagene Ziel.",
   "decide_series_suggested": "vorgeschlagen",
   "decide_series_best": "bestes",
-  "decide_series_confirm": "Bestes bestätigen, übrige nach „{{target}}“ senden"
+  "decide_series_confirm": "Bestes bestätigen, übrige nach „{{target}}“ senden",
+  "history_targets": "Ziele",
+  "history_undo_target": "Ziel {{target}} rückgängig machen …",
+  "history_undo_file": "Diese Datei rückgängig machen …",
+  "undo_file_title": "Diese Datei rückgängig machen?",
+  "undo_target_title": "Ziel „{{target}}“ rückgängig machen?",
+  "undo_partial_note": "Nur diese Dateien werden rückgängig gemacht: der Rest des Laufs bleibt, wie er ist, und ein späteres Rückgängigmachen des ganzen Laufs überspringt sie."
 }
