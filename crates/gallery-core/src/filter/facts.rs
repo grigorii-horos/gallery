@@ -367,7 +367,7 @@ mod weekdays {
     }
 }
 
-fn is_false(b: &bool) -> bool {
+pub(crate) fn is_false(b: &bool) -> bool {
     !*b
 }
 
@@ -619,10 +619,10 @@ pub struct Miss {
     pub detail: String,
 }
 
-type Verdict = std::result::Result<(), String>;
+pub(crate) type Verdict = std::result::Result<(), String>;
 
 /// Apply `not`: the inner verdict is inverted as a whole.
-fn with_not(not: bool, inner: Verdict) -> Verdict {
+pub(crate) fn with_not(not: bool, inner: Verdict) -> Verdict {
     match (not, inner) {
         (false, v) => v,
         (true, Ok(())) => Err(crate::t!("filter.miss.negated")),
@@ -630,7 +630,7 @@ fn with_not(not: bool, inner: Verdict) -> Verdict {
     }
 }
 
-fn miss(condition: &'static str, v: Verdict) -> std::result::Result<(), Miss> {
+pub(crate) fn miss(condition: &'static str, v: Verdict) -> std::result::Result<(), Miss> {
     v.map_err(|detail| Miss { condition, detail })
 }
 
@@ -652,7 +652,7 @@ fn range_verdict(prop: &str, raw: &str, r: &NumRange, v: Option<f64>) -> Verdict
     }
 }
 
-fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
+pub(crate) fn haversine_km(a: (f64, f64), b: (f64, f64)) -> f64 {
     let (la1, lo1) = (a.0.to_radians(), a.1.to_radians());
     let (la2, lo2) = (b.0.to_radians(), b.1.to_radians());
     let h = ((la2 - la1) / 2.0).sin().powi(2)
@@ -954,7 +954,7 @@ impl Filter {
         {
             return Err(crate::t!("config.bad_month", target = target, month = m));
         }
-        Ok(())
+        super::groups::check_conditions(self, cfg, target)
     }
 }
 

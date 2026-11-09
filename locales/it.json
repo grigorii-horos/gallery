@@ -685,5 +685,18 @@
   "filter.miss.tag_mismatch": "%{tag} «%{value}» non corrisponde",
   "filter.miss.prop_range": "%{prop} %{value} non rientra in %{wanted}",
   "filter.miss.prop_value": "%{prop} è %{value}, atteso %{wanted}",
-  "filter.miss.path": "il percorso %{path} non corrisponde"
+  "filter.miss.path": "il percorso %{path} non corrisponde",
+  "filter.image_unreadable": "impossibile leggere l’immagine %{path}: %{error}",
+  "filter.miss.no_event": "non fa parte di nessun evento",
+  "filter.miss.event_small": "l’evento ha %{files}, meno di %{min}",
+  "filter.miss.event_short": "l’evento dura %{length}, meno di %{wanted}",
+  "filter.miss.event_long": "l’evento dura %{length}, più di %{wanted}",
+  "filter.miss.event_at_place": "l’intero evento è entro %{place}",
+  "filter.miss.near": "%{found} di %{sources} entro %{wanted}, ne servono almeno %{min}",
+  "filter.miss.no_duplicate": "nessuna copia identica",
+  "filter.miss.not_in_series": "non fa parte di una raffica",
+  "filter.miss.series_best": "lo scatto migliore della sua raffica",
+  "config.near_no_sources": "destinazione '%{target}': `near` richiede `sources`",
+  "config.bad_away_from": "destinazione '%{target}': `event.away_from` «%{value}» non è un luogo di [places] (scrivilo come @nome)",
+  "config.series_mismatch": "destinazione '%{target}': tutte le condizioni `series` devono usare gli stessi gap, similar e by della prima"
 }

@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::filter::facts::{DateCond, DeviceCond, GeoCond, PropsCond};
+use crate::filter::groups::{DuplicateCond, EventCond, NearCond, SeriesCond};
 use crate::mask::{MAX_REF_DEPTH, MaskExpr, MaskItem, MaskScope};
 use crate::{Error, Result};
 
@@ -219,6 +220,18 @@ pub struct Filter {
     /// Mask on the path relative to the source root (`/` separators).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub path: Option<MaskExpr>,
+    /// Conditions on the event the file belongs to.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub event: Option<EventCond>,
+    /// Files of other sources taken around the same time and place.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub near: Option<NearCond>,
+    /// Byte-identical copies in the scan or in output folders.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duplicate: Option<DuplicateCond>,
+    /// Burst shots and re-takes; holds for all but the best shot.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<SeriesCond>,
 }
 
 /// A named point for geo conditions (`[places]`).
@@ -1412,6 +1425,8 @@ impl Config {
             }
             for f in &t.filters {
                 check_sources(name, &f.sources)?;
+                let named: Vec<String> = crate::filter::groups::named_sources(f).cloned().collect();
+                check_sources(name, &named)?;
                 if f.ai.as_ref().is_some_and(|d| d.trim().is_empty()) {
                     return Err(Error::Config(crate::t!(
                         "config.empty_description",

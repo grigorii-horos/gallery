@@ -671,5 +671,18 @@
   "filter.miss.tag_mismatch": "%{tag}“%{value}”不匹配",
   "filter.miss.prop_range": "%{prop} %{value} 不在 %{wanted} 内",
   "filter.miss.prop_value": "%{prop} 为 %{value}，期望 %{wanted}",
-  "filter.miss.path": "路径 %{path} 不匹配"
+  "filter.miss.path": "路径 %{path} 不匹配",
+  "filter.image_unreadable": "无法读取图像 %{path}：%{error}",
+  "filter.miss.no_event": "不属于任何事件",
+  "filter.miss.event_small": "该事件有 %{files}，少于 %{min}",
+  "filter.miss.event_short": "该事件持续 %{length}，短于 %{wanted}",
+  "filter.miss.event_long": "该事件持续 %{length}，长于 %{wanted}",
+  "filter.miss.event_at_place": "整个事件都在 %{place} 范围内",
+  "filter.miss.near": "%{wanted} 内来自 %{sources} 的有 %{found}，至少需要 %{min}",
+  "filter.miss.no_duplicate": "没有相同的副本",
+  "filter.miss.not_in_series": "不属于连拍组",
+  "filter.miss.series_best": "所在连拍组中最好的一张",
+  "config.near_no_sources": "目标“%{target}”：`near` 需要 `sources`",
+  "config.bad_away_from": "目标“%{target}”：`event.away_from` “%{value}” 不是 [places] 中的地点（请写成 @名称）",
+  "config.series_mismatch": "目标“%{target}”：所有 `series` 条件必须使用与第一个相同的 gap、similar 和 by"
 }

@@ -685,5 +685,18 @@
   "filter.miss.tag_mismatch": "%{tag} « %{value} » ne correspond pas",
   "filter.miss.prop_range": "%{prop} %{value} n'entre pas dans %{wanted}",
   "filter.miss.prop_value": "%{prop} vaut %{value}, attendu : %{wanted}",
-  "filter.miss.path": "le chemin %{path} ne correspond pas"
+  "filter.miss.path": "le chemin %{path} ne correspond pas",
+  "filter.image_unreadable": "impossible de lire l’image %{path} : %{error}",
+  "filter.miss.no_event": "ne fait partie d’aucun événement",
+  "filter.miss.event_small": "l’événement compte %{files}, moins de %{min}",
+  "filter.miss.event_short": "l’événement dure %{length}, moins de %{wanted}",
+  "filter.miss.event_long": "l’événement dure %{length}, plus de %{wanted}",
+  "filter.miss.event_at_place": "tout l’événement se trouve dans %{place}",
+  "filter.miss.near": "%{found} de %{sources} dans un rayon de %{wanted}, au moins %{min} requis",
+  "filter.miss.no_duplicate": "aucune copie identique",
+  "filter.miss.not_in_series": "ne fait pas partie d’une rafale",
+  "filter.miss.series_best": "la meilleure photo de sa rafale",
+  "config.near_no_sources": "cible « %{target} » : `near` nécessite `sources`",
+  "config.bad_away_from": "cible « %{target} » : `event.away_from` « %{value} » n’est pas un lieu de [places] (écrivez-le @nom)",
+  "config.series_mismatch": "cible « %{target} » : toutes les conditions `series` doivent utiliser les mêmes gap, similar et by que la première"
 }
