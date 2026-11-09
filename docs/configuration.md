@@ -745,8 +745,9 @@ in plans, overrides and reports, so those stay valid.
 
 - `gallery check -c CONFIG` (and every command that loads the config) prints a one-line notice
   when the file uses the old shape. `gallery check` exits 0.
-- The GUI saves in the new shape. It writes a `.bak` copy of the file first, then rewrites it
-  once, keeping the comments where it can. Routing does not change.
+- The GUI saves in the new shape. It writes a `.bak` copy of the file first (`.bak.1`, `.bak.2`,
+  … when that name is taken; later saves never replace it), then rewrites it once, keeping the
+  comments where it can. Routing does not change.
 - An empty `[targets]` table is not the old shape.
 - `gallery scan --no-ai` now means "no `ai` condition holds for any file"; in the old shape, that
   is the same as the old "skip the AI stage".

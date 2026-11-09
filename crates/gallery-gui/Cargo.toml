@@ -25,6 +25,7 @@ tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 chrono = "0.4.45"
 tauri-plugin-dialog = "2"
 toml_edit = "0.25"
+toml.workspace = true
 blake3 = "1.8.7"
 tempfile = "3"
 tauri-plugin-notification = "2"

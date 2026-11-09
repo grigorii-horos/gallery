@@ -18,7 +18,7 @@ use crate::config_edit::EditOp;
 use crate::config_edit::doc::read_draft;
 use crate::config_edit::file;
 use crate::config_edit::model::{
-    ConfigDraft, FilterDraft, OutputDraft, SourceDraft, Stage, TargetDraft,
+    ConfigDraft, FilterDraft, OutputDraft, SourceDraft, TargetDraft, TargetKind,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -30,11 +30,11 @@ pub enum ActionKind {
     SkipFolder,
     /// A `skip` glob of the source for the extension everywhere in it.
     SkipSource,
-    /// A new `after_ai` target for the group.
+    /// A new target at the end of the list for the group.
     CreateTarget,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct SuggestedAction {
     pub kind: ActionKind,
     /// Short Russian label for the button or the list entry.
@@ -103,8 +103,9 @@ pub fn actions_for(g: &Group, draft: &ConfigDraft, cfg: &Config) -> Vec<Suggeste
 fn add_to_target(g: &Group, item: &str, draft: &ConfigDraft) -> Vec<SuggestedAction> {
     let mut listing = Vec::new();
     let mut others = Vec::new();
-    for (stage, index, t) in draft.targets.all() {
-        if !stage.is_mask() {
+    for (index, t) in draft.targets.iter().enumerate() {
+        // Only targets that place files by their names.
+        if !t.kind.is_folders() || t.has_ai() {
             continue;
         }
         let mut new = t.clone();
@@ -128,7 +129,7 @@ fn add_to_target(g: &Group, item: &str, draft: &ConfigDraft) -> Vec<SuggestedAct
                 new.filters.push(FilterDraft {
                     sources: vec![g.source.clone()],
                     matches: Some(vec![item.to_string()]),
-                    exclude: Vec::new(),
+                    ..FilterDraft::default()
                 });
                 (
                     gallery_core::t!(
@@ -149,11 +150,7 @@ fn add_to_target(g: &Group, item: &str, draft: &ConfigDraft) -> Vec<SuggestedAct
             label,
             target: Some(t.name.clone()),
             dir: None,
-            ops: vec![EditOp::UpdateTarget {
-                stage,
-                index,
-                target: new,
-            }],
+            ops: vec![EditOp::UpdateTarget { index, target: new }],
         });
     }
     listing.extend(others);
@@ -210,7 +207,7 @@ fn skip_actions(g: &Group, draft: &ConfigDraft, cfg: &Config) -> Vec<SuggestedAc
     out
 }
 
-/// "Create target…": a new `after_ai` target taking the group's extension
+/// "Create target…": a new target (at the end) taking the group's extension
 /// from its source. `name` and `dir` default to a free name and the group's
 /// own folder (files stay where they are; only renamed).
 pub fn create_target(
@@ -221,11 +218,7 @@ pub fn create_target(
     name: Option<&str>,
     dir: Option<&str>,
 ) -> SuggestedAction {
-    let taken: Vec<&str> = draft
-        .targets
-        .all()
-        .map(|(_, _, t)| t.name.as_str())
-        .collect();
+    let taken: Vec<&str> = draft.targets.iter().map(|t| t.name.as_str()).collect();
     let name = match name {
         Some(n) => n.to_string(),
         None => free_name(&format!("{} .{}", g.source, g.ext), &taken),
@@ -252,7 +245,7 @@ pub fn create_target(
         filters: vec![FilterDraft {
             sources: vec![g.source.clone()],
             matches: Some(vec![item.to_string()]),
-            exclude: Vec::new(),
+            ..FilterDraft::default()
         }],
         outputs: vec![OutputDraft {
             dir: dir.clone(),
@@ -270,7 +263,7 @@ pub fn create_target(
         target: Some(name),
         dir: Some(dir),
         ops: vec![EditOp::AddTarget {
-            stage: Stage::AfterAi,
+            kind: TargetKind::Folders,
             target,
         }],
     }
@@ -294,9 +287,8 @@ struct Loaded {
 
 fn load(config: &Path) -> Result<Loaded, String> {
     let (text, version) = file::read(config).map_err(|e| format!("{}: {e}", config.display()))?;
-    let doc = text
-        .parse::<toml_edit::DocumentMut>()
-        .map_err(|e| gallery_core::t!("triage.invalid_toml", error = e))?;
+    // An old-shape file is offered the edits of its migrated list.
+    let (doc, _) = crate::config_edit::ordered_doc(&text).map_err(|e| e.message)?;
     let draft = read_draft(&doc)?;
     let dir = config.parent().unwrap_or(Path::new(""));
     let label = config.file_name().map(Path::new).unwrap_or(config);
@@ -400,9 +392,9 @@ mod tests {
         let toml = format!(
             "# my notes\n[[sources]]\nid = \"shots\"   # phone\npath = \"{r}/shots\"\nrecursive = true\n\n\
              [[sources]]\nid = \"lone\"\npath = \"{r}/lone\"\n\n\
-             # pics\n[[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
+             # pics\n[[targets]]\nname = \"pics\"\n[[targets.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"   # only jpg\n\
-             [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
+             [[targets.outputs]]\ndir = \"{r}/out\"\n",
             r = r.to_string_lossy().replace('\\', "/")
         );
         let cfg = r.join("gallery.toml");

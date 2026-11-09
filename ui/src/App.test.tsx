@@ -33,21 +33,15 @@ const summary: ConfigSummary = {
       ai_suffix: null,
     },
   ],
-  targets: {
-    before_ai: [
-      {
-        name: "Screenshots",
-        stage: "before_ai",
-        filters: [{ sources: ["camera"], match: "Screenshot_*", exclude: null }],
-        sources: [],
-        description: null,
-        prefilter: null,
-        outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
-      },
-    ],
-    ai: [],
-    after_ai: [],
-  },
+  targets: [
+    {
+      name: "Screenshots",
+      kind: "folders",
+      ai: false,
+      filters: [{ sources: ["camera"], match: "Screenshot_*", exclude: null, ai: null, conditions: [] }],
+      outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
+    },
+  ],
   presets: { name: [], content: [], masks: [] },
   ai: { model: "m", effort: "low", jobs: 8 },
 };
@@ -81,20 +75,14 @@ const outcome: EditOutcome = {
         ai_suffix_file: null,
       },
     ],
-    targets: {
-      before_ai: [
-        {
-          name: "Screenshots",
-          filters: [{ sources: ["camera"], match: ["Screenshot_*"], exclude: [] }],
-          sources: [],
-          description: null,
-          prefilter: null,
-          outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
-        },
-      ],
-      ai: [],
-      after_ai: [],
-    },
+    targets: [
+      {
+        name: "Screenshots",
+        kind: "folders",
+        filters: [{ sources: ["camera"], match: ["Screenshot_*"], exclude: [] }],
+        outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
+      },
+    ],
     masks: [],
   },
 };

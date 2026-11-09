@@ -4,10 +4,8 @@ import type { EditOp, EditOutcome, TargetDraft } from "./model";
 
 const target = (name: string): TargetDraft => ({
   name,
+  kind: "folders",
   filters: [],
-  sources: [],
-  description: null,
-  prefilter: null,
   outputs: [],
 });
 
@@ -18,7 +16,7 @@ const outcome = (over: Partial<EditOutcome> = {}): EditOutcome => ({
   error: null,
   warnings: [],
   renames: [],
-  draft: { sources: [], targets: { before_ai: [target("A")], ai: [], after_ai: [] }, masks: [] },
+  draft: { sources: [], targets: [target("A")], masks: [] },
   ...over,
 });
 
@@ -35,12 +33,12 @@ function echo(_cmd: string, args: Args): Promise<EditOutcome> {
   return Promise.resolve(
     outcome({
       changed: name !== "A",
-      draft: { sources: [], targets: { before_ai: [target(name)], ai: [], after_ai: [] }, masks: [] },
+      draft: { sources: [], targets: [target(name)], masks: [] },
     }),
   );
 }
 
-const rename = (name: string): EditOp => ({ op: "update_target", stage: "before_ai", index: 0, target: target(name) });
+const rename = (name: string): EditOp => ({ op: "update_target", index: 0, target: target(name) });
 
 describe("useConfigEditor", () => {
   beforeEach(() => {
@@ -63,12 +61,12 @@ describe("useConfigEditor", () => {
     expect(result.current.ops).toHaveLength(1);
     // Not checked yet: dirty by the operations alone.
     expect(result.current.dirty).toBe(true);
-    await waitFor(() => expect(result.current.view?.draft.targets.before_ai[0].name).toBe("ABC"));
+    await waitFor(() => expect(result.current.view?.draft.targets[0].name).toBe("ABC"));
     expect(result.current.dirty).toBe(true);
 
     // Typed back to the saved value: nothing to save.
     act(() => result.current.edit(rename("A")));
-    await waitFor(() => expect(result.current.view?.draft.targets.before_ai[0].name).toBe("A"));
+    await waitFor(() => expect(result.current.view?.draft.targets[0].name).toBe("A"));
     expect(result.current.dirty).toBe(false);
   });
 
@@ -77,11 +75,11 @@ describe("useConfigEditor", () => {
     await waitFor(() => expect(result.current.view).not.toBeNull());
     const gen = result.current.formGen;
     await act(() => result.current.editNow(rename("B")));
-    expect(result.current.view?.draft.targets.before_ai[0].name).toBe("B");
+    expect(result.current.view?.draft.targets[0].name).toBe("B");
     act(() => result.current.discard());
     expect(result.current.ops).toEqual([]);
     expect(result.current.dirty).toBe(false);
-    expect(result.current.view?.draft.targets.before_ai[0].name).toBe("A");
+    expect(result.current.view?.draft.targets[0].name).toBe("A");
     expect(result.current.formGen).toBeGreaterThan(gen);
   });
 
@@ -89,7 +87,8 @@ describe("useConfigEditor", () => {
     const onSaved = vi.fn();
     invoke.mockImplementation((cmd, args) => {
       if (cmd === "config_draft") return echo(cmd, args);
-      if (cmd === "config_edit") return Promise.resolve(outcome({ version: "v2", changed: true, saved: true }));
+      if (cmd === "config_edit")
+        return Promise.resolve(outcome({ version: "v2", changed: true, saved: true, backup: "gallery.toml.bak.1" }));
       throw new Error(cmd);
     });
     const { result } = renderHook(() => useConfigEditor(null, onSaved));
@@ -101,7 +100,7 @@ describe("useConfigEditor", () => {
     expect(call[1].ops).toEqual([rename("B")]);
     expect(result.current.ops).toEqual([]);
     expect(result.current.dirty).toBe(false);
-    expect(result.current.notice?.tone).toBe("ok");
+    expect(result.current.notice).toEqual({ tone: "ok", text: "Saved. The previous version is next to it as gallery.toml.bak.1." });
     expect(onSaved).toHaveBeenCalledOnce();
   });
 
@@ -109,7 +108,7 @@ describe("useConfigEditor", () => {
     invoke.mockImplementation((cmd, args) => {
       if (cmd === "config_draft") return echo(cmd, args);
       if (cmd === "config_edit")
-        return Promise.resolve(outcome({ changed: true, saved: false, error: { message: "bad", path: "targets.before_ai[0]" } }));
+        return Promise.resolve(outcome({ changed: true, saved: false, error: { message: "bad", path: "targets[0]" } }));
       throw new Error(cmd);
     });
     const { result } = renderHook(() => useConfigEditor(null, () => {}));
@@ -146,10 +145,10 @@ describe("useConfigEditor", () => {
     const { result } = renderHook(() => useConfigEditor(null, () => {}));
     await waitFor(() => expect(result.current.view).not.toBeNull());
     await act(() => result.current.editNow(rename("B")));
-    await act(() => result.current.editNow({ op: "remove_target", stage: "ai", index: 3 }));
+    await act(() => result.current.editNow({ op: "remove_target", index: 3 }));
     expect(result.current.ops).toEqual([rename("B")]);
     expect(result.current.notice).toEqual({ tone: "bad", text: "Change not applied: no such target" });
-    expect(result.current.view?.draft.targets.before_ai[0].name).toBe("B");
+    expect(result.current.view?.draft.targets[0].name).toBe("B");
   });
 
   it("sends the saved version with the draft and reports a file changed meanwhile", async () => {
@@ -168,7 +167,7 @@ describe("useConfigEditor", () => {
   });
 
   it("offers to move overrides to a renamed target after the save", async () => {
-    const renames = [{ stage: "before_ai" as const, index: 0, from: "A", to: "B", overrides: 2 }];
+    const renames = [{ index: 0, from: "A", to: "B", overrides: 2 }];
     invoke.mockImplementation((cmd, args) => {
       if (cmd === "config_draft") return echo(cmd, args);
       if (cmd === "config_edit") return Promise.resolve(outcome({ version: "v2", changed: true, saved: true, renames }));

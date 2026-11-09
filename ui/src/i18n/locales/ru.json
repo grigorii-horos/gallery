@@ -944,6 +944,7 @@
   "settings_last": "Последняя проверка: к сортировке {{total, number}} (готово к запуску {{ready, number}}, ждут ИИ {{ai, number}}).",
   "editor_not_applied": "Изменение не применено: {{error}}",
   "editor_saved": "Сохранено. Предыдущая версия лежит рядом как gallery.toml.bak.",
+  "editor_saved_as": "Сохранено. Предыдущая версия лежит рядом как {{file}}.",
   "editor_moved": "Ручные решения перенесены на новое название цели: {{n, number}}.",
   "editor_not_moved": "Решения не перенесены: {{error}}",
   "dialog_text_filter": "Текст",

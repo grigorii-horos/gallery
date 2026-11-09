@@ -516,6 +516,23 @@ fn mask_has(m: &[String], name: &str) -> bool {
     m.contains(&r)
 }
 
+/// A raw mask value of a condition (a string or a list) with `@from`
+/// replaced by `@to`.
+fn swap_json_ref(v: &mut serde_json::Value, from: &str, to: &str) {
+    let (f, t) = (format!("@{from}"), format!("@{to}"));
+    match v {
+        serde_json::Value::String(s) if *s == f => *s = t,
+        serde_json::Value::Array(a) => {
+            for x in a.iter_mut() {
+                if x.as_str() == Some(f.as_str()) {
+                    *x = serde_json::Value::from(t.as_str());
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
 fn swap_ref(m: &mut [String], from: &str, to: &str) {
     let (f, t) = (format!("@{from}"), format!("@{to}"));
     for x in m.iter_mut() {
@@ -534,21 +551,21 @@ pub fn references(d: &ConfigDraft, kind: PresetKind, name: &str) -> Vec<String> 
             out.push(s);
         }
     };
-    for (_, _, t) in d.targets.all() {
+    let at = format!("@{name}");
+    for t in &d.targets {
         let tn = &t.name;
         if kind == PresetKind::Mask {
             for (i, f) in t.filters.iter().enumerate() {
+                let mut conds = f.conditions.clone();
+                let in_conditions = super::cond::mask_values_mut(&mut conds)
+                    .into_iter()
+                    .any(|v| super::cond::json_strings(v).contains(&at.as_str()));
                 if f.matches.as_deref().is_some_and(|m| mask_has(m, name))
                     || mask_has(&f.exclude, name)
+                    || in_conditions
                 {
                     push(gallery_core::t!("edit.ref_filter", target = tn, n = i + 1));
                 }
-            }
-            if let Some(p) = &t.prefilter
-                && (p.matches.as_deref().is_some_and(|m| mask_has(m, name))
-                    || mask_has(&p.exclude, name))
-            {
-                push(gallery_core::t!("edit.ref_prefilter", target = tn));
             }
         }
         for (i, o) in t.outputs.iter().enumerate() {
@@ -682,11 +699,10 @@ fn rename_in_target(t: &mut TargetDraft, kind: PresetKind, from: &str, to: &str)
             }
             swap_ref(&mut f.exclude, from, to);
         }
-        if let Some(p) = &mut t.prefilter {
-            if let Some(m) = &mut p.matches {
-                swap_ref(m, from, to);
+        for f in &mut t.filters {
+            for v in super::cond::mask_values_mut(&mut f.conditions) {
+                swap_json_ref(v, from, to);
             }
-            swap_ref(&mut p.exclude, from, to);
         }
     }
 }
@@ -695,13 +711,13 @@ fn rename_in_target(t: &mut TargetDraft, kind: PresetKind, from: &str, to: &str)
 fn rename_refs(doc: &mut DocumentMut, kind: PresetKind, from: &str, to: &str) -> R<()> {
     let d = read_draft(doc)?;
     let style = Style::of(doc);
-    for (stage, i, t) in d.targets.all() {
+    for (i, t) in d.targets.iter().enumerate() {
         let mut n = t.clone();
         rename_in_target(&mut n, kind, from, to);
         if n != *t {
             renumber(doc);
-            let tb = super::ops::stage_table(doc, stage, i)?;
-            write_target(tb, stage, t, &n, &style);
+            let tb = super::ops::target_table(doc, i)?;
+            write_target(tb, t, &n, &style);
         }
     }
     if kind == PresetKind::Content {

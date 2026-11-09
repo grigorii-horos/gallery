@@ -4,7 +4,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ThumbQueue } from "./thumbQueue";
 import type { ChangePreview, SuggestedAction, TriageView } from "./triage";
 
-const op = { op: "update_target", stage: "after_ai", index: 0, target: { name: "pics" } };
+const op = { op: "update_target", index: 0, target: { name: "pics" } };
 const addAction = (target: string): SuggestedAction => ({
   kind: "add_to_target",
   label: `Add *.webm to the match of target “${target}”`,
@@ -54,7 +54,7 @@ const preview = (over: Partial<ChangePreview> = {}): ChangePreview => ({
   version: "v1",
   changed: true,
   diff: [
-    { kind: "ctx", text: "[[targets.after_ai.filters]]" },
+    { kind: "ctx", text: "[[targets.filters]]" },
     { kind: "del", text: 'match = "*.jpg"' },
     { kind: "add", text: 'match = ["*.jpg", "*.webm"]' },
   ],

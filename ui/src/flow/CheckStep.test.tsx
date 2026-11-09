@@ -4,13 +4,11 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigSummary, TargetSummary } from "../api";
 import fixture from "../plan/fixture-plan.json";
 
-const target = (name: string, stage: TargetSummary["stage"]): TargetSummary => ({
+const target = (name: string, ai = false): TargetSummary => ({
   name,
-  stage,
+  kind: "folders",
+  ai,
   filters: [],
-  sources: [],
-  description: null,
-  prefilter: null,
   outputs: [],
 });
 
@@ -20,11 +18,7 @@ const summary: ConfigSummary = {
   error: null,
   warnings: [],
   sources: [],
-  targets: {
-    before_ai: [target("Screenshots", "before_ai")],
-    ai: [target("Documents", "ai")],
-    after_ai: [target("Videos", "after_ai")],
-  },
+  targets: [target("Screenshots"), target("Documents", true), target("Videos")],
   presets: { name: [], content: [], masks: [] },
   ai: { model: "m", effort: "low", jobs: 8 },
 };

@@ -47,13 +47,13 @@ mask = "*.m4a"
 
 # ---- targets ----
 
-[[targets.after_ai]]
+[[targets]]
 name = "Timeline"
-[[targets.after_ai.filters]]
+[[targets.filters]]
 sources = ["camera"]
 match = "@phone"
 exclude = ["@docs"]
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-preset-test/out"
 content = ["tiny", { mask = "@phone-docs", preset = "voice" }]
 rename = ["short", "capture-date"]
@@ -309,9 +309,9 @@ path = "/tmp/gallery-preset-test/camera"
 
 # ---- targets ----
 
-[[targets.after_ai]]
+[[targets]]
 name = "T"
-[[targets.after_ai.filters]]
+[[targets.filters]]
 sources = ["camera"]
 "#;
     let fx = fixture(text);
@@ -979,9 +979,9 @@ quality = 40   # small
 kind = "bundle"
 steps = ["tiny",   { mask = "*.png", preset = "png-avif" }]   # order matters
 
-[[targets.after_ai]]
+[[targets]]
 name = "t"
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-preset-test/out"
 content = ["pack"]
 "#;

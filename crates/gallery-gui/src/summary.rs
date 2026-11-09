@@ -1,7 +1,7 @@
 //! `load_config`: a read-only JSON summary of a config for the UI.
 
 use crate::presets::{MaskInfo, PresetInfo, content_infos, mask_infos, name_infos};
-use gallery_core::config::{Config, Filter, Output, PipeStep, Source, Target};
+use gallery_core::config::{Config, Filter, Output, PipeStep, Source, Target, TargetKind};
 use gallery_core::mask::MaskExpr;
 use serde::Serialize;
 use std::path::Path;
@@ -15,7 +15,8 @@ pub struct ConfigSummary {
     pub error: Option<String>,
     pub warnings: Vec<String>,
     pub sources: Vec<SourceSummary>,
-    pub targets: TargetsSummary,
+    /// In order: the first target with a matching filter takes a file.
+    pub targets: Vec<TargetSummary>,
     pub presets: UserPresets,
     pub ai: AiSummary,
 }
@@ -33,22 +34,12 @@ pub struct SourceSummary {
 }
 
 #[derive(Debug, Serialize)]
-pub struct TargetsSummary {
-    pub before_ai: Vec<TargetSummary>,
-    pub ai: Vec<TargetSummary>,
-    pub after_ai: Vec<TargetSummary>,
-}
-
-/// A target of any stage; `filters` for mask stages, `sources` /
-/// `description` / `prefilter` for the AI stage.
-#[derive(Debug, Serialize)]
 pub struct TargetSummary {
     pub name: String,
-    pub stage: &'static str,
+    pub kind: TargetKind,
+    /// Some filter asks the AI.
+    pub ai: bool,
     pub filters: Vec<FilterSummary>,
-    pub sources: Vec<String>,
-    pub description: Option<String>,
-    pub prefilter: Option<FilterSummary>,
     pub outputs: Vec<OutputSummary>,
 }
 
@@ -58,6 +49,10 @@ pub struct FilterSummary {
     #[serde(rename = "match")]
     pub matches: Option<String>,
     pub exclude: Option<String>,
+    /// AI category description.
+    pub ai: Option<String>,
+    /// The keys of its other conditions (`date`, `near`, ...).
+    pub conditions: Vec<&'static str>,
 }
 
 #[derive(Debug, Serialize)]
@@ -107,7 +102,7 @@ pub fn summarize(cfg: &Config, path: &Path) -> ConfigSummary {
         error,
         warnings: cfg.warnings(),
         sources: cfg.sources.iter().map(source).collect(),
-        targets: targets(cfg),
+        targets: cfg.targets.iter().map(target).collect(),
         presets: UserPresets {
             name: name_infos(&cfg.name_presets, cfg),
             content: content_infos(&cfg.content_presets, cfg),
@@ -137,43 +132,30 @@ fn mask_str(m: &MaskExpr) -> Option<String> {
     (!m.is_empty()).then(|| m.source())
 }
 
-/// The ordered list in the old three-stage JSON shape the UI still reads
-/// (TEMPORARY, until the GUI rework): AI targets, mask targets before the
-/// first of them, and mask targets after it.
-fn targets(cfg: &Config) -> TargetsSummary {
-    let cut = crate::config_edit::model::ai_cut(cfg);
-    let mut out = TargetsSummary {
-        before_ai: Vec::new(),
-        ai: Vec::new(),
-        after_ai: Vec::new(),
-    };
-    for (i, t) in cfg.targets.iter().enumerate() {
-        if t.has_ai() {
-            out.ai.push(ai_target(t));
-        } else if i < cut {
-            out.before_ai.push(mask_target(t, "before_ai"));
-        } else {
-            out.after_ai.push(mask_target(t, "after_ai"));
-        }
-    }
-    out
-}
-
 fn filter(f: &Filter) -> FilterSummary {
+    let set = [
+        ("expand", f.expand.is_some()),
+        ("date", f.date.is_some()),
+        ("geo", f.geo.is_some()),
+        ("device", f.device.is_some()),
+        ("props", f.props.is_some()),
+        ("path", f.path.is_some()),
+        ("event", f.event.is_some()),
+        ("near", f.near.is_some()),
+        ("duplicate", f.duplicate.is_some()),
+        ("series", f.series.is_some()),
+    ];
     FilterSummary {
         sources: f.sources.clone(),
         matches: f.matches.as_ref().map(MaskExpr::source),
         exclude: mask_str(&f.exclude),
+        ai: f.ai.clone(),
+        conditions: set
+            .into_iter()
+            .filter(|(_, on)| *on)
+            .map(|(k, _)| k)
+            .collect(),
     }
-}
-
-/// The masks of an AI filter as the old prefilter; none when it has none.
-fn prefilter(f: &Filter) -> Option<FilterSummary> {
-    (f.matches.is_some() || !f.exclude.is_empty()).then(|| FilterSummary {
-        sources: Vec::new(),
-        matches: f.matches.as_ref().map(MaskExpr::source),
-        exclude: mask_str(&f.exclude),
-    })
 }
 
 fn steps(s: &[PipeStep]) -> Vec<StepSummary> {
@@ -194,29 +176,12 @@ fn output(o: &Output) -> OutputSummary {
     }
 }
 
-fn mask_target(t: &Target, stage: &'static str) -> TargetSummary {
+fn target(t: &Target) -> TargetSummary {
     TargetSummary {
         name: t.name.clone(),
-        stage,
+        kind: t.kind,
+        ai: t.has_ai(),
         filters: t.filters.iter().map(filter).collect(),
-        sources: Vec::new(),
-        description: None,
-        prefilter: None,
-        outputs: t.outputs.iter().map(output).collect(),
-    }
-}
-
-/// An AI target as the old shape had it: its first AI filter is the
-/// sources, description and prefilter (a migrated target has just that one).
-fn ai_target(t: &Target) -> TargetSummary {
-    let f = t.filters.iter().find(|f| f.ai.is_some());
-    TargetSummary {
-        name: t.name.clone(),
-        stage: "ai",
-        filters: Vec::new(),
-        sources: f.map(|f| f.sources.clone()).unwrap_or_default(),
-        description: f.and_then(|f| f.ai.clone()),
-        prefilter: f.and_then(prefilter),
         outputs: t.outputs.iter().map(output).collect(),
     }
 }
@@ -298,30 +263,52 @@ match = "*"
     }
 
     #[test]
-    fn summary_targets_per_stage() {
+    fn summary_targets_in_order() {
+        // The old three stages, read as one list.
         let v = summary();
         let t = &v["targets"];
         assert_eq!(
-            t["before_ai"][0],
+            t[0],
             json!({
-                "name": "Screenshots", "stage": "before_ai",
-                "filters": [{"sources": ["cam"], "match": "Screenshot_*", "exclude": "@dated"}],
-                "sources": [], "description": null, "prefilter": null,
+                "name": "Screenshots", "kind": "folders", "ai": false,
+                "filters": [{"sources": ["cam"], "match": "Screenshot_*", "exclude": "@dated",
+                             "ai": null, "conditions": []}],
                 "outputs": [{"dir": "/lib/shots", "server_dir": null, "content": [],
                              "rename": [{"preset": "capture-date", "mask": null}]}]
             })
         );
-        let ai = &t["ai"][0];
-        assert_eq!(ai["stage"], "ai");
-        assert_eq!(ai["sources"], json!(["cam"]));
-        assert_eq!(ai["description"], "Photos of documents");
-        assert_eq!(ai["prefilter"]["match"], "@photo");
+        let ai = &t[1];
+        assert_eq!(ai["name"], "Documents");
+        assert_eq!(ai["ai"], true);
+        assert_eq!(ai["filters"][0]["sources"], json!(["cam"]));
+        assert_eq!(ai["filters"][0]["ai"], "Photos of documents");
+        assert_eq!(ai["filters"][0]["match"], "@photo");
         assert_eq!(
             ai["outputs"][0]["content"],
             json!([{"preset": "tiny", "mask": null}, {"preset": "avif-high", "mask": "*.jpg"}])
         );
         assert_eq!(ai["outputs"][0]["server_dir"], "/srv/lib/docs");
-        assert_eq!(t["after_ai"][0]["filters"][0]["exclude"], json!(null));
+        assert_eq!(t[2]["name"], "Everything else");
+        assert_eq!(t[2]["filters"][0]["exclude"], json!(null));
+        assert_eq!(t.as_array().unwrap().len(), 3);
+    }
+
+    #[test]
+    fn summary_kinds_and_conditions() {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("g.toml");
+        std::fs::write(
+            &p,
+            "[[sources]]\nid = \"cam\"\npath = \"/m\"\n\n[[targets]]\nname = \"Dups\"\nkind = \"trash\"\n\
+             [[targets.filters]]\nsources = [\"cam\"]\nduplicate = {}\nexpand = \"event\"\n",
+        )
+        .unwrap();
+        let v = serde_json::to_value(load_summary(&p).unwrap()).unwrap();
+        assert_eq!(v["targets"][0]["kind"], "trash");
+        assert_eq!(
+            v["targets"][0]["filters"][0]["conditions"],
+            json!(["expand", "duplicate"])
+        );
     }
 
     #[test]

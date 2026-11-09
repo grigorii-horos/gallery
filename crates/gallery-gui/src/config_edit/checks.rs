@@ -8,13 +8,11 @@ use gallery_core::mask::{MaskExpr, MaskItem};
 use serde::Serialize;
 
 use super::limits::{KINDS, choices, limit_for};
-use super::model::{
-    ConfigDraft, ContentPresetDraft, NamePresetDraft, Stage, TargetDraft, target_path,
-};
+use super::model::{ConfigDraft, ContentPresetDraft, NamePresetDraft, TargetDraft, target_path};
 use super::presets::{Slot, kind_keys};
 
 /// Why the config cannot be saved; `path` is the field it is about
-/// (`sources[1]`, `targets.after_ai[0].filters[1].match`), when known.
+/// (`sources[1]`, `targets[0].filters[1].match`), when known.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct FieldError {
     pub message: String,
@@ -50,37 +48,26 @@ fn check_mask(path: String, items: &[String]) -> Result<(), FieldError> {
     Ok(())
 }
 
-fn check_target(path: &str, stage: Stage, t: &TargetDraft) -> Result<(), FieldError> {
+fn check_target(path: &str, t: &TargetDraft) -> Result<(), FieldError> {
     if t.name.trim().is_empty() {
         return Err(err(
             format!("{path}.name"),
             gallery_core::t!("edit.target_no_name"),
         ));
     }
-    if stage.is_mask() {
-        for (i, f) in t.filters.iter().enumerate() {
-            let fp = format!("{path}.filters[{i}]");
-            if let Some(m) = &f.matches {
-                check_mask(format!("{fp}.match"), m)?;
-            }
-            if !f.exclude.is_empty() {
-                check_mask(format!("{fp}.exclude"), &f.exclude)?;
-            }
+    for (i, f) in t.filters.iter().enumerate() {
+        let fp = format!("{path}.filters[{i}]");
+        if let Some(m) = &f.matches {
+            check_mask(format!("{fp}.match"), m)?;
         }
-    } else {
-        if t.description.as_deref().is_none_or(|d| d.trim().is_empty()) {
+        if !f.exclude.is_empty() {
+            check_mask(format!("{fp}.exclude"), &f.exclude)?;
+        }
+        if f.ai.as_deref().is_some_and(|d| d.trim().is_empty()) {
             return Err(err(
-                format!("{path}.description"),
+                format!("{fp}.ai"),
                 gallery_core::t!("edit.ai_no_description"),
             ));
-        }
-        if let Some(p) = &t.prefilter {
-            if let Some(m) = &p.matches {
-                check_mask(format!("{path}.prefilter.match"), m)?;
-            }
-            if !p.exclude.is_empty() {
-                check_mask(format!("{path}.prefilter.exclude"), &p.exclude)?;
-            }
         }
     }
     for (i, o) in t.outputs.iter().enumerate() {
@@ -223,8 +210,8 @@ pub fn precheck(d: &ConfigDraft) -> Result<(), FieldError> {
             ));
         }
     }
-    for (stage, i, t) in d.targets.all() {
-        check_target(&target_path(stage, i), stage, t)?;
+    for (i, t) in d.targets.iter().enumerate() {
+        check_target(&target_path(i), t)?;
     }
     for p in &d.name_presets {
         check_name_preset(p)?;
@@ -243,14 +230,82 @@ pub fn locate(message: &str, d: &ConfigDraft) -> Option<String> {
     // The core's messages are in the interface language: the names are read
     // back out of them with the catalog's own phrases (`config.who_*`).
     use gallery_core::i18n::extract;
+    let index = |name: &str, skip: usize| {
+        d.targets
+            .iter()
+            .enumerate()
+            .filter(|(_, t)| t.name == name)
+            .nth(skip)
+            .map(|(i, _)| i)
+    };
+    // Messages about one field of a target: the filter that has it.
+    let has =
+        |key: &'static str| move |f: &super::model::FilterDraft| f.conditions.contains_key(key);
+    type Has = Box<dyn Fn(&super::model::FilterDraft) -> bool>;
+    let fields: [(&str, &str, &str, Has); 7] = [
+        (
+            "config.expand_with_ai",
+            "name",
+            "expand",
+            Box::new(|f| f.ai.is_some() && f.expand.is_some()),
+        ),
+        (
+            "config.unknown_place",
+            "target",
+            "geo",
+            Box::new(has("geo")),
+        ),
+        (
+            "config.series_mismatch",
+            "target",
+            "series",
+            Box::new(has("series")),
+        ),
+        (
+            "config.near_no_sources",
+            "target",
+            "near",
+            Box::new(has("near")),
+        ),
+        (
+            "config.bad_away_from",
+            "target",
+            "event",
+            Box::new(has("event")),
+        ),
+        ("config.bad_month", "target", "date", Box::new(has("date"))),
+        (
+            "config.empty_description",
+            "name",
+            "ai",
+            Box::new(|f| f.ai.as_deref().is_some_and(|a| a.trim().is_empty())),
+        ),
+    ];
+    for (key, placeholder, field, pick) in &fields {
+        if let Some(name) = extract(key, placeholder, message)
+            && let Some(i) = index(&name, 0)
+        {
+            let at = target_path(i);
+            return Some(match d.targets[i].filters.iter().position(pick) {
+                Some(j) => format!("{at}.filters[{j}].{field}"),
+                None => at,
+            });
+        }
+    }
+    if let Some(name) = extract("config.kind_has_outputs", "name", message)
+        && let Some(i) = index(&name, 0)
+    {
+        return Some(format!("{}.outputs", target_path(i)));
+    }
     for (key, placeholder, skip) in [
         ("config.duplicate_target", "name", 1),
+        ("config.unknown_source", "target", 0),
         ("config.who_target", "name", 0),
     ] {
         if let Some(name) = extract(key, placeholder, message)
-            && let Some((s, i, _)) = d.targets.all().filter(|(_, _, t)| t.name == name).nth(skip)
+            && let Some(i) = index(&name, skip)
         {
-            return Some(target_path(s, i));
+            return Some(target_path(i));
         }
     }
     for key in ["config.bad_source_id", "config.who_source"] {
@@ -366,26 +421,22 @@ fn fixed_dir(dir: &str) -> &str {
 }
 
 struct TargetView<'a> {
-    stage: Stage,
     index: usize,
+    folders: bool,
     sources: Vec<&'a str>,
     accepts: Box<dyn Fn(&str) -> bool + 'a>,
     outputs: &'a [Output],
 }
 
 fn views(cfg: &Config) -> Vec<TargetView<'_>> {
-    super::model::staged(cfg)
-        .map(|(stage, index, t)| {
-            // A mask target's filters, or an AI target's AI filters (its
-            // sources and prefilter in the stage shape).
-            let filters: Vec<&Filter> = t
-                .filters
-                .iter()
-                .filter(|f| stage.is_mask() || f.ai.is_some())
-                .collect();
+    cfg.targets
+        .iter()
+        .enumerate()
+        .map(|(index, t)| {
+            let filters: Vec<&Filter> = t.filters.iter().collect();
             TargetView {
-                stage,
                 index,
+                folders: t.kind.is_folders(),
                 sources: filters
                     .iter()
                     .flat_map(|f| f.sources.iter().map(String::as_str))
@@ -418,36 +469,27 @@ pub fn warnings(cfg: &Config, d: &ConfigDraft) -> Vec<FieldWarning> {
             message,
         })
         .collect();
-    let mut views = views(cfg);
-    views.sort_by_key(|v| (v.stage as usize, v.index));
-    for v in &views {
-        let path = target_path(v.stage, v.index);
-        let draft = &d.targets.stage(v.stage).get(v.index);
-        if v.outputs.is_empty() {
+    for v in &views(cfg) {
+        let path = target_path(v.index);
+        let draft = d.targets.get(v.index);
+        if v.folders && v.outputs.is_empty() {
             w.push(FieldWarning {
                 path: format!("{path}.outputs"),
                 message: gallery_core::t!("edit.warn_no_outputs"),
             });
         }
-        if v.stage.is_mask() {
-            for (i, f) in draft
-                .map(|t| &t.filters[..])
-                .unwrap_or_default()
-                .iter()
-                .enumerate()
-            {
-                if f.sources.is_empty() {
-                    w.push(FieldWarning {
-                        path: format!("{path}.filters[{i}].sources"),
-                        message: gallery_core::t!("edit.warn_filter_no_sources"),
-                    });
-                }
+        for (i, f) in draft
+            .map(|t| &t.filters[..])
+            .unwrap_or_default()
+            .iter()
+            .enumerate()
+        {
+            if f.sources.is_empty() {
+                w.push(FieldWarning {
+                    path: format!("{path}.filters[{i}].sources"),
+                    message: gallery_core::t!("edit.warn_filter_no_sources"),
+                });
             }
-        } else if v.sources.is_empty() {
-            w.push(FieldWarning {
-                path: format!("{path}.sources"),
-                message: gallery_core::t!("edit.warn_ai_no_sources"),
-            });
         }
         for (oi, o) in v.outputs.iter().enumerate() {
             let op = format!("{path}.outputs[{oi}]");
@@ -515,21 +557,21 @@ mod tests {
             id: "cam".into(),
             ..Default::default()
         });
-        d.targets.after_ai.push(TargetDraft {
+        d.targets.push(TargetDraft {
             name: "T".into(),
             ..Default::default()
         });
-        d.targets.after_ai.push(TargetDraft {
+        d.targets.push(TargetDraft {
             name: "T".into(),
             ..Default::default()
         });
         assert_eq!(
             locate("target 'T': unknown source 'x'", &d).as_deref(),
-            Some("targets.after_ai[0]")
+            Some("targets[0]")
         );
         assert_eq!(
             locate("duplicate target name 'T'", &d).as_deref(),
-            Some("targets.after_ai[1]")
+            Some("targets[1]")
         );
         assert_eq!(
             locate(&gallery_core::t!("config.bad_source_id", id = "cam"), &d).as_deref(),
@@ -550,11 +592,19 @@ mod tests {
             ..Default::default()
         });
         for name in ["T", "T"] {
-            d.targets.after_ai.push(TargetDraft {
+            d.targets.push(TargetDraft {
                 name: name.into(),
                 ..Default::default()
             });
         }
+        let mut f = super::super::model::FilterDraft {
+            ai: Some("a".into()),
+            expand: Some("event".into()),
+            ..Default::default()
+        };
+        f.conditions
+            .insert("geo".into(), serde_json::json!("@home"));
+        d.targets[0].filters = vec![Default::default(), f];
         d.name_presets.push(NamePresetDraft {
             name: "Np".into(),
             ..Default::default()
@@ -576,13 +626,37 @@ mod tests {
                 let here = |what: &str| format!("{}: {what}", l.code);
                 assert_eq!(
                     at(t!("config.unknown_source", target = "T", id = "x")).as_deref(),
-                    Some("targets.after_ai[0]"),
+                    Some("targets[0]"),
                     "{}",
                     here("unknown_source")
                 );
                 assert_eq!(
+                    at(t!("config.expand_with_ai", name = "T")).as_deref(),
+                    Some("targets[0].filters[1].expand"),
+                    "{}",
+                    here("expand_with_ai")
+                );
+                assert_eq!(
+                    at(t!("config.unknown_place", target = "T", place = "home")).as_deref(),
+                    Some("targets[0].filters[1].geo"),
+                    "{}",
+                    here("unknown_place")
+                );
+                assert_eq!(
+                    at(t!("config.series_mismatch", target = "T")).as_deref(),
+                    Some("targets[0]"),
+                    "{}",
+                    here("series_mismatch")
+                );
+                assert_eq!(
+                    at(t!("config.kind_has_outputs", name = "T", kind = "trash")).as_deref(),
+                    Some("targets[0].outputs"),
+                    "{}",
+                    here("kind_has_outputs")
+                );
+                assert_eq!(
                     at(t!("config.duplicate_target", name = "T")).as_deref(),
-                    Some("targets.after_ai[1]"),
+                    Some("targets[1]"),
                     "{}",
                     here("duplicate_target")
                 );

@@ -14,7 +14,7 @@ const base: EditOutcome = {
   renames: [],
   draft: {
     sources: [],
-    targets: { before_ai: [], ai: [], after_ai: [] },
+    targets: [],
     masks: ["phone"],
     name_presets: [
       { name: "short", mask: null, template: "{date:YYYYMMDD}_{stem}.{ext}", date: "capture", skip_if: null, normalize_ext: null },

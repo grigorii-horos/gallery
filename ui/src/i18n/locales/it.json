@@ -908,6 +908,7 @@
   "settings_last": "Ultimo controllo: {{total, number}} da ordinare (pronti all’avvio {{ready, number}}, in attesa dell’IA {{ai, number}}).",
   "editor_not_applied": "Modifica non applicata: {{error}}",
   "editor_saved": "Salvato. La versione precedente è accanto, come gallery.toml.bak.",
+  "editor_saved_as": "Salvato. La versione precedente è accanto, come {{file}}.",
   "editor_moved": "Decisioni manuali spostate sul nuovo nome della destinazione: {{n, number}}.",
   "editor_not_moved": "Le decisioni non sono state spostate: {{error}}",
   "dialog_text_filter": "Testo",

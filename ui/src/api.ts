@@ -38,6 +38,10 @@ export interface FilterSummary {
   sources: string[];
   match: string | null;
   exclude: string | null;
+  /** AI category description. */
+  ai: string | null;
+  /** Keys of its other conditions (`date`, `near`, `expand`, ...). */
+  conditions: string[];
 }
 
 export interface StepSummary {
@@ -52,15 +56,15 @@ export interface OutputSummary {
   rename: StepSummary[];
 }
 
-export type Stage = "before_ai" | "ai" | "after_ai";
+/** What a target does with the files it takes. */
+export type TargetKind = "folders" | "trash" | "keep";
 
 export interface TargetSummary {
   name: string;
-  stage: Stage;
+  kind: TargetKind;
+  /** Some filter asks the AI. */
+  ai: boolean;
   filters: FilterSummary[];
-  sources: string[];
-  description: string | null;
-  prefilter: FilterSummary | null;
   outputs: OutputSummary[];
 }
 
@@ -91,7 +95,8 @@ export interface ConfigSummary {
   error: string | null;
   warnings: string[];
   sources: SourceSummary[];
-  targets: Record<Stage, TargetSummary[]>;
+  /** In order: the first target with a matching filter takes a file. */
+  targets: TargetSummary[];
   presets: PresetSet;
   ai: { model: string; effort: string; jobs: number };
 }

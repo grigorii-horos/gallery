@@ -20,9 +20,68 @@ pub fn read(path: &Path) -> std::io::Result<(String, String)> {
 
 /// The backup of `path`: `gallery.toml.bak` next to it.
 pub fn backup_path(path: &Path) -> PathBuf {
+    numbered_backup(path, 0)
+}
+
+/// `gallery.toml.bak` (`n = 0`), `gallery.toml.bak.1`, ...
+fn numbered_backup(path: &Path, n: usize) -> PathBuf {
     let mut name = path.file_name().unwrap_or_default().to_os_string();
     name.push(".bak");
+    if n > 0 {
+        name.push(format!(".{n}"));
+    }
     path.with_file_name(name)
+}
+
+/// The file at `p` is a config in the old three-stage shape.
+fn holds_old_shape(p: &Path) -> bool {
+    std::fs::read_to_string(p)
+        .ok()
+        .and_then(|t| t.parse::<toml_edit::DocumentMut>().ok())
+        .is_some_and(|d| super::migrate::is_old_shape(&d))
+}
+
+/// How the previous text is kept when the config is written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backup {
+    /// In `.bak`, replaced by the next save — unless it holds an old-shape
+    /// config (the copy made before the migration): then in the first
+    /// `.bak.N` that does not.
+    Rolling,
+    /// In the first of `.bak`, `.bak.1`, ... that does not exist; never
+    /// replaced (the original of an old-shape file).
+    Keep,
+}
+
+/// Copy `real` to its backup; the path written.
+fn back_up(real: &Path, how: Backup) -> std::io::Result<PathBuf> {
+    for n in 0.. {
+        let bak = numbered_backup(real, n);
+        match how {
+            Backup::Rolling if bak.exists() && holds_old_shape(&bak) => continue,
+            Backup::Rolling => {
+                std::fs::copy(real, &bak)?;
+                return Ok(bak);
+            }
+            Backup::Keep => {
+                // Created exclusively: an existing backup is never replaced.
+                let mut out = match std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(&bak)
+                {
+                    Ok(f) => f,
+                    Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
+                    Err(e) => return Err(e),
+                };
+                let bytes = std::fs::read(real)?;
+                out.write_all(&bytes)?;
+                out.sync_all()?;
+                return Ok(bak);
+            }
+        }
+    }
+    unreachable!("a free backup name")
 }
 
 /// The file was changed since `expected` was read.
@@ -40,9 +99,15 @@ impl From<std::io::Error> for WriteError {
 
 /// Replace the config at `path` (through a symlink: its target) with
 /// `text`, if it still has version `expected`: the new text goes to a
-/// temporary file in the same folder, the old one is copied to `.bak`, then
-/// the temporary file is renamed over it. Permissions are kept.
-pub fn write_atomic(path: &Path, expected: &str, text: &str) -> Result<(), WriteError> {
+/// temporary file in the same folder, the old one is copied to its backup
+/// (see [`Backup`]), then the temporary file is renamed over it.
+/// Permissions are kept. Returns the backup's path.
+pub fn write_atomic(
+    path: &Path,
+    expected: &str,
+    text: &str,
+    how: Backup,
+) -> Result<PathBuf, WriteError> {
     let real = std::fs::canonicalize(path)?;
     let dir = real.parent().unwrap_or(Path::new("."));
     let check = || -> Result<(), WriteError> {
@@ -61,13 +126,12 @@ pub fn write_atomic(path: &Path, expected: &str, text: &str) -> Result<(), Write
     tmp.write_all(text.as_bytes())?;
     tmp.as_file().sync_all()?;
     std::fs::set_permissions(tmp.path(), perms)?;
-    let bak = backup_path(&real);
-    std::fs::copy(&real, &bak)?;
+    let bak = back_up(&real, how)?;
     // Last look right before the swap: an outside save in between wins.
     check()?;
     tmp.persist(&real).map_err(|e| WriteError::Io(e.error))?;
     if let Ok(d) = std::fs::File::open(dir) {
         let _ = d.sync_all();
     }
-    Ok(())
+    Ok(bak)
 }

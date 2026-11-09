@@ -2,7 +2,7 @@
 // the little UI logic around them (which operations to send, dirty state,
 // drag-and-drop moves, field paths). What the edits do to the file is
 // computed in Rust.
-import type { PresetSet, Stage } from "../api";
+import type { PresetSet, TargetKind } from "../api";
 
 export interface SourceDraft {
   id: string;
@@ -22,11 +22,30 @@ export interface FilterDraft {
   /** null: any file. */
   match: string[] | null;
   exclude: string[];
+  /** AI category description; null: the filter does not ask the AI. */
+  ai?: string | null;
+  /** `"event"`: grow the match to whole events. */
+  expand?: string | null;
+  /** The other conditions as written in the file (TOML values as JSON), by key. */
+  conditions?: Record<string, unknown>;
 }
 
-export interface PrefilterDraft {
-  match: string[] | null;
-  exclude: string[];
+/** The keys of a filter that hold a condition. */
+export type ConditionKey = "date" | "geo" | "device" | "props" | "path" | "event" | "near" | "duplicate" | "series";
+
+/** One condition as the core reads it; `value` has the shape of the TOML value. */
+export interface ConditionValue {
+  key: ConditionKey;
+  value: unknown;
+}
+
+/** A named point of `[places]`. */
+export interface PlaceDraft {
+  name: string;
+  lat: number;
+  lon: number;
+  /** Radius in kilometres. */
+  km: number;
 }
 
 export interface StepDraft {
@@ -44,16 +63,16 @@ export interface OutputDraft {
 
 export interface TargetDraft {
   name: string;
+  kind: TargetKind;
   filters: FilterDraft[];
-  sources: string[];
-  description: string | null;
-  prefilter: PrefilterDraft | null;
   outputs: OutputDraft[];
 }
 
 export interface ConfigDraft {
   sources: SourceDraft[];
-  targets: Record<Stage, TargetDraft[]>;
+  places?: PlaceDraft[];
+  /** In order: the first target with a matching filter takes a file. */
+  targets: TargetDraft[];
   /** Names of the user's own masks. */
   masks: string[];
   name_presets?: NamePresetDraft[];
@@ -119,10 +138,15 @@ export type EditOp =
   | { op: "add_source"; source: SourceDraft }
   | { op: "update_source"; id: string; source: SourceDraft }
   | { op: "remove_source"; id: string }
-  | { op: "add_target"; stage: Stage; target: TargetDraft }
-  | { op: "update_target"; stage: Stage; index: number; target: TargetDraft }
-  | { op: "remove_target"; stage: Stage; index: number }
-  | { op: "move_target"; from: Stage; index: number; to: Stage; to_index: number }
+  | { op: "add_target"; kind: TargetKind; target?: TargetDraft }
+  | { op: "update_target"; index: number; target: TargetDraft }
+  | { op: "remove_target"; index: number }
+  | { op: "move_target"; from: number; to: number }
+  | { op: "set_target_kind"; name: string; kind: TargetKind }
+  | { op: "set_condition"; target: string; filter: number; condition: ConditionValue }
+  | { op: "remove_condition"; target: string; filter: number; key: ConditionKey | "ai" | "expand" }
+  | { op: "set_place"; name: string; place: { lat: number; lon: number; km: number } }
+  | { op: "remove_place"; name: string }
   | { op: "add_name_preset"; preset: NamePresetDraft }
   | { op: "update_name_preset"; name: string; preset: NamePresetDraft }
   | { op: "remove_name_preset"; name: string }
@@ -136,7 +160,7 @@ export type EditOp =
   | { op: "copy_builtin"; kind: PresetKind; from: string; to: string };
 
 export interface FieldIssue {
-  /** Field path: `sources[1].id`, `targets.after_ai[0].outputs[1].dir`; "" for the whole config. */
+  /** Field path: `sources[1].id`, `targets[0].outputs[1].dir`; "" for the whole config. */
   path: string;
   message: string;
 }
@@ -149,7 +173,6 @@ export interface FieldError {
 /// A target renamed by the edit; overrides name targets, so some may still
 /// point at `from`.
 export interface TargetRename {
-  stage: Stage;
   index: number;
   from: string;
   to: string;
@@ -161,6 +184,10 @@ export interface EditOutcome {
   draft: ConfigDraft;
   changed: boolean;
   saved: boolean;
+  /** The file is in the old three-stage shape: saving writes the new one after a backup. */
+  old_shape?: boolean;
+  /** File name of the backup this save wrote. */
+  backup?: string | null;
   error: FieldError | null;
   warnings: FieldIssue[];
   renames: TargetRename[];
@@ -205,7 +232,7 @@ export function maskItemKind(item: string): "not" | "ref" | "pattern" {
 export function pushOp(ops: EditOp[], op: EditOp): EditOp[] {
   const last = ops[ops.length - 1];
   if (last && op.op === "update_target" && last.op === "update_target") {
-    if (last.stage === op.stage && last.index === op.index) return [...ops.slice(0, -1), op];
+    if (last.index === op.index) return [...ops.slice(0, -1), op];
   }
   if (
     last &&
@@ -229,25 +256,15 @@ export function isDirty(ops: EditOp[], checked: { changed: boolean } | null): bo
   return checked ? checked.changed : true;
 }
 
-/// The move for a target dragged from `from` and dropped before item
-/// `before` of stage `to` (`before` = length: at the end); null when it
-/// would not move or cannot (AI targets stay in their stage).
-export function dropMove(
-  from: { stage: Stage; index: number },
-  to: Stage,
-  before: number,
-): Extract<EditOp, { op: "move_target" }> | null {
-  if ((from.stage === "ai") !== (to === "ai")) return null;
-  let toIndex = before;
-  if (from.stage === to) {
-    if (before === from.index || before === from.index + 1) return null;
-    if (before > from.index) toIndex = before - 1;
-  }
-  return { op: "move_target", from: from.stage, index: from.index, to, to_index: toIndex };
+/// The move for target `from` dragged and dropped before item `before`
+/// (`before` = length: at the end); null when it would not move.
+export function dropMove(from: number, before: number): Extract<EditOp, { op: "move_target" }> | null {
+  if (before === from || before === from + 1) return null;
+  return { op: "move_target", from, to: before > from ? before - 1 : before };
 }
 
-export function pathOf(stage: Stage, index: number): string {
-  return `targets.${stage}[${index}]`;
+export function pathOf(index: number): string {
+  return `targets[${index}]`;
 }
 
 /// Issues about `path` or a field below it.
@@ -272,17 +289,12 @@ export function relativeTo(file: string, config: string): string {
   return dir && file.startsWith(dir) ? file.slice(dir.length) : file;
 }
 
-export function emptyTarget(stage: Stage): TargetDraft {
-  return stage === "ai"
-    ? { name: "", filters: [], sources: [], description: "", prefilter: null, outputs: [] }
-    : {
-        name: "",
-        filters: [{ sources: [], match: null, exclude: [] }],
-        sources: [],
-        description: null,
-        prefilter: null,
-        outputs: [],
-      };
+export function emptyFilter(): FilterDraft {
+  return { sources: [], match: null, exclude: [], ai: null, expand: null, conditions: {} };
+}
+
+export function emptyTarget(kind: TargetKind = "folders"): TargetDraft {
+  return { name: "", kind, filters: [emptyFilter()], outputs: [] };
 }
 
 export function emptySource(): SourceDraft {

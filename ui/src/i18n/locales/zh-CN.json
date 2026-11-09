@@ -836,6 +836,7 @@
   "settings_last": "上次检查：待整理 {{total, number}} 个（可运行 {{ready, number}} 个，等待 AI {{ai, number}} 个）。",
   "editor_not_applied": "更改未应用：{{error}}",
   "editor_saved": "已保存。上一版本在旁边，名为 gallery.toml.bak。",
+  "editor_saved_as": "已保存。上一版本在旁边，名为 {{file}}。",
   "editor_moved": "手动决定已移到新的目标名称：{{n, number}}。",
   "editor_not_moved": "决定未能移动：{{error}}",
   "dialog_text_filter": "文本",

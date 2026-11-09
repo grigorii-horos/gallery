@@ -872,6 +872,7 @@
   "settings_last": "Letzte Prüfung: {{total, number}} zu sortieren (startbereit {{ready, number}}, warten auf KI {{ai, number}}).",
   "editor_not_applied": "Änderung nicht angewendet: {{error}}",
   "editor_saved": "Gespeichert. Die vorherige Version liegt daneben als gallery.toml.bak.",
+  "editor_saved_as": "Gespeichert. Die vorherige Version liegt daneben als {{file}}.",
   "editor_moved": "Manuelle Entscheidungen auf den neuen Zielnamen übertragen: {{n, number}}.",
   "editor_not_moved": "Entscheidungen wurden nicht übertragen: {{error}}",
   "dialog_text_filter": "Text",

@@ -908,6 +908,7 @@
   "settings_last": "Dernière vérification : {{total, number}} à trier (prêts à lancer {{ready, number}}, en attente de l’IA {{ai, number}}).",
   "editor_not_applied": "Modification non appliquée : {{error}}",
   "editor_saved": "Enregistré. La version précédente se trouve à côté, en gallery.toml.bak.",
+  "editor_saved_as": "Enregistré. La version précédente se trouve à côté, en {{file}}.",
   "editor_moved": "Décisions manuelles reportées sur le nouveau nom de cible : {{n, number}}.",
   "editor_not_moved": "Les décisions n’ont pas été reportées : {{error}}",
   "dialog_text_filter": "Texte",

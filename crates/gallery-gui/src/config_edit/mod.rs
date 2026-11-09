@@ -7,11 +7,17 @@
 //! Comments, blank lines and key order of untouched places stay
 //! byte-for-byte. A file changed outside since it was read is not
 //! overwritten: the UI must reload it.
+//!
+//! A file in the old three-stage shape is edited as the ordered list it
+//! migrates to (`migrate`): its first save writes the new shape, after a
+//! `.bak` copy of the original that no later save replaces.
 
 pub mod checks;
+pub mod cond;
 pub mod doc;
 pub mod file;
 pub mod limits;
+pub mod migrate;
 pub mod model;
 pub mod ops;
 pub mod order;
@@ -31,7 +37,8 @@ use serde::{Deserialize, Serialize};
 use toml_edit::DocumentMut;
 
 pub use checks::{FieldError, FieldWarning};
-pub use model::{ConfigDraft, Stage};
+pub use cond::ConditionValue;
+pub use model::{ConfigDraft, TargetKind};
 pub use ops::EditOp;
 pub use presets::Usage;
 
@@ -71,7 +78,6 @@ impl EditFailure {
 /// targets by name: the UI offers to move overrides to the new name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TargetRename {
-    pub stage: Stage,
     pub index: usize,
     pub from: String,
     pub to: String,
@@ -89,6 +95,11 @@ pub struct EditOutcome {
     /// The operations changed the text.
     pub changed: bool,
     pub saved: bool,
+    /// The file is in the old three-stage shape: saving writes the new one
+    /// (after a backup).
+    pub old_shape: bool,
+    /// The backup written by this save (its file name), if any.
+    pub backup: Option<String>,
     /// The edited config is invalid: it was not (and will not be) written.
     pub error: Option<FieldError>,
     pub warnings: Vec<FieldWarning>,
@@ -101,6 +112,9 @@ pub struct EditOutcome {
 }
 
 struct Applied {
+    /// The text before the operations (an old-shape file migrated).
+    base: String,
+    old_shape: bool,
     text: String,
     draft: ConfigDraft,
     result: Result<Config, FieldError>,
@@ -110,10 +124,7 @@ struct Applied {
 struct Edited {
     original: String,
     version: String,
-    text: String,
-    draft: ConfigDraft,
-    result: Result<Config, FieldError>,
-    renames: Vec<TargetRename>,
+    a: Applied,
 }
 
 fn read_doc(text: &str) -> Result<DocumentMut, EditFailure> {
@@ -125,18 +136,29 @@ fn read_doc(text: &str) -> Result<DocumentMut, EditFailure> {
     })
 }
 
+/// `text` as a document in the new shape (an old-shape one migrated), and
+/// whether it was old.
+pub fn ordered_doc(text: &str) -> Result<(DocumentMut, bool), EditFailure> {
+    let mut doc = read_doc(text)?;
+    let old = migrate::to_ordered(&mut doc).map_err(|m| EditFailure::new(FailureKind::Read, m))?;
+    Ok((doc, old))
+}
+
 /// Apply `ops` to `text` (the file at `path`) and check the result.
 fn edit_text(path: &Path, text: &str, ops: &[EditOp]) -> Result<Applied, EditFailure> {
-    let mut doc = read_doc(text)?;
+    let (mut doc, old_shape) = ordered_doc(text)?;
+    let base = if old_shape {
+        doc.to_string()
+    } else {
+        text.to_string()
+    };
     model_of(&doc)?;
     let mut renames: Vec<TargetRename> = Vec::new();
     for (i, op) in ops.iter().enumerate() {
         let old_name = match op {
-            EditOp::UpdateTarget { stage, index, .. } => model_of(&doc)?
-                .targets
-                .stage(*stage)
-                .get(*index)
-                .map(|t| t.name.clone()),
+            EditOp::UpdateTarget { index, .. } => {
+                model_of(&doc)?.targets.get(*index).map(|t| t.name.clone())
+            }
             _ => None,
         };
         ops::apply(&mut doc, op).map_err(|message| EditFailure {
@@ -144,27 +166,19 @@ fn edit_text(path: &Path, text: &str, ops: &[EditOp]) -> Result<Applied, EditFai
             message,
             op: Some(i),
         })?;
-        if let (
-            Some(from),
-            EditOp::UpdateTarget {
-                stage,
-                index,
-                target,
-            },
-        ) = (old_name, op)
+        if let (Some(from), EditOp::UpdateTarget { index, target }) = (old_name, op)
             && from != target.name
         {
             // A later rename of the same target continues the chain.
             match renames
                 .iter_mut()
-                .find(|r| r.stage == *stage && r.index == *index && r.to == from)
+                .find(|r| r.index == *index && r.to == from)
             {
                 Some(r) if r.from == target.name => {
-                    renames.retain(|r| !(r.stage == *stage && r.index == *index));
+                    renames.retain(|r| r.index != *index);
                 }
                 Some(r) => r.to = target.name.clone(),
                 None => renames.push(TargetRename {
-                    stage: *stage,
                     index: *index,
                     from,
                     to: target.name.clone(),
@@ -174,13 +188,15 @@ fn edit_text(path: &Path, text: &str, ops: &[EditOp]) -> Result<Applied, EditFai
         }
     }
     let new = if ops.is_empty() {
-        text.to_string()
+        base.clone()
     } else {
         doc.to_string()
     };
     let draft = model_of(&doc)?;
     let result = checks::validate(&new, path, &draft);
     Ok(Applied {
+        base,
+        old_shape,
         text: new,
         draft,
         result,
@@ -204,33 +220,49 @@ fn edit(path: &Path, ops: &[EditOp]) -> Result<Edited, EditFailure> {
     Ok(Edited {
         original,
         version,
-        text: a.text,
-        draft: a.draft,
-        result: a.result,
-        renames: a.renames,
+        a,
     })
 }
 
-fn outcome(e: Edited, version: String, saved: bool) -> EditOutcome {
-    let changed = e.text != e.original;
-    let (error, warnings) = match &e.result {
-        Ok(cfg) => (None, checks::warnings(cfg, &e.draft)),
+/// The warnings of an edited config (none when it is invalid), with the
+/// notice of the old shape.
+fn warnings_of(a: &Applied) -> (Option<FieldError>, Vec<FieldWarning>) {
+    let (error, mut warnings) = match &a.result {
+        Ok(cfg) => (None, checks::warnings(cfg, &a.draft)),
         Err(err) => (Some(err.clone()), Vec::new()),
     };
-    let own = parsed(&e.text).map(|cfg| crate::summary::UserPresets {
+    if a.old_shape {
+        warnings.insert(
+            0,
+            FieldWarning {
+                path: String::new(),
+                message: gallery_core::t!("edit.warn_old_shape"),
+            },
+        );
+    }
+    (error, warnings)
+}
+
+fn outcome(e: Edited, version: String, saved: bool, backup: Option<String>) -> EditOutcome {
+    let a = e.a;
+    let changed = a.text != a.base;
+    let (error, warnings) = warnings_of(&a);
+    let own = parsed(&a.text).map(|cfg| crate::summary::UserPresets {
         name: crate::presets::name_infos(&cfg.name_presets, &cfg),
         content: crate::presets::content_infos(&cfg.content_presets, &cfg),
         masks: crate::presets::mask_infos(&cfg.masks, &cfg),
     });
     EditOutcome {
         version,
-        usage: presets::usage(&e.draft),
-        draft: e.draft,
+        usage: presets::usage(&a.draft),
+        draft: a.draft,
         changed,
         saved,
+        old_shape: a.old_shape && !saved,
+        backup,
         error,
         warnings,
-        renames: e.renames,
+        renames: a.renames,
         own,
     }
 }
@@ -265,11 +297,7 @@ pub fn with_override_warnings(out: &mut EditOutcome, overrides: &Path) {
     let Ok(ov) = gallery_core::overrides::Overrides::load(overrides) else {
         return;
     };
-    let still_named = |name: &str| {
-        [Stage::BeforeAi, Stage::Ai, Stage::AfterAi]
-            .iter()
-            .any(|s| out.draft.targets.stage(*s).iter().any(|t| t.name == name))
-    };
+    let still_named = |name: &str| out.draft.targets.iter().any(|t| t.name == name);
     let kept: Vec<bool> = out.renames.iter().map(|r| still_named(&r.from)).collect();
     for (r, kept) in out.renames.iter_mut().zip(kept) {
         r.overrides = ov
@@ -283,7 +311,7 @@ pub fn with_override_warnings(out: &mut EditOutcome, overrides: &Path) {
                 gallery_core::t!("edit.rename_gone")
             };
             out.warnings.push(FieldWarning {
-                path: format!("{}.name", model::target_path(r.stage, r.index)),
+                path: format!("{}.name", model::target_path(r.index)),
                 message: gallery_core::tn!(
                     "edit.rename_decisions",
                     r.overrides,
@@ -309,7 +337,7 @@ pub fn draft(
         return Err(changed_failure());
     }
     let v = e.version.clone();
-    Ok(outcome(e, v, false))
+    Ok(outcome(e, v, false, None))
 }
 
 /// The saved config at `path` and the same config with `ops` applied (the
@@ -317,34 +345,41 @@ pub fn draft(
 /// message for the user (unreadable, or the draft is invalid).
 pub fn configs(path: &Path, ops: &[EditOp]) -> Result<(Config, Config), String> {
     let old = edit(path, &[]).map_err(|f| f.message)?;
-    let old = old.result.map_err(|e| e.message)?;
+    let old = old.a.result.map_err(|e| e.message)?;
     let new = edit(path, ops).map_err(|f| f.message)?;
-    let new = new.result.map_err(|e| e.message)?;
+    let new = new.a.result.map_err(|e| e.message)?;
     Ok((old, new))
 }
 
 /// Apply `ops` to the config at `path` and write it, if the file still has
 /// `version` and the result is valid. An invalid result is returned with
-/// its error and not written.
+/// its error and not written. An old-shape file is written in the new
+/// shape, after a backup of its original text that is never replaced.
 pub fn save(path: &Path, version: &str, ops: &[EditOp]) -> Result<EditOutcome, EditFailure> {
     let changed = changed_failure;
     let e = edit(path, ops)?;
     if e.version != version {
         return Err(changed());
     }
-    if e.result.is_err() || e.text == e.original {
+    if e.a.result.is_err() || e.a.text == e.a.base {
         let v = e.version.clone();
-        return Ok(outcome(e, v, false));
+        return Ok(outcome(e, v, false, None));
     }
-    file::write_atomic(path, version, &e.text).map_err(|w| match w {
+    let keep = if e.a.old_shape {
+        file::Backup::Keep
+    } else {
+        file::Backup::Rolling
+    };
+    let bak = file::write_atomic(path, version, &e.a.text, keep).map_err(|w| match w {
         file::WriteError::Changed => changed(),
         file::WriteError::Io(err) => EditFailure::new(
             FailureKind::Io,
             gallery_core::t!("edit.write_failed", path = path.display(), error = err),
         ),
     })?;
-    let v = file::version_of(e.text.as_bytes());
-    Ok(outcome(e, v, true))
+    let v = file::version_of(e.a.text.as_bytes());
+    let name = bak.file_name().map(|n| n.to_string_lossy().into_owned());
+    Ok(outcome(e, v, true, name))
 }
 
 /// One line of a [`ChangePreview`].
@@ -409,14 +444,12 @@ pub fn preview_change(
     if version.is_some_and(|v| v != e.version) {
         return Err(changed_failure());
     }
-    let (error, warnings) = match &e.result {
-        Ok(cfg) => (None, checks::warnings(cfg, &e.draft)),
-        Err(err) => (Some(err.clone()), Vec::new()),
-    };
+    let (error, warnings) = warnings_of(&e.a);
     Ok(ChangePreview {
         version: e.version.clone(),
-        changed: e.text != e.original,
-        diff: diff_lines(&e.original, &e.text),
+        changed: e.a.text != e.a.base,
+        // Against the file as it is: an old-shape file shows its rewrite.
+        diff: diff_lines(&e.original, &e.a.text),
         error,
         warnings,
     })
