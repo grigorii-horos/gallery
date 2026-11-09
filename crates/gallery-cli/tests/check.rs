@@ -135,6 +135,9 @@ fn unmatched_without_a_plan_sees_groups() {
             .assert()
             .success(),
     );
-    // a.jpg or b.jpg (the original) and c.jpg stay: two unmatched files.
+    // The original of the pair and c.jpg stay; the trashed copy is not listed.
     assert!(out.contains("2 files"), "{out}");
+    // One group of two files, 9 B = "same" (the original) + "other": the
+    // second copy of "same" is trashed by the rule, not unmatched.
+    assert!(out.contains("s\t.jpg\t2\t9 B\t"), "{out}");
 }
