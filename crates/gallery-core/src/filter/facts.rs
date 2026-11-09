@@ -184,6 +184,13 @@ pub fn facts_of(entry: &FileEntry, exif: &Value, tz: Option<Tz>) -> Facts {
     if tag_f64(exif, "Orientation").is_some_and(|o| (5.0..=8.0).contains(&o)) {
         std::mem::swap(&mut width, &mut height);
     }
+    // A video's QuickTime rotation of 90 or 270 degrees: played a quarter
+    // turn round, so a 1920x1080 clip shot upright is portrait.
+    if kind == MediaKind::Video
+        && tag_f64(exif, "Rotation").is_some_and(|r| matches!(r.rem_euclid(360.0), 90.0 | 270.0))
+    {
+        std::mem::swap(&mut width, &mut height);
+    }
 
     let audio_codec =
         first_str(exif, &["AudioFormat", "AudioCodecID"]).map(|s| audio_codec_name(&s));
@@ -573,6 +580,10 @@ impl<'de> Deserialize<'de> for GeoCond {
                     (None, None, None) => None,
                     _ => return Err(de::Error::custom(crate::t!("filter.bad_circle"))),
                 };
+                // No file without GPS lies in a circle: the table holds nothing.
+                if t.has_gps == Some(false) && circle.is_some() {
+                    return Err(de::Error::custom(crate::t!("filter.no_gps_in_circle")));
+                }
                 Ok(GeoCond {
                     places: Vec::new(),
                     circle,
@@ -1226,6 +1237,62 @@ home = { lat = 47.0245, lon = 28.8323, km = 2 }
         let mut p = pixel();
         p["IFD0:Orientation"] = json!(6);
         hit("props = { orientation = \"portrait\" }", "a.jpg", &p);
+    }
+
+    #[test]
+    fn rotated_video_swaps_dimensions() {
+        let mut v = video();
+        v["Track1:Rotation"] = json!(90);
+        hit("props = { orientation = \"portrait\" }", "v.mp4", &v);
+        v["Track1:Rotation"] = json!(270);
+        hit("props = { orientation = \"portrait\" }", "v.mp4", &v);
+        v["Track1:Rotation"] = json!(180);
+        hit("props = { orientation = \"landscape\" }", "v.mp4", &v);
+    }
+
+    #[test]
+    fn no_gps_together_with_a_circle_is_a_load_error() {
+        let e =
+            toml::from_str::<Filter>("geo = { has_gps = false, lat = 1.0, lon = 2.0, km = 3.0 }")
+                .unwrap_err()
+                .to_string();
+        assert!(e.contains(&crate::t!("filter.no_gps_in_circle")), "{e}");
+        assert!(
+            toml::from_str::<Filter>("geo = { has_gps = true, lat = 1.0, lon = 2.0, km = 3.0 }")
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn facts_fall_back_to_other_tags() {
+        let f = facts_of(
+            &entry("v.mp4"),
+            &json!({
+                "ExifIFD:ExifImageWidth": 640, "ExifIFD:ExifImageHeight": 480,
+                "Track1:MediaDuration": 12.5,
+                "Matroska:CodecID": "V_MPEGH/ISO/HEVC",
+            }),
+            None,
+        );
+        assert_eq!((f.width, f.height), (Some(640), Some(480)));
+        assert_eq!(f.duration_s, Some(12.5));
+        assert_eq!(f.video_codec.as_deref(), Some("hevc"));
+    }
+
+    #[test]
+    fn not_inverts_props_and_a_negated_path_mask() {
+        let p = pixel();
+        hit("props = { width = \"..1000\", not = true }", "a.jpg", &p);
+        let m = missed("props = { width = \">=1000\", not = true }", "a.jpg", &p);
+        assert_eq!(
+            (m.condition, m.detail),
+            ("props", crate::t!("filter.miss.negated"))
+        );
+        hit("path = \"!WhatsApp/**\"", "Camera/x.jpg", &p);
+        assert_eq!(
+            missed("path = \"!WhatsApp/**\"", "WhatsApp/x.jpg", &p).condition,
+            "path"
+        );
     }
 
     #[test]
