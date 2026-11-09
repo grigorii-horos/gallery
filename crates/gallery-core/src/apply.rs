@@ -1075,8 +1075,15 @@ impl Run<'_> {
                         .is_ok_and(|h| h == staged.hash),
                 }
         };
+        // The source's own path, or only a collision variant of its name
+        // (`<stem>_1.<ext>` because `<stem>.avif` was taken): renaming to
+        // that would change nothing but add a number.
         let at_source = |staged: &Staged| {
-            staged.wanted == item.source || same_file(&staged.wanted, &item.source)
+            staged.wanted == item.source
+                || same_file(&staged.wanted, &item.source)
+                || staged.wanted.parent().zip(src_dir).is_some_and(|(w, s)| {
+                    same_dir(w, s, true) && collision_variant(&staged.wanted, &item.source)
+                })
         };
         let in_src_dir = |staged: &Staged| {
             let w = staged.wanted.parent();
@@ -1720,6 +1727,21 @@ impl Run<'_> {
             }
         }
     }
+}
+
+/// Whether the name of `wanted` is the name of `source` with only a
+/// `_<n>` collision suffix (see [`reserve`]) added to its stem.
+fn collision_variant(wanted: &Path, source: &Path) -> bool {
+    let (Some(w), Some(s)) = (wanted.file_name(), source.file_name()) else {
+        return false;
+    };
+    let (w, s) = (w.to_string_lossy(), s.to_string_lossy());
+    let ((w_stem, w_ext), (s_stem, s_ext)) = (split_name(&w), split_name(&s));
+    w_ext.eq_ignore_ascii_case(&s_ext)
+        && w_stem
+            .strip_prefix(s_stem.as_str())
+            .and_then(|rest| rest.strip_prefix('_'))
+            .is_some_and(|n| !n.is_empty() && n.bytes().all(|b| b.is_ascii_digit()))
 }
 
 /// Whether a metadata step of the pipe sets the mtime from the capture date.
@@ -3071,6 +3093,18 @@ mod tests {
         assert_eq!(m & !0o644, 0, "{m:o}");
         assert_ne!(m & 0o400, 0, "{m:o}");
         assert_eq!(names_in(d.path()), [".gallery-tmp-x"]);
+    }
+
+    #[test]
+    fn collision_variants_of_the_source_name() {
+        let src = Path::new("/d/shot.png");
+        assert!(collision_variant(Path::new("/d/shot_1.png"), src));
+        assert!(collision_variant(Path::new("/d/shot_12.PNG"), src));
+        assert!(!collision_variant(Path::new("/d/shot.png"), src));
+        assert!(!collision_variant(Path::new("/d/shot_.png"), src));
+        assert!(!collision_variant(Path::new("/d/shot_1a.png"), src));
+        assert!(!collision_variant(Path::new("/d/shot_1.jpg"), src));
+        assert!(!collision_variant(Path::new("/d/20260412_103314.png"), src));
     }
 
     #[test]

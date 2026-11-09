@@ -412,3 +412,29 @@ fn a_metadata_step_after_the_fallback_stops_after_one_run() {
     assert!(again.items.is_empty(), "{again:?}");
     assert_eq!(again.unchanged, std::slice::from_ref(&src));
 }
+
+/// `<stem>.avif` is taken, so the plan reserved `<stem>_1.avif`; the
+/// fallback would be `<stem>_1.png`. That number is no name worth a
+/// rename: the source stays as it is.
+#[test]
+fn a_collision_numbered_fallback_name_keeps_the_source() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let d = d.path();
+    let root = d.join("src");
+    let src = tiny_png(&root, "shot.png");
+    std::fs::write(root.join("shot.avif"), b"another file").unwrap();
+    let orig = hash(&src);
+    let c = config(d, None, "", 72);
+    let plan = scan_plan(&c, d, &src);
+    assert_eq!(plan.items[0].outputs[0].dest, root.join("shot_1.avif"));
+    let (_, rep) = run_plan(d, &plan);
+    let r = &rep.items[0];
+    untouched(r);
+    assert!(r.outputs[0].renamed_from.is_none(), "{r:?}");
+    assert_eq!(r.outputs[0].actual.as_deref(), Some(src.as_path()));
+    assert_eq!(names(&root), ["shot.avif", "shot.png"]);
+    assert_eq!(hash(&src), orig);
+    let again = scan_plan(&c, d, &src);
+    assert!(again.items.is_empty(), "{again:?}");
+}
