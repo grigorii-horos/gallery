@@ -1,9 +1,11 @@
 //! External tool discovery, capability probing and command construction.
 
 use crate::{Error, Result};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// A command for an external tool: on unix in its own process group (Windows:
 /// a new process group, below), so a
@@ -28,6 +30,28 @@ fn tool_command(program: &Path) -> Command {
         );
     }
     cmd
+}
+
+/// First non-empty stdout line of `path arg`, cached per binary.
+fn version_line(path: &Path, arg: &str) -> Option<String> {
+    type Cache = HashMap<PathBuf, (u64, Option<SystemTime>, Option<String>)>;
+    static CACHE: Mutex<Option<Cache>> = Mutex::new(None);
+    let meta = std::fs::metadata(path).ok()?;
+    let stamp = (meta.len(), meta.modified().ok());
+    let mut cache = CACHE.lock().unwrap_or_else(|e| e.into_inner());
+    let cache = cache.get_or_insert_with(HashMap::new);
+    if let Some((len, modified, line)) = cache.get(path)
+        && (*len, *modified) == stamp
+    {
+        return line.clone();
+    }
+    let line = tool_command(path).arg(arg).output().ok().and_then(|out| {
+        let text = String::from_utf8_lossy(&out.stdout);
+        let line = text.lines().next().unwrap_or("").trim().to_string();
+        (!line.is_empty()).then_some(line)
+    });
+    cache.insert(path.to_path_buf(), (stamp.0, stamp.1, line.clone()));
+    line
 }
 
 /// Paths of the external tools gallery drives.
@@ -217,6 +241,24 @@ impl Tools {
             probe("optipng", o, "-version");
         }
         caps
+    }
+
+    /// First line of the version banner of each encoder a content pipe
+    /// runs (avifenc, ffmpeg, magick, optipng): an upgrade may make a file
+    /// smaller that was not before. Each banner is cached per binary (path,
+    /// size, mtime), so asking again costs a stat per tool.
+    pub fn encoder_versions(&self) -> BTreeMap<String, String> {
+        let mut list = vec![
+            ("avifenc", &self.avifenc, "--version"),
+            ("ffmpeg", &self.ffmpeg, "-version"),
+            ("magick", &self.magick, "-version"),
+        ];
+        if let Some(o) = &self.optipng {
+            list.push(("optipng", o, "-version"));
+        }
+        list.into_iter()
+            .filter_map(|(name, path, arg)| version_line(path, arg).map(|v| (name.to_string(), v)))
+            .collect()
     }
 
     /// Command for `tool`, run at lowest CPU and IO priority (nice/ionice on

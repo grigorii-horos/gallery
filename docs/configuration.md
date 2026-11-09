@@ -184,6 +184,14 @@ Safety-relevant behaviour of outputs (details in [architecture](architecture.md#
   content pipe is empty, the source is not copied or trashed: it is *renamed or moved* there
   (a file that already has the right name is left out of the plan as "unchanged"). This is how the
   "Screenshots" example in `examples/gallery.toml` sorts files into `year/month` folders without duplicating them.
+- **Already as small as it gets:** when an output in the source's own folder runs content steps but
+  the encoder result is not smaller, the source keeps its bytes: it is left where it is (or only
+  renamed in its folder), never copied over itself and trashed. Gallery remembers such a file
+  (`incompressible.json` in its cache folder, per file size and mtime, preset settings and encoder
+  versions), so the next scan lists it as unchanged instead of encoding it again. Editing the file,
+  changing the presets or upgrading an encoder tries again. Server plans (`server_dir`) cannot use
+  this: the desktop does not know what the server's runs found, so such files are planned again
+  each time; the server's apply still leaves them untouched, and nothing is lost.
 - An output with no `content` and no `rename` is a backup copy (byte for byte).
 
 ## Filter conditions
