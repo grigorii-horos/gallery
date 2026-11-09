@@ -101,16 +101,45 @@ pub fn install_hint(tool: &str) -> Option<String> {
             _ => return None,
         }
     } else {
-        match tool {
-            "ffmpeg" | "ffprobe" => "sudo apt install ffmpeg",
-            "exiftool" => "sudo apt install libimage-exiftool-perl",
-            "magick" => "sudo apt install imagemagick",
-            "avifenc" => "sudo apt install libavif-bin",
-            "optipng" => "sudo apt install optipng",
-            _ => return None,
-        }
+        let manager = LINUX_MANAGERS
+            .into_iter()
+            .find(|m| find(m).is_some())
+            .unwrap_or("apt");
+        return linux_hint(manager, tool);
     };
     Some(cmd.to_string())
+}
+
+/// Linux package managers a hint is given for, in the order they are looked
+/// for on `PATH` (apt last: some other distributions carry it too).
+const LINUX_MANAGERS: [&str; 4] = ["pacman", "dnf", "zypper", "apt"];
+
+/// The install command for `tool` with the Linux package `manager`.
+fn linux_hint(manager: &str, tool: &str) -> Option<String> {
+    let package = match (manager, tool) {
+        (_, "ffmpeg" | "ffprobe") => "ffmpeg",
+        (_, "optipng") => "optipng",
+        ("pacman", "exiftool") => "perl-image-exiftool",
+        ("pacman", "magick") => "imagemagick",
+        ("pacman", "avifenc") => "libavif",
+        ("dnf", "exiftool") => "perl-Image-ExifTool",
+        ("dnf", "magick") => "ImageMagick",
+        ("dnf", "avifenc") => "libavif-tools",
+        ("zypper", "exiftool") => "exiftool",
+        ("zypper", "magick") => "ImageMagick",
+        ("zypper", "avifenc") => "avif-tools",
+        (_, "exiftool") => "libimage-exiftool-perl",
+        (_, "magick") => "imagemagick",
+        (_, "avifenc") => "libavif-bin",
+        _ => return None,
+    };
+    let install = match manager {
+        "pacman" => "sudo pacman -S",
+        "dnf" => "sudo dnf install",
+        "zypper" => "sudo zypper install",
+        _ => "sudo apt install",
+    };
+    Some(format!("{install} {package}"))
 }
 
 /// First directory (in order) holding `name` or `name` + the platform exe suffix.
@@ -243,6 +272,39 @@ mod hint_tests {
             assert!(install_hint(t).is_some(), "{t}");
         }
         assert_eq!(install_hint("nope"), None);
+    }
+
+    #[test]
+    fn linux_hints_name_the_distribution_packages() {
+        let arch: Vec<String> = ["exiftool", "optipng", "ffmpeg", "magick", "avifenc"]
+            .iter()
+            .map(|t| linux_hint("pacman", t).unwrap())
+            .collect();
+        assert_eq!(
+            arch,
+            [
+                "sudo pacman -S perl-image-exiftool",
+                "sudo pacman -S optipng",
+                "sudo pacman -S ffmpeg",
+                "sudo pacman -S imagemagick",
+                "sudo pacman -S libavif",
+            ]
+        );
+        assert_eq!(
+            linux_hint("dnf", "exiftool").unwrap(),
+            "sudo dnf install perl-Image-ExifTool"
+        );
+        assert_eq!(
+            linux_hint("zypper", "magick").unwrap(),
+            "sudo zypper install ImageMagick"
+        );
+        assert_eq!(
+            linux_hint("apt", "avifenc").unwrap(),
+            "sudo apt install libavif-bin"
+        );
+        for m in LINUX_MANAGERS {
+            assert_eq!(linux_hint(m, "nope"), None);
+        }
     }
 
     #[test]
