@@ -669,6 +669,8 @@
   "effect_title": "Ефект",
   "effect_calculating": "обчислення…",
   "effect_working": "З’ясовуємо, що зміниться…",
+  "effect_counting": "рахуємо дублікати та різкість… {{done, number}} з {{total, number}}",
+  "effect_counting_aria": "Підрахунок дублікатів і різкості",
   "effect_none_one": "Зміни не зачеплять жодного з {{count, number}} файлу.",
   "effect_none_few": "Зміни не зачеплять жодного з {{count, number}} файлів.",
   "effect_none_many": "Зміни не зачеплять жодного з {{count, number}} файлів.",

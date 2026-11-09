@@ -669,6 +669,8 @@
   "effect_title": "Efekt",
   "effect_calculating": "obliczanie…",
   "effect_working": "Ustalanie, co się zmieni…",
+  "effect_counting": "liczenie duplikatów i ostrości… {{done, number}} z {{total, number}}",
+  "effect_counting_aria": "Liczenie duplikatów i ostrości",
   "effect_none_one": "Zmiany nie dotyczą żadnego z {{count, number}} pliku.",
   "effect_none_few": "Zmiany nie dotyczą żadnego z {{count, number}} plików.",
   "effect_none_many": "Zmiany nie dotyczą żadnego z {{count, number}} plików.",

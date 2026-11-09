@@ -66,6 +66,18 @@ describe("effect panel", () => {
     expect(screen.getByText("boom")).toBeInTheDocument();
   });
 
+  it("shows a counting hint with progress instead of looking frozen, then goes back to plain calculating", () => {
+    const { rerender } = render(<EffectPanel state={{ diff: null, loading: true, error: null, counting: { done: 40, total: 120 } }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("counting duplicates and sharpness… 40 of 120");
+    const bar = screen.getByRole("progressbar", { name: "Counting duplicates and sharpness" });
+    expect(bar).toHaveAttribute("max", "120");
+    expect(bar).toHaveAttribute("value", "40");
+    expect(screen.queryByText("calculating…")).toBeNull();
+    rerender(<EffectPanel state={{ diff, loading: true, error: null, counting: null }} />);
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByText("calculating…")).toBeInTheDocument();
+  });
+
   it("words a target line", () => {
     expect(targetLine({ name: "x", before: c({ unchanged: 1 }), after: c({ compressed: 2, renamed: 1 }), changed: 3 })).toBe(
       "takes 3 (was 1): 2 compressed, 1 renamed",
