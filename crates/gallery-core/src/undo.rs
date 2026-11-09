@@ -97,37 +97,90 @@ pub fn ensure_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<()> {
     }
 }
 
-/// The sources of the report's items that the plan routed to `target`
+/// The plan the report belongs to: `plan`, else the one the report names,
+/// else the file next to the report.
+fn plan_for(report_path: &Path, report: &Report, plan: Option<&Path>) -> Result<Plan> {
+    let no_plan = || Error::Plan(crate::t!("undo.no_plan"));
+    let path = match plan {
+        Some(p) => p.to_path_buf(),
+        None if report.plan.is_file() => report.plan.clone(),
+        None => {
+            let name = report_path.file_name().and_then(|n| n.to_str());
+            name.and_then(|n| n.rfind(".report.").map(|i| &n[..i]))
+                .map(|stem| report_path.with_file_name(format!("{stem}.json")))
+                .ok_or_else(no_plan)?
+        }
+    };
+    if !path.is_file() {
+        return Err(no_plan());
+    }
+    Plan::load(&path)
+}
+
+/// The target of each item of the report. A report written since targets
+/// were recorded says it itself; for an older one the plan item of the same
+/// source counts only when its planned outputs are the report item's: a plan
+/// rescanned since may route the file elsewhere, and such an item has no
+/// known target (it is left out).
+pub fn item_targets(report: &Report, plan: Option<&Plan>) -> HashMap<PathBuf, String> {
+    let planned = |outs: &mut dyn Iterator<Item = &PathBuf>| {
+        let mut v: Vec<PathBuf> = outs.cloned().collect();
+        v.sort();
+        v
+    };
+    let by_source: HashMap<&PathBuf, &crate::plan::PlanItem> = plan
+        .map(|p| p.items.iter().map(|it| (&it.source, it)).collect())
+        .unwrap_or_default();
+    let mut map = HashMap::new();
+    for it in &report.items {
+        let target = match &it.target {
+            Some(t) => Some(t.clone()),
+            None => by_source.get(&it.source).and_then(|pi| {
+                let same = planned(&mut pi.outputs.iter().map(|o| &o.dest))
+                    == planned(&mut it.outputs.iter().map(|o| &o.planned));
+                same.then(|| pi.target.clone())
+            }),
+        };
+        if let Some(t) = target {
+            map.insert(it.source.clone(), t);
+        }
+    }
+    map
+}
+
+/// The target of each item of the report at `report_path` (see
+/// [`item_targets`]); the plan is read only for items without a recorded
+/// target, and its absence just leaves those out.
+pub fn report_targets(report_path: &Path, report: &Report) -> HashMap<PathBuf, String> {
+    let plan = if report.items.iter().any(|it| it.target.is_none()) {
+        plan_for(report_path, report, None).ok()
+    } else {
+        None
+    };
+    item_targets(report, plan.as_ref())
+}
+
+/// The sources of the report's items that were routed to `target`
 /// (`folders` and `trash` targets alike; a `keep` target's files are not in
-/// a report). The plan is the one the report names, else the file next to
-/// the report. An error when no item of the report belongs to the target.
+/// a report), the unfinished run's journal merged in. An error when no item
+/// of the report is known to belong to the target.
 pub fn target_sources(
     report_path: &Path,
     plan: Option<&Path>,
     target: &str,
 ) -> Result<Vec<PathBuf>> {
-    let report = read_report(report_path)?;
-    let plan = match plan {
-        Some(p) => Plan::load(p)?,
-        None if report.plan.is_file() => Plan::load(&report.plan)?,
-        None => {
-            let name = report_path.file_name().and_then(|n| n.to_str());
-            let sibling = name
-                .and_then(|n| n.rfind(".report.").map(|i| &n[..i]))
-                .map(|stem| report_path.with_file_name(format!("{stem}.json")));
-            Plan::load(&sibling.ok_or_else(|| Error::Plan(crate::t!("undo.no_plan")))?)?
-        }
+    let mut report = read_report(report_path)?;
+    merge_journal(report_path, &mut report)?;
+    let plan = if plan.is_some() || report.items.iter().any(|it| it.target.is_none()) {
+        Some(plan_for(report_path, &report, plan)?)
+    } else {
+        None
     };
-    let in_target: HashSet<&PathBuf> = plan
-        .items
-        .iter()
-        .filter(|it| it.target == target)
-        .map(|it| &it.source)
-        .collect();
+    let targets = item_targets(&report, plan.as_ref());
     let sources: Vec<PathBuf> = report
         .items
         .iter()
-        .filter(|it| in_target.contains(&it.source))
+        .filter(|it| targets.get(&it.source).is_some_and(|t| t == target))
         .map(|it| it.source.clone())
         .collect();
     if sources.is_empty() {
@@ -816,6 +869,7 @@ mod tests {
                 }],
                 error: None,
                 elapsed_ms: None,
+                target: None,
             }],
         );
         let s = undo(&rp).unwrap();
@@ -850,6 +904,7 @@ mod tests {
             outputs: vec![output(out)],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         let rp = save(d.path(), vec![done(&a, &ta, &oa), done(&b, &tb, &ob)]);
         let read =
@@ -897,6 +952,7 @@ mod tests {
             outputs: vec![output(out)],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         // The last snapshot has a.jpg still in progress (no outputs yet) and
         // misses b.jpg; the run died before finishing.
@@ -962,6 +1018,7 @@ mod tests {
                 ],
                 error: None,
                 elapsed_ms: None,
+                target: None,
             }],
         );
         let s = undo(&rp).unwrap();
@@ -994,6 +1051,7 @@ mod tests {
             outputs: vec![output(out)],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         // Item 2 comes first, so its place is still taken on the first pass.
         let rp = save(
@@ -1039,6 +1097,7 @@ mod tests {
             }],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         let rp = save(
             d.path(),
@@ -1085,6 +1144,7 @@ mod tests {
             }],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         let rp = save(
             d.path(),
@@ -1120,6 +1180,7 @@ mod tests {
                 outputs: vec![o],
                 error: None,
                 elapsed_ms: None,
+                target: None,
             }],
         );
         let s = undo(&rp).unwrap();
@@ -1144,6 +1205,7 @@ mod tests {
             outputs,
             error: None,
             elapsed_ms: None,
+            target: None,
         }
     }
 
@@ -1386,6 +1448,7 @@ mod cancel_tests {
                 }],
                 error: None,
                 elapsed_ms: None,
+                target: None,
             });
             pairs.push((src, out));
         }

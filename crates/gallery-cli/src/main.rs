@@ -1455,9 +1455,15 @@ fn failure_reason(it: &ItemResult) -> String {
 
 /// The sources `--file` and `--target` select (empty: the whole run).
 fn undo_selection(report: &Path, files: &[PathBuf], targets: &[String]) -> Result<Vec<PathBuf>> {
+    // The report records absolute paths: a relative `--file` is resolved
+    // against the working directory.
+    let files: Vec<PathBuf> = files
+        .iter()
+        .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
+        .collect();
     let mut sources: Vec<PathBuf> = Vec::new();
-    undo::ensure_in_report(report, files)?;
-    sources.extend(files.iter().cloned());
+    undo::ensure_in_report(report, &files)?;
+    sources.extend(files);
     for t in targets {
         sources.extend(undo::target_sources(report, None, t)?);
     }
@@ -1468,12 +1474,12 @@ fn undo_selection(report: &Path, files: &[PathBuf], targets: &[String]) -> Resul
 
 fn undo_cmd(report: &Path, files: &[PathBuf], targets: &[String]) -> Result<()> {
     let partial = !files.is_empty() || !targets.is_empty();
+    let _global = gallery_core::lock::acquire_apply()?;
     let sources = if partial {
         undo_selection(report, files, targets)?
     } else {
         Vec::new()
     };
-    let _global = gallery_core::lock::acquire_apply()?;
     let cancel = cancel_on_ctrl_c(false);
     let line = Line::new();
     let s = if partial {
@@ -1636,6 +1642,7 @@ mod tests {
             ],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         assert_eq!(failure_reason(&it), "/o/b.avif: avifenc: boom");
         it.error = Some("trash: denied".into());

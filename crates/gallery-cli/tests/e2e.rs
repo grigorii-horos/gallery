@@ -304,6 +304,17 @@ outputs = [{{ dir = "{out}/rest" }}]
     assert!(live(&out.join("rest")).is_empty());
     assert_eq!(live(&out.join("texts")), ["a.txt", "b.txt"]);
 
+    // A relative path is taken against the working directory.
+    gallery()
+        .current_dir(&src)
+        .arg("undo")
+        .arg(&report)
+        .args(["--file", "a.txt"])
+        .assert()
+        .success();
+    assert_eq!(live(&src), ["a.txt", "c.dat"]);
+    assert_eq!(live(&out.join("texts")), ["b.txt"]);
+
     // A path that is not in the run, an unknown target: refused, nothing moves.
     gallery()
         .arg("undo")
@@ -318,7 +329,7 @@ outputs = [{{ dir = "{out}/rest" }}]
         .args(["--target", "nope"])
         .assert()
         .failure();
-    assert_eq!(live(&src), ["c.dat"]);
+    assert_eq!(live(&src), ["a.txt", "c.dat"]);
 
     // One target (trash kind).
     gallery()
@@ -327,8 +338,8 @@ outputs = [{{ dir = "{out}/rest" }}]
         .args(["--target", "junk"])
         .assert()
         .success();
-    assert_eq!(live(&src), ["c.dat", "d.tmp"]);
-    assert_eq!(live(&out.join("texts")), ["a.txt", "b.txt"]);
+    assert_eq!(live(&src), ["a.txt", "c.dat", "d.tmp"]);
+    assert_eq!(live(&out.join("texts")), ["b.txt"]);
 
     // The full undo skips the done items and finishes the run.
     gallery().arg("undo").arg(&report).assert().success();

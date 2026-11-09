@@ -2483,6 +2483,7 @@ mod tests {
             outputs: vec![],
             error: Some("boom".into()),
             elapsed_ms: None,
+            target: None,
         };
         let fail = ItemStatus::Failed { trashed: None };
         let report = Report {
