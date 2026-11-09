@@ -70,6 +70,7 @@ fn item(src: &Path, root: &Path, dests: &[PathBuf]) -> PlanItem {
             })
             .collect(),
         kind: Default::default(),
+        captured: None,
     }
 }
 

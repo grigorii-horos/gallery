@@ -88,6 +88,12 @@ pub struct PlanItem {
     /// for other items, items without such outputs, and in older plans.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ai_meta: Option<AiMeta>,
+    /// When the file was captured (`YYYY-MM-DDTHH:MM:SS`, local), if known.
+    /// Set on `trash` items only: the last-copy guard may turn one into a
+    /// review item, which the GUI groups into series by it. Absent in older
+    /// plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub captured: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -479,6 +485,7 @@ pub fn build_plan_with(
                     kind: TargetKind::Trash,
                     outputs: Vec::new(),
                     ai_meta: None,
+                    captured: captured(capture()),
                 });
                 continue;
             }
@@ -689,6 +696,7 @@ pub fn build_plan_with(
             kind: TargetKind::Folders,
             outputs,
             ai_meta,
+            captured: None,
         });
     }
 
@@ -823,7 +831,7 @@ pub fn guard_last_copies(plan: &mut Plan, groups: &Groups, files: &[FileEntry]) 
             mtime_ns: it.mtime_ns,
             suggested: it.target,
             reason: crate::t!("plan.last_copy_kept"),
-            captured: None,
+            captured: it.captured,
             source_root: Some(it.source_root),
             name_error: false,
             series: None,
@@ -2401,6 +2409,7 @@ mod tests {
                 trace: vec![],
             }],
             kind: Default::default(),
+            captured: None,
         }
     }
 
@@ -2599,6 +2608,7 @@ mod tests {
                 trace: vec![],
             }],
             kind: Default::default(),
+            captured: None,
         }
     }
 

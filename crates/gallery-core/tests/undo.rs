@@ -54,6 +54,7 @@ fn item(src: &Path, root: &Path, outs: Vec<(PathBuf, Vec<&str>)>) -> PlanItem {
             })
             .collect(),
         kind: Default::default(),
+        captured: None,
     }
 }
 
