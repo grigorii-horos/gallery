@@ -869,6 +869,8 @@
   "kind_keep": "Behalten",
   "kind_trash_hint": "Dateien kommen in den Papierkorb, nachdem alles andere abgelegt ist; nie die letzte Kopie.",
   "kind_keep_hint": "Dateien bleiben, wo sie sind, und gelten als erledigt.",
+  "kind_drop_outputs": "Diese Art hat keine Ausgaben: Beim Wechsel werden die Ausgaben dieses Ziels entfernt.",
+  "kind_drop_outputs_ok": "Ausgaben entfernen und wechseln",
   "cond_add": "+ Bedingung",
   "cond_remove": "{{name}} entfernen",
   "cond_not": "Nicht (umkehren)",

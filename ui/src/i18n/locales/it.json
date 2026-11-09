@@ -905,6 +905,8 @@
   "kind_keep": "Mantieni",
   "kind_trash_hint": "I file vanno nel cestino dopo che tutto il resto è stato sistemato; mai l'ultima copia.",
   "kind_keep_hint": "I file restano dove sono e contano come gestiti.",
+  "kind_drop_outputs": "Questo tipo non ha output: cambiando, gli output di questa destinazione vengono rimossi.",
+  "kind_drop_outputs_ok": "Rimuovi output e cambia",
   "cond_add": "+ condizione",
   "cond_remove": "Rimuovi {{name}}",
   "cond_not": "Non (inverti)",

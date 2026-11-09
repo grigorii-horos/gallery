@@ -941,6 +941,8 @@
   "kind_keep": "Zostaw",
   "kind_trash_hint": "Pliki trafiają do kosza po umieszczeniu wszystkiego innego; nigdy ostatnia kopia.",
   "kind_keep_hint": "Pliki zostają na miejscu i są uznane za obsłużone.",
+  "kind_drop_outputs": "Ten rodzaj nie ma wyników: zmiana usuwa wyniki tego celu.",
+  "kind_drop_outputs_ok": "Usuń wyniki i zmień",
   "cond_add": "+ warunek",
   "cond_remove": "Usuń: {{name}}",
   "cond_not": "Nie (odwróć)",

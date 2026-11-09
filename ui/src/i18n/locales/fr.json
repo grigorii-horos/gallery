@@ -905,6 +905,8 @@
   "kind_keep": "Garder",
   "kind_trash_hint": "Les fichiers vont à la corbeille une fois tout le reste placé ; jamais la dernière copie.",
   "kind_keep_hint": "Les fichiers restent où ils sont et comptent comme traités.",
+  "kind_drop_outputs": "Ce type n'a pas de sorties : le changement supprime les sorties de cette cible.",
+  "kind_drop_outputs_ok": "Supprimer les sorties et changer",
   "cond_add": "+ condition",
   "cond_remove": "Retirer {{name}}",
   "cond_not": "Non (inverser)",

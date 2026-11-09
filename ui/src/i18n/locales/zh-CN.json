@@ -833,6 +833,8 @@
   "kind_keep": "保留",
   "kind_trash_hint": "其余文件都放好后，这些文件才会移入回收站；绝不会删除最后一份副本。",
   "kind_keep_hint": "文件留在原处，视为已处理。",
+  "kind_drop_outputs": "此类型没有输出：切换后将移除此目标的输出。",
+  "kind_drop_outputs_ok": "移除输出并切换",
   "cond_add": "+ 条件",
   "cond_remove": "移除{{name}}",
   "cond_not": "非（取反）",

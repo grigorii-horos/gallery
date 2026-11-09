@@ -905,6 +905,8 @@
   "kind_keep": "Manter",
   "kind_trash_hint": "Os arquivos vão para a lixeira depois que todo o resto é colocado; nunca a última cópia.",
   "kind_keep_hint": "Os arquivos ficam onde estão e contam como tratados.",
+  "kind_drop_outputs": "Este tipo não tem saídas: ao trocar, as saídas deste destino são removidas.",
+  "kind_drop_outputs_ok": "Remover saídas e trocar",
   "cond_add": "+ condição",
   "cond_remove": "Remover {{name}}",
   "cond_not": "Não (inverter)",

@@ -869,6 +869,8 @@
   "kind_keep": "Keep",
   "kind_trash_hint": "Files go to the trash after everything else is placed; never the last copy.",
   "kind_keep_hint": "Files stay where they are and count as handled.",
+  "kind_drop_outputs": "This kind has no outputs: switching removes this target's outputs.",
+  "kind_drop_outputs_ok": "Remove outputs and switch",
   "cond_add": "+ condition",
   "cond_remove": "Remove {{name}}",
   "cond_not": "Not (invert)",

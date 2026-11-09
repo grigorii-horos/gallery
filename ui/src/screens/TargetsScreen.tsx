@@ -156,6 +156,9 @@ function targetMeta(tg: TargetDraft): string {
   return dirs.join(", ");
 }
 
+let filterKeySeq = 0;
+const nextFilterKey = () => `filter-${++filterKeySeq}`;
+
 function TargetForm({
   target,
   index,
@@ -173,6 +176,9 @@ function TargetForm({
 }) {
   const { t } = useTranslation();
   const [form, setForm] = useState(target);
+  // Stable keys for the filters, so removing one does not hand its
+  // editors' local state to the next filter.
+  const [filterKeys, setFilterKeys] = useState(() => target.filters.map(() => nextFilterKey()));
   const v = editor.view!;
   const path = pathOf(index);
   const sourceIds = v.draft.sources.map((s) => s.id);
@@ -198,6 +204,19 @@ function TargetForm({
 
   const ownErr = errors.find((e) => e.path === path)?.message ?? null;
 
+  // Trash and keep targets have no outputs: leaving folders with outputs
+  // asks first and then drops them, so no hidden outputs block the save.
+  const [pendingKind, setPendingKind] = useState<TargetKind | null>(null);
+  const switchKind = (kind: TargetKind) => {
+    if (kind === form.kind) return;
+    if (form.kind === "folders" && kind !== "folders" && form.outputs.length > 0) {
+      setPendingKind(kind);
+      return;
+    }
+    setPendingKind(null);
+    update({ ...form, kind });
+  };
+
   return (
     <div className="detail form">
       <div className="form-head">
@@ -205,7 +224,7 @@ function TargetForm({
       </div>
       <Issues items={[]} error={errAt(".name") ?? ownErr} />
       <Field label={t("targets_kind")} hint={form.kind === "trash" ? t("kind_trash_hint") : form.kind === "keep" ? t("kind_keep_hint") : undefined}>
-        <select className="select" aria-label={t("targets_kind")} value={form.kind} onChange={(e) => update({ ...form, kind: e.target.value as TargetKind })}>
+        <select className="select" aria-label={t("targets_kind")} value={form.kind} onChange={(e) => switchKind(e.target.value as TargetKind)}>
           {(["folders", "trash", "keep"] as const).map((k) => (
             <option key={k} value={k}>
               {t(`kind_${k}`)}
@@ -213,6 +232,26 @@ function TargetForm({
           ))}
         </select>
       </Field>
+      {pendingKind && (
+        <div className="notice warn" role="alertdialog" aria-label={t("kind_drop_outputs")}>
+          <p className="notice-text">{t("kind_drop_outputs")}</p>
+          <div className="form-tools">
+            <button
+              type="button"
+              className="btn danger"
+              onClick={() => {
+                setPendingKind(null);
+                update({ ...form, kind: pendingKind, outputs: [] });
+              }}
+            >
+              {t("kind_drop_outputs_ok")}
+            </button>
+            <button type="button" className="btn quiet" onClick={() => setPendingKind(null)}>
+              {t("cancel")}
+            </button>
+          </div>
+        </div>
+      )}
       <div className="form-tools">
         <button type="button" className="btn quiet" disabled={index === 0} onClick={() => structural({ op: "move_target", from: index, to: index - 1 }, index - 1)}>
           {t("targets_up")}
@@ -230,7 +269,7 @@ function TargetForm({
       {form.filters.length === 0 && <p className="notice warn">{t("targets_no_filters")}</p>}
       <ul className="filters">
         {form.filters.map((f, i) => (
-          <li key={i}>
+          <li key={filterKeys[i] ?? `extra-${i}`}>
             <FilterEditor
               value={f}
               sourceIds={sourceIds}
@@ -242,12 +281,22 @@ function TargetForm({
               editor={editor}
               configPath={data.configPath}
               onChange={(nf) => update({ ...form, filters: form.filters.map((x, j) => (j === i ? nf : x)) })}
-              onRemove={() => update({ ...form, filters: form.filters.filter((_, j) => j !== i) })}
+              onRemove={() => {
+                setFilterKeys((ks) => ks.filter((_, j) => j !== i));
+                update({ ...form, filters: form.filters.filter((_, j) => j !== i) });
+              }}
             />
           </li>
         ))}
       </ul>
-      <button type="button" className="link small" onClick={() => update({ ...form, filters: [...form.filters, emptyFilter()] })}>
+      <button
+        type="button"
+        className="link small"
+        onClick={() => {
+          setFilterKeys((ks) => [...ks, nextFilterKey()]);
+          update({ ...form, filters: [...form.filters, emptyFilter()] });
+        }}
+      >
         {t("targets_add_filter")}
       </button>
 
