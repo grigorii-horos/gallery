@@ -136,6 +136,7 @@
   "apply.exif_not_read": "EXIF não lido: %{error}; origem intocada",
   "apply.earlier_failed": "ignorado: uma saída anterior falhou",
   "apply.kept_in_place": "mantido no lugar: a origem já tem este nome",
+  "apply.already_smallest": "já está o menor possível — mantido como está",
   "apply.ai_meta_unwritable": "o exiftool não grava %{container}: palavras-chave da IA não gravadas",
   "apply.ai_meta_failed": "palavras-chave da IA não gravadas: %{error}",
   "apply.discrepancy_allowed": "divergência permitida: %{message}",

@@ -138,6 +138,7 @@
   "apply.exif_not_read": "EXIF не прочитано: %{error}; джерело не чіпали",
   "apply.earlier_failed": "пропущено: попередній вихід не вдався",
   "apply.kept_in_place": "залишено на місці: у джерела вже таке ім’я",
+  "apply.already_smallest": "менше вже не зробити — залишено як є",
   "apply.ai_meta_unwritable": "exiftool не пише %{container}: ключові слова ШІ не записано",
   "apply.ai_meta_failed": "ключові слова ШІ не записано: %{error}",
   "apply.discrepancy_allowed": "розбіжність допущено: %{message}",

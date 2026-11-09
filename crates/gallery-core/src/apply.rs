@@ -11,6 +11,12 @@
 //!   is renamed in its folder or moved into a folder inside its source root
 //!   (no-overwrite, never copied) only after every written output is in place
 //!   and only if it is still the file the plan saw;
+//! - a processed output that comes out as the source's very bytes (the pipe
+//!   could not make the file smaller) never replaces the source: at the
+//!   source's own path the source just stays, under another name in its
+//!   folder the source is renamed; either way it is not trashed, and the
+//!   file is remembered (see [`crate::incompressible`]) so that planning
+//!   keeps it in place next time;
 //! - a `trash` target's file has no outputs: it goes to the trash directly,
 //!   after every placement of the run, and only if it is still the file the
 //!   plan saw; a `keep` target's file is not in the items at all.
@@ -1041,14 +1047,72 @@ impl Run<'_> {
             discard(&ready);
             return;
         }
+        // An output that is the source's own bytes (a pipe that could not
+        // make the file smaller fell back to it) never replaces the source:
+        // wanted at the source's own path, the source just stays (nothing
+        // written, nothing trashed); wanted under another name in the
+        // source's folder, the source is renamed instead of copied and
+        // trashed, unless another output already consumes it. Only for
+        // processed outputs: a byte copy's place is decided by the plan
+        // (a Keep or Rename output when it is the source).
+        let renames = item.outputs.iter().any(|o| o.op == OutputOp::Rename);
+        let src_dir = item.source.parent();
+        let mut identical = |staged: &Staged| {
+            staged.len == item.size
+                && match &source_hash {
+                    Some(h) => *h == staged.hash,
+                    None => file_hash(&item.source)
+                        .inspect(|h| source_hash = Some(h.clone()))
+                        .is_ok_and(|h| h == staged.hash),
+                }
+        };
+        let at_source = |staged: &Staged| {
+            staged.wanted == item.source || same_file(&staged.wanted, &item.source)
+        };
+        let in_src_dir = |staged: &Staged| {
+            let w = staged.wanted.parent();
+            w.zip(src_dir).is_some_and(|(w, s)| same_dir(w, s, true))
+        };
+        let processed = |k: usize| !item.outputs[k].steps.is_empty();
+        let mut stays_at: Vec<usize> = Vec::new();
+        let mut rename_to: Option<(usize, PathBuf)> = None;
+        for (k, staged) in &ready {
+            if processed(*k) && !renames && at_source(staged) && identical(staged) {
+                stays_at.push(*k);
+            }
+        }
+        if !consumes && stays_at.is_empty() {
+            rename_to = ready
+                .iter()
+                .find(|(k, s)| processed(*k) && in_src_dir(s) && identical(s))
+                .map(|(k, s)| (*k, s.wanted.clone()));
+        }
+        let source_stays = consumes || !stays_at.is_empty() || rename_to.is_some();
+        let mut ready_rest = Vec::with_capacity(ready.len());
+        for (k, staged) in ready {
+            let kept = stays_at.contains(&k);
+            if kept || rename_to.as_ref().is_some_and(|(r, _)| *r == k) {
+                let _ = std::fs::remove_file(&staged.path);
+                let out = &mut res.outputs[k];
+                out.warnings.push(crate::t!("apply.already_smallest"));
+                if kept {
+                    // The output is the source itself, where it already is.
+                    out.actual = Some(item.source.clone());
+                    out.size = Some(item.size);
+                    out.hash = Some(staged.hash.clone());
+                }
+                continue;
+            }
+            ready_rest.push((k, staged));
+        }
         // Decided by where the result goes: a fallback that keeps the
         // source's extension can land on the source path too. A source
         // that stays (renamed or kept) is never replaced: such an output
         // gets the next free name instead.
-        let mut ready = ready.into_iter();
+        let mut ready = ready_rest.into_iter();
         while let Some((k, staged)) = ready.next() {
             let out = &mut res.outputs[k];
-            if !consumes && staged.wanted == item.source {
+            if !source_stays && staged.wanted == item.source {
                 in_place.push((k, staged));
                 continue;
             }
@@ -1075,8 +1139,17 @@ impl Run<'_> {
                 .open(&item.source)
                 .and_then(|mut f| f.write_all(b"changed"));
         }
-        if consumes {
-            self.consume(item, res, source_hash);
+        if source_stays {
+            let renamed = rename_to.as_ref().map(|(k, _)| *k);
+            self.consume(item, res, source_hash, rename_to);
+            // Remember what could not be made smaller, where it now is, so
+            // the next scan does not encode it again.
+            if matches!(res.status, ItemStatus::Done { .. }) {
+                for k in stays_at.iter().copied().chain(renamed) {
+                    let at = res.outputs[k].actual.clone();
+                    self.remember_incompressible(item, &item.outputs[k], at.as_deref());
+                }
+            }
             return;
         }
         // The source may have changed while it was being processed.
@@ -1154,13 +1227,26 @@ impl Run<'_> {
     /// Every write of an item that keeps its source is in place: give the
     /// source the name of its Rename output, if it has one. The source is
     /// never trashed and never overwritten; a taken name gets the next one.
-    fn consume(&self, item: &PlanItem, res: &mut ItemResult, source_hash: Option<String>) {
-        let Some(k) = item.outputs.iter().position(|o| o.op == OutputOp::Rename) else {
+    /// `rename_to` is a written output found to be the source's own bytes
+    /// under another name in its folder: the source takes that name instead.
+    fn consume(
+        &self,
+        item: &PlanItem,
+        res: &mut ItemResult,
+        source_hash: Option<String>,
+        rename_to: Option<(usize, PathBuf)>,
+    ) {
+        let planned = item
+            .outputs
+            .iter()
+            .position(|o| o.op == OutputOp::Rename)
+            .map(|k| (k, item.outputs[k].dest.clone()));
+        let Some((k, dest)) = planned.or(rename_to) else {
             // Only Keep outputs besides the writes: nothing more to do.
             res.status = ItemStatus::Done { trashed: None };
             return;
         };
-        let dest = &item.outputs[k].dest;
+        let dest = &dest;
         let (Some(src_dir), Some(dest_dir), Some(wanted)) =
             (item.source.parent(), dest.parent(), dest.file_name())
         else {
@@ -1218,6 +1304,26 @@ impl Run<'_> {
             return;
         }
         res.status = ItemStatus::Done { trashed: None };
+    }
+
+    /// Record that the pipe of `o` could not make the source smaller, now
+    /// that the file is at `at` (the source path, or its new name), still
+    /// the file the plan saw.
+    fn remember_incompressible(&self, item: &PlanItem, o: &PlannedOutput, at: Option<&Path>) {
+        let Some(at) = at else {
+            return;
+        };
+        if o.steps.is_empty()
+            || !std::fs::symlink_metadata(at)
+                .is_ok_and(|m| m.is_file() && same_file_state(item, &m))
+        {
+            return;
+        }
+        let pipe =
+            crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n));
+        if let Some(pipe) = pipe {
+            crate::incompressible::remember(at, &pipe);
+        }
     }
 
     /// Move `source` to `wanted` in folder `dir` (its own folder or one inside
