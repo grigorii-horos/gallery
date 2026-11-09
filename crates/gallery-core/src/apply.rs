@@ -1231,6 +1231,49 @@ impl Run<'_> {
                 trashed: Some(trashed),
             }
         };
+        if ok {
+            self.remember_fallbacks(item, res);
+        }
+    }
+
+    /// A pipe whose encoder fell back but whose later step (a metadata
+    /// step) still changed the bytes replaced the source with a new file in
+    /// its folder: remember that file, as placed, so the next scan keeps it
+    /// instead of running the same pipe on it again (and again).
+    fn remember_fallbacks(&self, item: &PlanItem, res: &ItemResult) {
+        let Some(src_dir) = item.source.parent() else {
+            return;
+        };
+        for (o, out) in item.outputs.iter().zip(&res.outputs) {
+            let Some(at) = out.actual.as_deref() else {
+                continue;
+            };
+            if !out.fell_back || o.steps.is_empty() || out.error.is_some() {
+                continue;
+            }
+            if !at.parent().is_some_and(|d| same_dir(d, src_dir, true)) {
+                continue;
+            }
+            let Ok(meta) = std::fs::symlink_metadata(at) else {
+                continue;
+            };
+            let (Ok(mtime), true) = (mtime_ns(&meta), meta.is_file()) else {
+                continue;
+            };
+            let pipe =
+                crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n));
+            if let Some(pipe) = pipe {
+                self.incompressible
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner())
+                    .push(crate::incompressible::Record {
+                        path: at.to_path_buf(),
+                        size: meta.len(),
+                        mtime_ns: mtime,
+                        pipe,
+                    });
+            }
+        }
     }
 
     /// Every write of an item that keeps its source is in place: give the

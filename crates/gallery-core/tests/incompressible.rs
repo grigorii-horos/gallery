@@ -375,3 +375,40 @@ fn every_file_of_a_parallel_run_is_remembered() {
     assert!(again.items.is_empty(), "{again:?}");
     assert_eq!(again.unchanged.len(), 6);
 }
+
+/// A metadata step after the encoder changes the fallback's bytes: the
+/// first run replaces the source (as before), and the result is
+/// remembered, so the next scan keeps it instead of looping.
+#[test]
+fn a_metadata_step_after_the_fallback_stops_after_one_run() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let d = d.path();
+    let root = d.join("src");
+    let src = tiny_png(&root, "shot.png");
+    let orig = hash(&src);
+    let mut c = config(d, None, "", 72);
+    c.targets[0].outputs[0]
+        .content
+        .push(gallery_core::config::PipeStep::named("meta-full"));
+
+    let plan = scan_plan(&c, d, &src);
+    assert_eq!(plan.items[0].outputs[0].steps, ["shot", "meta-full"]);
+    let (_, rep) = run_plan(d, &plan);
+    let r = &rep.items[0];
+    assert!(r.outputs[0].fell_back, "{r:?}");
+    assert_eq!(r.outputs[0].actual.as_deref(), Some(src.as_path()));
+    if hash(&src) == orig {
+        // The metadata step had nothing to write: the plain kept case.
+        untouched(r);
+    } else {
+        assert!(
+            matches!(r.status, ItemStatus::Done { trashed: Some(_) }),
+            "{r:?}"
+        );
+    }
+    // Either way the next scan leaves the file alone.
+    let again = scan_plan(&c, d, &src);
+    assert!(again.items.is_empty(), "{again:?}");
+    assert_eq!(again.unchanged, std::slice::from_ref(&src));
+}
