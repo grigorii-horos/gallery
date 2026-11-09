@@ -225,6 +225,20 @@ pub fn precheck(d: &ConfigDraft) -> Result<(), FieldError> {
     Ok(())
 }
 
+/// The place names (without `@` and `!`) the filter's `geo` refers to.
+fn geo_places(f: &super::model::FilterDraft) -> Vec<String> {
+    let one = |v: &serde_json::Value| {
+        v.as_str()
+            .and_then(|s| s.trim_start_matches('!').strip_prefix('@'))
+            .map(str::to_string)
+    };
+    match f.conditions.get("geo") {
+        Some(serde_json::Value::Array(a)) => a.iter().filter_map(one).collect(),
+        Some(v) => one(v).into_iter().collect(),
+        None => Vec::new(),
+    }
+}
+
 /// The field a core error message is about: the target or source it names.
 pub fn locate(message: &str, d: &ConfigDraft) -> Option<String> {
     // The core's messages are in the interface language: the names are read
@@ -249,6 +263,7 @@ pub fn locate(message: &str, d: &ConfigDraft) -> Option<String> {
             "expand",
             Box::new(|f| f.ai.is_some() && f.expand.is_some()),
         ),
+        // Refined below: the filter that names the place.
         (
             "config.unknown_place",
             "target",
@@ -286,7 +301,23 @@ pub fn locate(message: &str, d: &ConfigDraft) -> Option<String> {
             && let Some(i) = index(&name, 0)
         {
             let at = target_path(i);
-            return Some(match d.targets[i].filters.iter().position(pick) {
+            // The filter whose `geo` names the place the message is about
+            // (other placeholders cannot be read back, so each place a
+            // filter names is tried by rendering the message with it).
+            let naming = (*key == "config.unknown_place")
+                .then(|| {
+                    d.targets[i].filters.iter().position(|f| {
+                        geo_places(f).into_iter().any(|p| {
+                            message.contains(&gallery_core::i18n::translate(
+                                key,
+                                &[("target", name.clone()), ("place", p)],
+                            ))
+                        })
+                    })
+                })
+                .flatten();
+            let pos = naming.or_else(|| d.targets[i].filters.iter().position(pick));
+            return Some(match pos {
                 Some(j) => format!("{at}.filters[{j}].{field}"),
                 None => at,
             });
@@ -578,6 +609,28 @@ mod tests {
             Some("sources[0]")
         );
         assert_eq!(locate("something else", &d), None);
+    }
+
+    /// An unknown place points at the filter that names it, not at the first
+    /// filter with any `geo`.
+    #[test]
+    fn unknown_place_points_at_the_filter_naming_it() {
+        let mut d = ConfigDraft::default();
+        let geo = |v: serde_json::Value| {
+            let mut f = super::super::model::FilterDraft::default();
+            f.conditions.insert("geo".into(), v);
+            f
+        };
+        d.targets.push(TargetDraft {
+            name: "T".into(),
+            filters: vec![
+                geo(serde_json::json!("@home")),
+                geo(serde_json::json!(["@work", "!@cabin"])),
+            ],
+            ..Default::default()
+        });
+        let m = gallery_core::t!("config.unknown_place", target = "T", place = "cabin");
+        assert_eq!(locate(&m, &d).as_deref(), Some("targets[0].filters[1].geo"));
     }
 
     /// The editor reads names out of the core's messages through the catalog:

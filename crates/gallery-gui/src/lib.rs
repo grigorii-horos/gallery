@@ -795,11 +795,17 @@ async fn explain_file(
 /// current plan of the config at `config`, which says what the AI decided.
 fn learning_for(config: &Path) -> Option<(PathBuf, PathBuf)> {
     let store = learn::default_file().ok()?;
-    let plan = current::Owned::for_config(config, None)
-        .ok()?
-        .env()
-        .plan_path();
-    Some((store, plan))
+    Some((store, current_plan_path(config)?))
+}
+
+/// The stored current plan of the config at `config`.
+fn current_plan_path(config: &Path) -> Option<PathBuf> {
+    Some(
+        current::Owned::for_config(config, None)
+            .ok()?
+            .env()
+            .plan_path(),
+    )
 }
 
 fn set_with_learning(
@@ -829,6 +835,7 @@ async fn set_override(
         let req = overrides::OverrideRequest {
             source_path,
             action,
+            expect: None,
         };
         let res = set_with_learning(path, vec![req])?.remove(0);
         match res.error {
@@ -852,8 +859,10 @@ async fn set_overrides(
 }
 
 /// Confirm a series review: `best` is marked as the series' best shot and
-/// the other `members` go to `target`; one result per member. A member whose
-/// file changed since the plan is refused (the best one refuses the lot).
+/// the other `members` go to `target`; one result per member. A member that
+/// is not in a series the current plan holds for review is refused (the
+/// lot), and so is a member whose file changed since the plan (the best one
+/// refuses the lot).
 #[tauri::command]
 async fn confirm_series(
     path: Option<String>,
@@ -862,7 +871,12 @@ async fn confirm_series(
     target: String,
 ) -> Result<Vec<overrides::OverrideResult>, String> {
     blocking(move || {
-        overrides::confirm_series_in(members, &best, &target, |r| set_with_learning(path, r))
+        let series = current_plan_path(&config_path(path.clone()))
+            .map(|p| overrides::plan_series(&p, &best))
+            .unwrap_or_default();
+        overrides::confirm_series_in(members, &best, &target, &series, |r| {
+            set_with_learning(path, r)
+        })
     })
     .await
 }

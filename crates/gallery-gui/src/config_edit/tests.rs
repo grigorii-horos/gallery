@@ -1839,3 +1839,20 @@ fn swap_warning_counts_each_old_name_once_and_does_not_claim_a_missing_target() 
     assert_eq!(names.len(), 2);
     assert!(names.iter().all(|w| w.message.contains("will belong")));
 }
+
+#[test]
+fn preview_of_an_old_shape_file_reports_its_rewrite_as_a_change() {
+    let fx = fixture(
+        "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/s\"\n\n[[targets.before_ai]]\nname = \"A\"\n",
+    );
+    // No op changes anything, yet saving would rewrite the file.
+    let p = preview_change(&fx.path, None, &[]).unwrap();
+    assert!(!p.diff.is_empty());
+    assert!(p.changed, "{:?}", p.diff);
+    // A file already in the new shape with no op: no change.
+    let new = fixture(
+        "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/s\"\n\n[[targets]]\nname = \"A\"\n",
+    );
+    let p = preview_change(&new.path, None, &[]).unwrap();
+    assert!(!p.changed, "{p:?}");
+}
