@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use crate::filter::facts::{DateCond, DeviceCond, GeoCond, PropsCond};
 use crate::mask::{MAX_REF_DEPTH, MaskExpr, MaskItem, MaskScope};
 use crate::{Error, Result};
 
@@ -207,6 +208,17 @@ pub struct Filter {
     pub ai: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub expand: Option<Expand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub date: Option<DateCond>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub geo: Option<GeoCond>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<DeviceCond>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub props: Option<PropsCond>,
+    /// Mask on the path relative to the source root (`/` separators).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<MaskExpr>,
 }
 
 /// A named point for geo conditions (`[places]`).
@@ -349,6 +361,7 @@ impl StagedTargets {
                     exclude,
                     ai: Some(a.description),
                     expand: None,
+                    ..Filter::default()
                 }],
                 outputs: a.outputs,
             }
@@ -1405,6 +1418,15 @@ impl Config {
                         name = name
                     )));
                 }
+                f.check_conditions(self, name).map_err(Error::Config)?;
+                let device = f
+                    .device
+                    .iter()
+                    .flat_map(|d| [&d.make, &d.model, &d.software]);
+                for m in device.flatten().chain(f.path.iter()) {
+                    self.check_mask_refs(&crate::t!("config.who_target", name = name), m)
+                        .map_err(Error::Config)?;
+                }
                 if f.ai.is_some() && f.expand.is_some() {
                     return Err(Error::Config(crate::t!(
                         "config.expand_with_ai",
@@ -1885,6 +1907,35 @@ dir = "/o"
             m.contains("expand") && m.contains("ai") && m.contains("T"),
             "{m}"
         );
+    }
+
+    #[test]
+    fn unknown_place_ref_is_an_error() {
+        let base = format!(
+            "{TWO_SOURCES}[places]\nhome = {{ lat = 1.0, lon = 2.0, km = 1.0 }}\n[[targets]]\nname = \"T\"\n[[targets.filters]]\nsources = [\"cam\"]\n"
+        );
+        load_str(&format!("{base}geo = [\"@home\", \"!@home\"]\n"))
+            .unwrap()
+            .validate()
+            .unwrap();
+        let m = load_str(&format!("{base}geo = \"@nowhere\"\n"))
+            .unwrap()
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("nowhere") && m.contains("T"), "{m}");
+        let m = load_str(&format!("{base}date = {{ months = [13] }}\n"))
+            .unwrap()
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("13"), "{m}");
+        let m = load_str(&format!("{base}path = \"@nomask\"\n"))
+            .unwrap()
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(m.contains("nomask"), "{m}");
     }
 
     #[test]
