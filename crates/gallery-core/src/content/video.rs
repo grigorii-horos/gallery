@@ -396,14 +396,12 @@ fn restore_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<Stri
         "-UserData:GPSCoordinates<Keys:Location"
     };
     let args = [
-        "-TagsFromFile".to_string(),
-        input.display().to_string(),
-        user_data.into(),
+        user_data.to_string(),
         "-Keys:GPSCoordinates".into(),
         "-Keys:Make<Keys:AndroidMake".into(),
         "-Keys:Model<Keys:AndroidModel".into(),
     ];
-    if let Err(e) = exif::write(ctx.tools, out, &args) {
+    if let Err(e) = exif::write_from(ctx.tools, input, out, &args) {
         warnings.push(crate::t!("content.meta_not_copied", error = e));
         return;
     }

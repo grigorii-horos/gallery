@@ -25,7 +25,7 @@ const READ_ARGS: [&str; 7] = [
 /// (`-G1`), values numeric (`-n`). Use this to verify files just written or
 /// staged: they are never worth caching and must never be answered stale.
 pub fn read(tools: &Tools, paths: &[PathBuf]) -> Result<HashMap<PathBuf, serde_json::Value>> {
-    read_batches(tools, paths, &NoProgress, &Cancel::new(), &mut |_| {})
+    read_batches(tools, paths, &NoProgress, &Cancel::new(), &mut |_, _| {})
 }
 
 /// [`read`] answered from the persistent cache `<cache dir>/exif/<xx>.json`
@@ -114,7 +114,7 @@ fn read_cached(
     cache_dir: Option<&Path>,
 ) -> Result<HashMap<PathBuf, serde_json::Value>> {
     let Some(cache_dir) = cache_dir else {
-        return read_batches(tools, paths, progress, cancel, &mut |_| {});
+        return read_batches(tools, paths, progress, cancel, &mut |_, _| {});
     };
     if !paths.is_empty() {
         cancel.check()?;
@@ -156,14 +156,11 @@ fn read_cached(
     let shifted = Shifted { progress, hits };
     // New entries by shard; merged onto the shard as it is on disk by then.
     let mut fresh_entries: HashMap<String, Vec<(String, Entry)>> = HashMap::new();
-    let mut store = |raw: &serde_json::Value| {
-        let Some(src) = raw.get("SourceFile").and_then(|s| s.as_str()) else {
-            return;
-        };
+    let mut store = |path: &Path, raw: &serde_json::Value| {
         if raw.get("Error").is_some() {
             return;
         }
-        if let Some((k, size, mtime_ns)) = stamps.get(Path::new(src)) {
+        if let Some((k, size, mtime_ns)) = stamps.get(path) {
             fresh_entries.entry(shard_of(k)).or_default().push((
                 k.clone(),
                 Entry {
@@ -224,28 +221,35 @@ impl Progress for Shifted<'_> {
 }
 
 /// Run exiftool over `paths` in batches. `raw` sees each record as exiftool
-/// printed it, before the QuickTime zone conversion applied to the result.
+/// printed it, with the requested path it answers, before the QuickTime zone
+/// conversion applied to the result. Result keys are the requested paths.
 fn read_batches(
     tools: &Tools,
     paths: &[PathBuf],
     progress: &dyn Progress,
     cancel: &Cancel,
-    raw: &mut dyn FnMut(&serde_json::Value),
+    raw: &mut dyn FnMut(&Path, &serde_json::Value),
 ) -> Result<HashMap<PathBuf, serde_json::Value>> {
     let mut result = HashMap::new();
     let mut done = 0;
     for chunk in paths.chunks(BATCH) {
         cancel.check()?;
         let mut argfile = tempfile::NamedTempFile::new()?;
+        let mut on_argv = Vec::new();
         for p in chunk {
-            writeln!(argfile, "{}", p.display())?;
+            match argfile_line(p) {
+                Some(line) => writeln!(argfile, "{line}")?,
+                None => on_argv.push(p),
+            }
         }
         argfile.flush()?;
+        let requested = Requested::new(chunk);
         let out = tools
             .command(&tools.exiftool)
             .args(READ_ARGS)
             .arg("-@")
             .arg(argfile.path())
+            .args(on_argv)
             .output()?;
         // exiftool exits 1 when some file is unreadable but still prints the rest.
         let parsed: Vec<serde_json::Value> = serde_json::from_slice(&out.stdout).map_err(|e| {
@@ -256,11 +260,16 @@ fn read_batches(
             ))
         })?;
         for mut v in parsed {
-            raw(&v);
+            let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) else {
+                continue;
+            };
+            let path = requested
+                .get(src)
+                .cloned()
+                .unwrap_or_else(|| PathBuf::from(src));
+            raw(&path, &v);
             quicktime_to_local(tools, &mut v);
-            if let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) {
-                result.insert(PathBuf::from(src), v.clone());
-            }
+            result.insert(path, v);
         }
         done += chunk.len();
         progress.step(ProgressEvent {
@@ -271,6 +280,46 @@ fn read_batches(
         });
     }
     Ok(result)
+}
+
+/// `p` as one line of an exiftool argument file, or None when a line cannot
+/// hold it: not UTF-8, a line break inside, a leading `#` (a comment) or
+/// edge spaces (trimmed). Such a path goes on the command line instead, as
+/// raw bytes, so it can never turn into extra options.
+fn argfile_line(p: &Path) -> Option<&str> {
+    p.to_str()
+        .filter(|s| !s.contains(['\r', '\n']) && !s.starts_with('#') && s.trim() == *s)
+}
+
+/// Requested paths of one batch by how exiftool may echo them in
+/// `SourceFile`: spelled the same, or equal up to the path separator
+/// (exiftool on Windows may echo `C:/a/b.jpg` for `C:\a\b.jpg`).
+struct Requested<'a> {
+    exact: HashMap<&'a std::ffi::OsStr, &'a PathBuf>,
+    unified: HashMap<String, &'a PathBuf>,
+}
+
+impl<'a> Requested<'a> {
+    fn new(chunk: &'a [PathBuf]) -> Self {
+        Requested {
+            exact: chunk.iter().map(|p| (p.as_os_str(), p)).collect(),
+            unified: chunk
+                .iter()
+                .filter_map(|p| Some((unify_separators(p.to_str()?), p)))
+                .collect(),
+        }
+    }
+
+    fn get(&self, src: &str) -> Option<&'a PathBuf> {
+        let exact = self.exact.get(std::ffi::OsStr::new(src));
+        exact
+            .or_else(|| self.unified.get(&unify_separators(src)))
+            .copied()
+    }
+}
+
+fn unify_separators(s: &str) -> String {
+    s.replace('\\', "/")
 }
 
 /// QuickTime date tags exiftool stores as UTC: the movie, track and media
@@ -319,21 +368,39 @@ pub(crate) fn quicktime_to_local(tools: &Tools, rec: &mut serde_json::Value) {
 /// Windows exiftool reads its command line in the ANSI code page, which
 /// would turn Cyrillic or CJK values into `?`.
 pub fn write(tools: &Tools, path: &Path, args: &[String]) -> Result<()> {
+    write_impl(tools, None, path, args)
+}
+
+/// [`write`] with `-TagsFromFile from` ahead of `args`: tags are copied from
+/// `from` as `args` select them.
+pub fn write_from(tools: &Tools, from: &Path, path: &Path, args: &[String]) -> Result<()> {
+    write_impl(tools, Some(from), path, args)
+}
+
+fn write_impl(tools: &Tools, from: Option<&Path>, path: &Path, args: &[String]) -> Result<()> {
     let mut argfile = tempfile::NamedTempFile::new()?;
-    // A path the file cannot hold as one line (not UTF-8, a line break, a
-    // leading `#` or edge spaces) stays on the command line, as raw bytes.
-    let utf8_path = path
-        .to_str()
-        .filter(|p| !p.contains(['\r', '\n']) && !p.starts_with('#') && p.trim() == *p);
+    let mut cmd = tools.command(&tools.exiftool);
+    cmd.args(["-overwrite_original", "-m", "-charset", "filename=utf8"]);
+    // A path the file cannot hold as one line stays on the command line, as
+    // raw bytes; `-TagsFromFile` then goes there too, ahead of the file.
+    if let Some(from) = from {
+        match argfile_line(from) {
+            Some(line) => writeln!(argfile, "-TagsFromFile\n{line}")?,
+            None => {
+                cmd.arg("-TagsFromFile").arg(from);
+            }
+        }
+    }
+    let utf8_path = argfile_line(path);
     // One argument per line: a line break inside one would split it.
-    for a in args.iter().map(String::as_str).chain(utf8_path) {
+    for a in args.iter().map(String::as_str) {
         writeln!(argfile, "{}", a.replace(['\r', '\n'], " "))?;
     }
+    if let Some(line) = utf8_path {
+        writeln!(argfile, "{line}")?;
+    }
     argfile.flush()?;
-    let mut cmd = tools.command(&tools.exiftool);
-    cmd.args(["-overwrite_original", "-m", "-charset", "filename=utf8"])
-        .arg("-@")
-        .arg(argfile.path());
+    cmd.arg("-@").arg(argfile.path());
     if utf8_path.is_none() {
         cmd.arg(path);
     }
@@ -448,6 +515,107 @@ mod tests {
         let mut t = tools_in(Some("Asia/Tokyo"));
         t.exiftool = script;
         (t, count)
+    }
+
+    #[test]
+    fn source_file_with_forward_slashes_finds_the_backslash_request() {
+        let chunk = [PathBuf::from(r"C:\Photos\a.jpg"), PathBuf::from("b.jpg")];
+        let r = Requested::new(&chunk);
+        assert_eq!(r.get("C:/Photos/a.jpg"), Some(&chunk[0]));
+        assert_eq!(r.get(r"C:\Photos\a.jpg"), Some(&chunk[0]));
+        assert_eq!(r.get("b.jpg"), Some(&chunk[1]));
+        assert_eq!(r.get("C:/Photos/c.jpg"), None);
+    }
+
+    /// A fake exiftool that saves its argument file as `argfile` and its
+    /// arguments, NUL-separated, as `argv`, prints `[]` and succeeds.
+    #[cfg(unix)]
+    fn recording_exiftool(dir: &Path) -> Tools {
+        use std::os::unix::fs::PermissionsExt;
+        let script = dir.join("exiftool");
+        std::fs::write(
+            &script,
+            format!(
+                "#!/bin/sh\nprev=\nfor a; do [ \"$prev\" = -@ ] && cp \"$a\" '{0}/argfile'; prev=$a; done\n\
+                 printf '%s\\0' \"$@\" > '{0}/argv'\nprintf '[]'\necho ' 1 image files updated' >&2\n",
+                dir.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut t = tools_in(None);
+        t.exiftool = script;
+        t
+    }
+
+    #[cfg(unix)]
+    fn recorded(dir: &Path) -> (String, Vec<String>) {
+        let argfile = std::fs::read_to_string(dir.join("argfile")).unwrap();
+        let argv = std::fs::read_to_string(dir.join("argv")).unwrap();
+        let argv = argv.split_terminator('\0').map(String::from).collect();
+        (argfile, argv)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_file_name_with_a_line_break_is_never_an_argfile_line() {
+        let d = tempfile::tempdir().unwrap();
+        let t = recording_exiftool(d.path());
+        let plain = d.path().join("a.jpg");
+        let evil = d.path().join("b\n-delete_original!\n.jpg");
+        read(&t, &[plain.clone(), evil.clone()]).unwrap();
+        let (argfile, argv) = recorded(d.path());
+        assert_eq!(argfile, format!("{}\n", plain.display()));
+        assert_eq!(argv.last().map(String::as_str), evil.to_str());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn real_exiftool_reads_a_file_with_a_line_break_in_its_name() {
+        let Some(exiftool) = crate::tools::find("exiftool") else {
+            return;
+        };
+        let d = tempfile::tempdir().unwrap();
+        let mut t = tools_in(None);
+        t.exiftool = exiftool;
+        let plain = d.path().join("a.txt");
+        let evil = d.path().join("b\n-ver\n.txt");
+        std::fs::write(&plain, "a").unwrap();
+        std::fs::write(&evil, "b").unwrap();
+        let got = read(&t, &[plain.clone(), evil.clone()]).unwrap();
+        assert_eq!(got.len(), 2, "{got:?}");
+        assert!(got.contains_key(&plain) && got.contains_key(&evil));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn tags_from_a_file_with_a_line_break_go_on_the_command_line() {
+        let d = tempfile::tempdir().unwrap();
+        let t = recording_exiftool(d.path());
+        let out = d.path().join("out.jpg");
+        let args = ["-all:all".to_string()];
+        let plain = d.path().join("in.jpg");
+        write_from(&t, &plain, &out, &args).unwrap();
+        let (argfile, _) = recorded(d.path());
+        assert_eq!(
+            argfile,
+            format!(
+                "-TagsFromFile\n{}\n-all:all\n{}\n",
+                plain.display(),
+                out.display()
+            )
+        );
+        let evil = d.path().join("in\n-delete_original!.jpg");
+        write_from(&t, &evil, &out, &args).unwrap();
+        let (argfile, argv) = recorded(d.path());
+        assert_eq!(argfile, format!("-all:all\n{}\n", out.display()));
+        let at = argv.iter().position(|a| a == "-TagsFromFile").unwrap();
+        assert_eq!(argv[at + 1], evil.to_str().unwrap());
+        assert_eq!(
+            argv[at + 2],
+            "-@",
+            "tags-from-file comes before the arguments"
+        );
     }
 
     #[cfg(unix)]

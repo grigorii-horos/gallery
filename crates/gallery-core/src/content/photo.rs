@@ -231,14 +231,12 @@ fn run(mut cmd: Command, what: &str) -> Result<()> {
 /// Problems become warnings: a lost capture time must not go unnoticed.
 fn copy_tags(ctx: &StepCtx, input: &Path, out: &Path, warnings: &mut Vec<String>) {
     let args = [
-        "-TagsFromFile".to_string(),
-        input.display().to_string(),
-        "-all:all".into(),
+        "-all:all".to_string(),
         "--Orientation".into(),
         "--ExifImageWidth".into(),
         "--ExifImageHeight".into(),
     ];
-    if let Err(e) = exif::write(ctx.tools, out, &args) {
+    if let Err(e) = exif::write_from(ctx.tools, input, out, &args) {
         warnings.push(crate::t!("content.meta_not_copied", error = e));
         return;
     }
