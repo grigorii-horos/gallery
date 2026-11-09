@@ -778,3 +778,34 @@ rename = ["By extension"]
     assert!(cat.verdict.contains("a cat"), "{}", cat.verdict);
     assert!(!cat.verdict.contains("By extension"), "{}", cat.verdict);
 }
+
+#[test]
+fn a_file_its_pipe_did_not_shrink_is_explained_as_kept() {
+    let fx = fixture();
+    let src = fx.p("src/IMG_1.jpg");
+    let pipe = crate::incompressible::fingerprint(
+        &["avif-high".to_string()],
+        |n| fx.cfg.content_preset(n),
+        &crate::incompressible::current_versions(),
+    )
+    .unwrap();
+    crate::incompressible::remember(&src, &pipe);
+    let e = fx.explain("src/IMG_1.jpg");
+    assert_eq!(e.outcome, Outcome::Unchanged);
+    let out = &e.outputs[0];
+    assert_eq!(out.op, OutputOp::Keep);
+    assert!(out.incompressible);
+    assert!(out.content[0].matched);
+    assert!(
+        e.verdict
+            .starts_with("Target pics (mask) keeps the file as it is"),
+        "{}",
+        e.verdict
+    );
+    assert!(
+        e.to_text()
+            .contains("[kept: the pipe did not make it smaller]"),
+        "{}",
+        e.to_text()
+    );
+}

@@ -287,6 +287,7 @@
   "explain_op_write": "Запис нового файлу",
   "explain_op_rename": "Перейменування на місці",
   "explain_op_keep": "Без змін",
+  "explain_op_kept_smallest": "Без змін: ланцюжок не зробив його меншим",
   "explain_aria": "Чому цей файл",
   "explain_trace": "Слід",
   "explain_working": "З’ясовуємо…",

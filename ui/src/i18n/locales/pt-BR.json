@@ -269,6 +269,7 @@
   "explain_op_write": "Gravação de um novo arquivo",
   "explain_op_rename": "Renomeação no lugar",
   "explain_op_keep": "Sem alteração",
+  "explain_op_kept_smallest": "Sem alteração: a cadeia não o deixou menor",
   "explain_aria": "Por que este arquivo",
   "explain_trace": "Rastro",
   "explain_working": "Descobrindo…",

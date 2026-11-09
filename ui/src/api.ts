@@ -376,6 +376,8 @@ export interface OutputCheck {
   rename: StepCheck[];
   dest: string;
   op: OutputOp;
+  /** Kept as it is: the content pipe did not make the file smaller before. */
+  incompressible?: boolean;
 }
 
 export interface Explanation {

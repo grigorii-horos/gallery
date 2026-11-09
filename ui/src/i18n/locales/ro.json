@@ -269,6 +269,7 @@
   "explain_op_write": "Se scrie un fișier nou",
   "explain_op_rename": "Redenumire pe loc",
   "explain_op_keep": "Neschimbat",
+  "explain_op_kept_smallest": "Neschimbat: lanțul nu l-a făcut mai mic",
   "explain_aria": "De ce acest fișier",
   "explain_trace": "Urmă",
   "explain_working": "Se elucidează…",
