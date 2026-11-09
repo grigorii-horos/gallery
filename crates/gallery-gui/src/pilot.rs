@@ -282,6 +282,7 @@ mod tests {
                 steps: steps.iter().map(|s| s.to_string()).collect(),
                 trace: vec![],
             }],
+            kind: Default::default(),
         }
     }
 
@@ -303,6 +304,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         }
     }
 

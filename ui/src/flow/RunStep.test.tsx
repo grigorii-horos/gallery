@@ -32,6 +32,8 @@ const basePreview = (): ApplyPreview => ({
   trash: 84,
   renamed: 30,
   kept: 6,
+  to_trash: 0,
+  kept_targets: 0,
   writes: 96,
   review: 7,
   unmatched: 4,

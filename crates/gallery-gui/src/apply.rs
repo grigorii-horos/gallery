@@ -11,6 +11,7 @@ use std::sync::Mutex;
 use gallery_core::apply::{
     ApplyOptions, ItemResult, ItemStatus, Report, apply_observed, report_path,
 };
+use gallery_core::config::TargetKind;
 use gallery_core::plan::{OutputOp, Plan, PlanItem, Side};
 use gallery_core::progress::{Cancel, ProgressEvent};
 use gallery_core::tools::Tools;
@@ -109,6 +110,11 @@ pub struct ApplyPreview {
     pub renamed: usize,
     /// Sources an output keeps where they are (no rename): untouched.
     pub kept: usize,
+    /// Files of `trash` targets: no outputs, they go to the trash after
+    /// every placement of the run.
+    pub to_trash: usize,
+    /// Files `keep` targets take: not part of the run, left untouched.
+    pub kept_targets: usize,
     /// New files written.
     pub writes: usize,
     /// Files outside the run, left as they are.
@@ -133,8 +139,12 @@ pub enum Applied {
     Undone,
 }
 
-/// Whether the source of `item` goes to the trash, is renamed, or stays.
+/// Whether the source of `item` goes to the trash once its outputs are in
+/// place, is renamed, or stays (a `trash` target's item is none of these).
 fn fate(item: &PlanItem) -> (bool, bool, bool) {
+    if item.kind == TargetKind::Trash {
+        return (false, false, false);
+    }
     let renamed = item.outputs.iter().any(|o| o.op == OutputOp::Rename);
     let kept = !renamed && item.outputs.iter().any(|o| o.op == OutputOp::Keep);
     (!renamed && !kept, renamed, kept)
@@ -149,9 +159,11 @@ pub fn preview_of(plan: &Plan, plan_path: &Path) -> ApplyPreview {
         review: plan.review.len(),
         unmatched: plan.unmatched.len(),
         unchanged: plan.unchanged.len(),
+        kept_targets: plan.kept.len(),
         ..ApplyPreview::default()
     };
     for it in &plan.items {
+        p.to_trash += usize::from(it.kind == TargetKind::Trash);
         let (trash, renamed, kept) = fate(it);
         p.trash += usize::from(trash);
         p.renamed += usize::from(renamed);
@@ -448,6 +460,7 @@ mod tests {
                     trace: vec![],
                 })
                 .collect(),
+            kind: Default::default(),
         }
     }
 
@@ -481,11 +494,30 @@ mod tests {
             serde_json::to_value(&v).unwrap(),
             json!({"plan_path": "/p/x.plan.json", "plan_id": "", "created": "2026-11-05T10:00:00+02:00",
                    "side": "local", "files": 5, "trash": 2, "renamed": 2, "kept": 1,
+                   "to_trash": 0, "kept_targets": 0,
                    "writes": 5, "review": 0, "unmatched": 1, "unchanged": 2,
                    "applied": null})
         );
         // Every file has one fate.
         assert_eq!(v.trash + v.renamed + v.kept, v.files);
+    }
+
+    #[test]
+    fn preview_counts_trash_and_keep_targets_apart() {
+        let mut junk = item("/s/j.jpg", &[]);
+        junk.kind = TargetKind::Trash;
+        let mut p = plan(
+            Side::Local,
+            vec![junk, item("/s/a.jpg", &[OutputOp::Write])],
+        );
+        p.kept = vec![gallery_core::plan::KeptItem {
+            source: "/s/k.jpg".into(),
+            target: "Keep".into(),
+        }];
+        let v = preview_of(&p, Path::new("/p/x.plan.json"));
+        assert_eq!((v.files, v.trash, v.to_trash, v.kept_targets), (2, 1, 1, 1));
+        // Every file of the run still has one fate.
+        assert_eq!(v.trash + v.renamed + v.kept + v.to_trash, v.files);
     }
 
     #[test]
@@ -524,6 +556,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: true,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         let write = |r: &Report| {
             std::fs::write(report_path(&path), serde_json::to_string(r).unwrap()).unwrap()
@@ -611,6 +644,7 @@ mod tests {
                 undone_sources: vec![],
                 cancelled: false,
                 stopped_by_anomalies: false,
+                kept: 0,
             })
             .unwrap(),
         )
@@ -691,6 +725,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: true,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         assert_eq!(
             serde_json::to_value(summarize(&report, 8)).unwrap(),

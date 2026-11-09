@@ -43,6 +43,7 @@ fn item(src: &str, target: &str, size: u64, ops: &[(OutputOp, &[&str])]) -> Plan
                 trace: vec![],
             })
             .collect(),
+        kind: Default::default(),
     }
 }
 
@@ -255,6 +256,7 @@ fn report_of(plan: &Plan, ms: u64, size_pct: u64) -> Report {
         undone_sources: vec![],
         cancelled: false,
         stopped_by_anomalies: false,
+        kept: 0,
     }
 }
 
@@ -395,4 +397,26 @@ fn ai_scan_over_a_dollar_asks_for_confirmation() {
     assert!(ai_estimate(&dry(0, 300), SONNET, &[]).confirm);
     // An unknown price never blocks.
     assert!(!ai_estimate(&dry(0, 10_000), "mystery", &[]).confirm);
+}
+
+#[test]
+fn trash_items_count_as_to_trash_and_keep_items_as_kept() {
+    let mut junk = item("/s/junk.jpg", "Junk", 3 * MB, &[]);
+    junk.kind = crate::config::TargetKind::Trash;
+    let mut p = plan_of(vec![junk, photo("/s/a.jpg", 10 * MB)]);
+    p.kept = vec![crate::plan::KeptItem {
+        source: "/s/k.jpg".into(),
+        target: "Keep".into(),
+    }];
+    let e = estimate_with(&p, &History::default(), 1);
+    let t = |n: &str| e.targets.iter().find(|t| t.name == n).unwrap();
+    let junk = t("Junk");
+    assert_eq!((junk.files, junk.trash, junk.kept), (1, 1, 0));
+    // Nothing is written for it: all of it is freed, in no time.
+    assert_eq!(junk.output_bytes.high, 0);
+    assert_eq!(junk.saving_bytes.low, 3 * MB as i64);
+    assert_eq!(junk.seconds.high, 0.0);
+    let keep = t("Keep");
+    assert_eq!((keep.files, keep.trash, keep.kept), (0, 0, 1));
+    assert_eq!((e.total.trash, e.total.kept), (2, 1));
 }

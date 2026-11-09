@@ -47,7 +47,7 @@ export function runLockedText(i: FlowInput): string | null {
 }
 
 export interface StatusPart {
-  id: "run" | "waiting" | "unchanged" | "unmatched";
+  id: "run" | "waiting" | "unchanged" | "kept" | "unmatched";
   count: number;
   text: string;
 }
@@ -59,6 +59,7 @@ export function statusParts(v: CurrentView): StatusPart[] {
     { id: "run", count: p.items.length, text: t("status_to_sort", { n: p.items.length }) },
     { id: "waiting", count: v.waiting_ai, text: t("status_waiting_ai", { n: v.waiting_ai }) },
     { id: "unchanged", count: (p.unchanged ?? []).length, text: t("status_unchanged", { n: (p.unchanged ?? []).length }) },
+    { id: "kept", count: (p.kept ?? []).length, text: t("status_kept", { n: (p.kept ?? []).length }) },
     { id: "unmatched", count: p.unmatched.length, text: t("status_unmatched", { n: p.unmatched.length }) },
   ];
   // Zero is worth saying only for the main figure.

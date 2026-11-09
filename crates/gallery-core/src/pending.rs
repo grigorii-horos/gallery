@@ -17,7 +17,7 @@ use crate::ai::cache::Cache;
 use crate::config::Config;
 use crate::effect::CachedOnly;
 use crate::overrides::Overrides;
-use crate::plan::{Plan, Side, build_plan_with};
+use crate::plan::{Plan, Side, build_plan_with, guard_last_copies};
 use crate::progress::{Cancel, NoProgress};
 use crate::route::{RouteCtx, route_with_overrides};
 use crate::tools::Tools;
@@ -309,6 +309,7 @@ fn build_in(
         &NoProgress,
         cancel,
     )?;
+    guard_last_copies(&mut plan, &ctx.groups, files);
     let waiting: BTreeSet<PathBuf> = ai.pending.into_inner().into_iter().collect();
     strip_waiting(&mut plan, &waiting);
     Ok(Built {

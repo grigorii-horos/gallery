@@ -98,6 +98,7 @@ mod tests {
                 steps: vec![],
                 trace: vec![],
             }],
+            kind: Default::default(),
         };
         let plan = Plan {
             version: PLAN_VERSION,
@@ -111,6 +112,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.path().join("p.plan.json");
         plan.save(&path).unwrap();

@@ -715,6 +715,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: false,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         write_report(&path, &r).unwrap();
         path
@@ -847,6 +848,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: false,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         write_report(&rp, &report).unwrap();
         let line = |run: &str, it: &ItemResult| {
@@ -1254,6 +1256,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: false,
             stopped_by_anomalies: false,
+            kept: 0,
         })
         .unwrap();
         let orig = Path::new("/p/a.jpg");
@@ -1332,6 +1335,7 @@ mod cancel_tests {
             undone_sources: vec![],
             cancelled: false,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         write_report(&path, &r).unwrap();
         (path, pairs)

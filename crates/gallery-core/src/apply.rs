@@ -10,7 +10,10 @@
 //! - a source consumed by a Rename or Keep output never goes to the trash: it
 //!   is renamed in its folder or moved into a folder inside its source root
 //!   (no-overwrite, never copied) only after every written output is in place
-//!   and only if it is still the file the plan saw.
+//!   and only if it is still the file the plan saw;
+//! - a `trash` target's file has no outputs: it goes to the trash directly,
+//!   after every placement of the run, and only if it is still the file the
+//!   plan saw; a `keep` target's file is not in the items at all.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -23,7 +26,7 @@ use rayon::prelude::*;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
-use crate::config::{AudioCodec, ContentPreset, expand_tilde};
+use crate::config::{AudioCodec, ContentPreset, TargetKind, expand_tilde};
 use crate::content::{StepCtx, run_pipe};
 use crate::datetime::capture_date;
 use crate::media::{kind_of, split_name};
@@ -116,6 +119,14 @@ pub struct Report {
     /// and `cancelled` stays false.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub stopped_by_anomalies: bool,
+    /// Files the plan's `keep` targets took: apply leaves them untouched,
+    /// they are only counted here.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub kept: usize,
+}
+
+fn is_zero(n: &usize) -> bool {
+    *n == 0
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -365,6 +376,7 @@ fn apply_impl(
         undone_sources: Vec::new(),
         cancelled: false,
         stopped_by_anomalies: false,
+        kept: plan.kept.len(),
     };
     let out_path = report_path(plan_path);
     let journal = if opts.dry_run {
@@ -399,42 +411,55 @@ fn apply_impl(
     let done = AtomicUsize::new(0);
     let anomalous = AtomicUsize::new(0);
     let stop = AtomicBool::new(false);
-    pool.install(|| {
-        plan.items.par_iter().enumerate().for_each(|(i, item)| {
-            // Checked only before an item starts: an item in flight always
-            // finishes on its own path, and one never started stays absent
-            // from the report (its source untouched).
-            if cancel.is_cancelled() || stop.load(Ordering::SeqCst) {
-                return;
-            }
-            let started = Instant::now();
-            let mut r = run.item(item);
-            if matches!(
-                r.status,
-                ItemStatus::Done { .. } | ItemStatus::Failed { .. }
-            ) {
-                r.elapsed_ms = Some(started.elapsed().as_millis() as u64);
-            }
-            if !opts.allow_anomalies
-                && r.outputs.iter().any(|o| !o.anomalies.is_empty())
-                && anomalous.fetch_add(1, Ordering::SeqCst) + 1 >= opts.max_anomalies
-                && opts.max_anomalies > 0
-            {
-                stop.store(true, Ordering::SeqCst);
-            }
-            run.journal(&r);
-            on_item(&r);
-            collected
-                .lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .record(i, r);
-            progress.step(ProgressEvent {
-                stage: Stage::Apply,
-                done: done.fetch_add(1, Ordering::SeqCst) + 1,
-                total,
-                current: Some(item.source.clone()),
-            });
+    let one = |i: usize, item: &PlanItem| {
+        // Checked only before an item starts: an item in flight always
+        // finishes on its own path, and one never started stays absent
+        // from the report (its source untouched).
+        if cancel.is_cancelled() || stop.load(Ordering::SeqCst) {
+            return;
+        }
+        let started = Instant::now();
+        let mut r = run.item(item);
+        if matches!(
+            r.status,
+            ItemStatus::Done { .. } | ItemStatus::Failed { .. }
+        ) {
+            r.elapsed_ms = Some(started.elapsed().as_millis() as u64);
+        }
+        if !opts.allow_anomalies
+            && r.outputs.iter().any(|o| !o.anomalies.is_empty())
+            && anomalous.fetch_add(1, Ordering::SeqCst) + 1 >= opts.max_anomalies
+            && opts.max_anomalies > 0
+        {
+            stop.store(true, Ordering::SeqCst);
+        }
+        run.journal(&r);
+        on_item(&r);
+        collected
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .record(i, r);
+        progress.step(ProgressEvent {
+            stage: Stage::Apply,
+            done: done.fetch_add(1, Ordering::SeqCst) + 1,
+            total,
+            current: Some(item.source.clone()),
         });
+    };
+    let is_trash = |item: &PlanItem| item.kind == TargetKind::Trash;
+    pool.install(|| {
+        // Every placement first; the files of `trash` targets go to the
+        // trash only after that, in the phase where originals are trashed.
+        plan.items
+            .par_iter()
+            .enumerate()
+            .filter(|(_, item)| !is_trash(item))
+            .for_each(|(i, item)| one(i, item));
+        plan.items
+            .par_iter()
+            .enumerate()
+            .filter(|(_, item)| is_trash(item))
+            .for_each(|(i, item)| one(i, item));
     });
 
     let collected = collected.into_inner().unwrap_or_else(|e| e.into_inner());
@@ -814,6 +839,18 @@ impl Run<'_> {
             res.status = ItemStatus::Stale;
             return res;
         }
+        if item.kind == TargetKind::Trash {
+            if !item.outputs.is_empty() {
+                // A trash item never places anything: a plan saying
+                // otherwise is not one this build wrote.
+                res.error = Some(crate::t!("apply.trash_with_outputs"));
+            } else if self.opts.dry_run {
+                res.status = ItemStatus::DryRun;
+            } else {
+                self.trash_source(item, &mut res);
+            }
+            return res;
+        }
         if item.outputs.is_empty() {
             // Vacuously "all outputs done" must never trash a source.
             res.error = Some(no_outputs());
@@ -825,6 +862,27 @@ impl Run<'_> {
         }
         self.process(item, &mut res);
         res
+    }
+
+    /// A `trash` target's file, already checked to be the file the plan saw:
+    /// nothing to place or verify, so it goes to the trash directly and is
+    /// journaled at once, like a trashed original, so undo finds it.
+    fn trash_source(&self, item: &PlanItem, res: &mut ItemResult) {
+        let trashed = match self.opts.trash {
+            TrashMode::System => move_to_trash(&item.source, &item.source_root, self.run_id),
+            TrashMode::Folder => move_to_folder(&item.source, &item.source_root, self.run_id),
+        };
+        match trashed {
+            Ok(t) => {
+                res.status = ItemStatus::Done { trashed: Some(t) };
+                self.journal(res);
+                #[cfg(test)]
+                if CRASH_AFTER_TRASH.lock().unwrap().contains(&item.source) {
+                    panic!("test: the run dies after the trash move");
+                }
+            }
+            Err(e) => res.error = Some(crate::t!("apply.trash", error = e)),
+        }
     }
 
     /// Produce and place every output, then trash the source; or, when an
@@ -1861,12 +1919,14 @@ mod tests {
                     steps: vec!["P".into()],
                     trace: vec![],
                 }],
+                kind: Default::default(),
             }],
             review: vec![],
             unmatched: vec![],
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.join("plan.json");
         plan.save(&path).unwrap();
@@ -1978,6 +2038,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: false,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         let mut p = Collected::new(base, 120, Some(path.clone()));
         // Out of order, as worker threads finish.
@@ -2039,6 +2100,7 @@ mod tests {
             undone_sources: vec!["/a".into()],
             cancelled: true,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         let json = serde_json::to_string(&r).unwrap();
         assert_eq!(serde_json::from_str::<Report>(&json).unwrap(), r);
@@ -2105,12 +2167,14 @@ mod tests {
                     steps: vec![],
                     trace: vec![],
                 }],
+                kind: Default::default(),
             }],
             review: vec![],
             unmatched: vec![],
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.join("plan.json");
         plan.save(&path).unwrap();
@@ -2899,6 +2963,7 @@ mod cancel_tests {
                     steps: vec![],
                     trace: vec![],
                 }],
+                kind: Default::default(),
             });
             sources.push(src);
         }
@@ -2914,6 +2979,7 @@ mod cancel_tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.join("plan.json");
         plan.save(&path).unwrap();
@@ -3154,12 +3220,14 @@ mod exif_failure_tests {
                     steps: vec![],
                     trace: vec![],
                 }],
+                kind: Default::default(),
             }],
             review: vec![],
             unmatched: vec![],
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.join("plan.json");
         plan.save(&path).unwrap();
@@ -3305,12 +3373,14 @@ mod mtime_tests {
                     steps: names,
                     trace: vec![],
                 }],
+                kind: Default::default(),
             }],
             review: vec![],
             unmatched: vec![],
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.path().join("plan.json");
         plan.save(&path).unwrap();
@@ -3544,6 +3614,7 @@ mod verification {
                         steps: steps.iter().map(|s| s.to_string()).collect(),
                         trace: vec![],
                     }],
+                    kind: Default::default(),
                 }
             })
             .collect();
@@ -3568,6 +3639,7 @@ mod verification {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let path = d.join("plan.json");
         plan.save(&path).unwrap();
@@ -3854,3 +3926,6 @@ mod verification {
         }
     }
 }
+
+#[cfg(test)]
+mod trash_tests;

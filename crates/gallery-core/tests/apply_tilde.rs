@@ -49,12 +49,14 @@ fn apply_expands_tilde_with_local_home() {
                 steps: vec![],
                 trace: vec![],
             }],
+            kind: Default::default(),
         }],
         review: vec![],
         unmatched: vec![],
         warnings: vec![],
         unchanged: vec![],
         retry_of: None,
+        kept: Vec::new(),
     };
     let plan_path = home.path().join("plan.json");
     plan.save(&plan_path).unwrap();

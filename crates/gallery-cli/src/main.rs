@@ -1024,6 +1024,9 @@ fn print_summary(plan: &Plan, output: &Path) {
         "{}",
         gallery_core::t!("cli.unchanged", n = plan.unchanged.len())
     );
+    if !plan.kept.is_empty() {
+        println!("{}", gallery_core::t!("cli.kept", n = plan.kept.len()));
+    }
     if !plan.warnings.is_empty() {
         println!(
             "{}",
@@ -1244,6 +1247,9 @@ fn apply_cmd(
             skipped = skipped
         )
     );
+    if report.kept > 0 {
+        println!("{}", gallery_core::t!("cli.kept", n = report.kept));
+    }
     if dry_run && let Ok(p) = Plan::load(plan) {
         print_estimate(&p, plan, opts.jobs);
     }

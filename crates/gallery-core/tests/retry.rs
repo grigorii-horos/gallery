@@ -38,6 +38,7 @@ fn save(path: &Path, items: Vec<PlanItem>) {
         warnings: vec![],
         unchanged: vec![],
         retry_of: None,
+        kept: Vec::new(),
     }
     .save(path)
     .unwrap();
@@ -67,6 +68,7 @@ fn item(src: &Path, root: &Path, dests: &[PathBuf]) -> PlanItem {
                 trace: vec![],
             })
             .collect(),
+        kind: Default::default(),
     }
 }
 

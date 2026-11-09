@@ -57,6 +57,7 @@ fn item(src: &Path, root: &Path, outs: Vec<(PathBuf, Vec<&str>)>) -> PlanItem {
                 trace: vec![],
             })
             .collect(),
+        kind: Default::default(),
     }
 }
 
@@ -94,6 +95,7 @@ fn save_plan(dir: &Path, items: Vec<PlanItem>) -> PathBuf {
         warnings: vec![],
         unchanged: vec![],
         retry_of: None,
+        kept: Vec::new(),
     };
     let path = dir.join("plan.json");
     plan.save(&path).unwrap();

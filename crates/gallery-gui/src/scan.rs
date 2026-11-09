@@ -76,6 +76,8 @@ pub struct ScanSummary {
     pub review: usize,
     pub unmatched: usize,
     pub unchanged: usize,
+    /// Files `keep` targets take: left untouched (counted in `targets` too).
+    pub kept: usize,
     /// Plan warnings (series split, double encoding…).
     pub warnings: usize,
     /// Routing notes, e.g. a manual decision naming an unknown target.
@@ -92,12 +94,16 @@ impl ScanSummary {
         for it in &plan.items {
             *targets.entry(it.target.clone()).or_default() += 1;
         }
+        for k in &plan.kept {
+            *targets.entry(k.target.clone()).or_default() += 1;
+        }
         ScanSummary {
             files: plan.items.len(),
             targets,
             review: plan.review.len(),
             unmatched: plan.unmatched.len(),
             unchanged: plan.unchanged.len(),
+            kept: plan.kept.len(),
             warnings: plan.warnings.len(),
             notes: out.warnings.clone(),
             overrides_applied: out.overrides_applied,
@@ -458,7 +464,7 @@ dir = "{out}/rest"
         assert_eq!(
             s,
             json!({"files": 2, "targets": {"rest": 2}, "review": 0, "unmatched": 0,
-                   "unchanged": 1, "warnings": 0, "notes": [], "overrides_applied": 1,
+                   "unchanged": 1, "kept": 0, "warnings": 0, "notes": [], "overrides_applied": 1,
                    "ai": null})
         );
         assert!(events.lock().unwrap().contains(&Stage::Plan));

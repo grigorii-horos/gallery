@@ -491,6 +491,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         }
     }
 
@@ -503,6 +504,7 @@ mod tests {
             target: target.into(),
             via,
             outputs: vec![],
+            kind: Default::default(),
         }
     }
 
@@ -516,6 +518,7 @@ mod tests {
             captured: None,
             source_root: None,
             name_error: false,
+            series: None,
         }
     }
 

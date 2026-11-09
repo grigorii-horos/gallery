@@ -13,7 +13,7 @@ use crate::ai::usage_log;
 use crate::ai::{AiClassifier, Usage};
 use crate::config::Config;
 use crate::overrides::Overrides;
-use crate::plan::{Plan, Side, build_plan_with};
+use crate::plan::{Plan, Side, build_plan_with, guard_last_copies};
 use crate::progress::{Cancel, Progress};
 use crate::route::{AiAnswer, AiRequest, Classifier, Confidence, RouteCtx, route_with_overrides};
 use crate::tools::Tools;
@@ -195,7 +195,8 @@ pub fn scan_plan_using(
     } else {
         Side::Local
     };
-    let plan = build_plan_with(cfg, routed.decisions, &exif, side, progress, cancel)?;
+    let mut plan = build_plan_with(cfg, routed.decisions, &exif, side, progress, cancel)?;
+    guard_last_copies(&mut plan, &ctx.groups, &files);
     Ok(ScanOutcome {
         plan,
         warnings: routed.warnings,
@@ -646,5 +647,70 @@ ai = "outings"
         )
         .unwrap();
         assert_eq!(d.candidates, 2);
+    }
+
+    /// Both copies of a picture match a trash target: the album's copy (a
+    /// scanned file of a source inside the album) as a duplicate of the
+    /// camera's, the camera's as already placed in the album. The scan never
+    /// plans both for the trash: one is held for review.
+    #[test]
+    fn a_scan_never_trashes_every_copy() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let put = |rel: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"placed before").unwrap();
+            p
+        };
+        let cam = put("camera/b.jpg");
+        let placed = put("out/2026/b.jpg");
+        let r = root.display().to_string().replace('\\', "/");
+        let text = format!(
+            r#"
+[[sources]]
+id = "camera"
+path = "{r}/camera"
+
+[[sources]]
+id = "outsrc"
+path = "{r}/out"
+recursive = true
+
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera", "outsrc"]
+duplicate = {{ of = ["sources", "outputs"] }}
+
+[[targets]]
+name = "Album"
+[[targets.outputs]]
+dir = "{r}/out/{{YYYY}}"
+"#
+        );
+        let cfg: Config = toml::from_str(&text).unwrap();
+        let opts = ScanOptions {
+            no_ai: true,
+            ..Default::default()
+        };
+        let out = scan_plan_using(
+            &cfg,
+            &tools(),
+            opts,
+            &Overrides::default(),
+            None,
+            &crate::progress::NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        let plan = &out.plan;
+        let trashed: Vec<&Path> = plan.items.iter().map(|i| i.source.as_path()).collect();
+        assert_eq!(trashed, [placed.as_path()], "{plan:#?}");
+        assert_eq!(plan.items[0].kind, crate::config::TargetKind::Trash);
+        assert_eq!(plan.review.len(), 1, "{plan:#?}");
+        assert_eq!(plan.review[0].source, cam);
+        assert_eq!(plan.review[0].reason, crate::t!("plan.last_copy_kept"));
     }
 }
