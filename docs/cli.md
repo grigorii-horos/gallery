@@ -60,10 +60,17 @@ itself (an unknown flag, a missing argument) stay in English.
 ## `check`
 
 ```
-gallery check
+gallery check [-c <CONFIG>]
 ```
 
-Lists the external tools (`ffmpeg`, `ffprobe`, `exiftool`, `avifenc`, `magick`, `optipng`), their
+With `-c/--config` the config file is loaded and validated first: an unknown source or preset, a
+duplicate target name, a bad condition and so on is an error (exit 1) that names the target. A file
+that still uses the old three-stage targets (`targets.before_ai` / `ai` / `after_ai`) prints a
+one-line migration notice and exits 0 (see [Migration](configuration.md#migration-from-the-three-stages));
+otherwise it prints `config <path>: ok (N sources, M targets)`. Every other command that loads the
+config prints the same notice on stderr.
+
+Then it lists the external tools (`ffmpeg`, `ffprobe`, `exiftool`, `avifenc`, `magick`, `optipng`), their
 versions and the ffmpeg capabilities. Exit 1 if a required tool or `libsvtav1` is missing
 (`optipng` is only needed for PNG presets; `libopus` and `vidstab` only by the presets that use them).
 
@@ -92,7 +99,7 @@ gallery scan -c <CONFIG> -o <PLAN> [--server] [--accept-low] [--no-ai] [--overri
 gallery scan -c <CONFIG> --estimate
 ```
 
-Scans the sources, reads EXIF, routes every file through the three stages, and writes a plan. It
+Scans the sources, reads EXIF, routes every file through the ordered targets, and writes a plan. It
 prints a summary: files per target, the review list, unmatched files, warnings and the AI cost.
 Nothing but the plan file (and the AI answer cache) is written; sources are never touched.
 
@@ -103,10 +110,10 @@ Nothing but the plan file (and the AI answer cache) is written; sources are neve
 | `--estimate` | Only estimate the AI cost (how many files would be sent, how many are cached). No calls, no plan. Conflicts with `--no-ai` and `-o`. |
 | `--server` | Build the plan with server paths (`server_path` of sources, `server_dir` of outputs). See [Server workflow](../README.md#server-workflow). |
 | `--accept-low` | Accept unsure AI answers instead of sending them to the review list. |
-| `--no-ai` | Skip the AI stage; files go on to `after_ai`. |
+| `--no-ai` | Skip the AI: no `ai` condition holds, so files go on to the later targets. |
 | `--overrides <FILE>` | Manual decisions file. Default: `~/.local/share/gallery/overrides.json` if it exists. |
 
-When the AI stage is on and the config has AI targets, the key and model are checked **before** the
+When AI is on and some filter has an `ai` condition, the key and model are checked **before** the
 scan starts, so a missing key fails at once (exit 1). Unlike the GUI (which only calls the AI when
 you press *Ask AI*), `gallery scan` asks the AI for every file without a cached answer; run
 `--estimate` first to see how many that is.
@@ -174,16 +181,25 @@ be undone once. Pass the report file by its actual name (`<plan>.report.json`).
 gallery explain -c <CONFIG> [--overrides <FILE>] <PATH>...
 ```
 
-For each file: the source it belongs to, every target filter that took it or did not and why
-(match, exclude, `!`), the manual decision or cached AI answer, the content and name steps that
-would fire, the final destination, and a one-line verdict with a hint. It never calls the AI and
-changes nothing.
+For each file: the source it belongs to, every target in list order with the filters that took the
+file or did not and why (match, exclude, `!`), the **first condition that missed** for each target
+that did not take it, the manual decision or cached AI answer, the content and name steps that would
+fire, the final destination, and a one-line verdict with a hint. It never calls the AI and changes
+nothing.
+
+When the config uses conditions on groups (`event`, `expand`, `near`, `duplicate`, `series`,
+`props.sharpness`), explain scans all the sources as a real scan does, so those conditions see the
+same files, and it applies the last-copy guard to the plan it shows: a file a scan holds for review
+is never explained as "goes to the trash". A miss reads like `near: 0 files of olga within 2h / 1.0 km,
+at least 1 needed`, `duplicate: no identical copy` or `date: no capture date`.
 
 ```
 $ gallery explain -c gallery.toml ~/Sync/Camera/IMG_20260417_101010.jpg
 /home/me/Sync/Camera/IMG_20260417_101010.jpg
 ├─ Source: camera, the scan sees it
-├─ Stage before AI
+├─ Targets, in order
+│  ├─ Duplicates — no
+│  │  ├─ duplicate: no identical copy
 │  ├─ Screenshots and screen recordings — no
 │  │  ├─ filter 1: match [@screenshot, @screen-recording] did not take
 ...
@@ -200,7 +216,8 @@ gallery unmatched -c <CONFIG> [--plan <PLAN>] [--overrides <FILE>]
 
 Groups the unmatched files by source, folder and extension and prints, per group, the file count,
 size and reason (the same reasoning as `explain`). Without `--plan`, a plan is built on the fly
-without AI and EXIF, which is enough to know what is unmatched. In the GUI the same view offers
+without AI but with the metadata and groups a scan reads (dates, places, events, duplicates, ...), so
+the result matches what a scan without an AI answer would leave unmatched. In the GUI the same view offers
 *Add to target…*, *Always ignore in the whole source* and *Create target…*.
 
 ## `pending`

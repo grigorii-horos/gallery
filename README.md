@@ -2,9 +2,10 @@
 
 **Gallery sorts the photos and videos that pile up in your sync folders.** Point it at your
 sources (a phone camera folder, a partner's folder, a screenshots folder…), describe where each kind
-of file belongs, and Gallery routes every file in three stages — name masks, then **one Claude
-request per file** for the fuzzy cases ("is this a receipt or a document?"), then name masks again —
-shows you the whole plan, and only then does the work: metadata fixes, AVIF / WebP / AV1 / Opus
+of file belongs, and Gallery walks every file down **one ordered list of targets**. A target's filter
+is built from conditions: name masks, dates, places, neighbouring files, duplicates, series, and, for
+the fuzzy cases ("is this a receipt or a document?"), **one Claude request per file**. The first
+matching target takes the file. Gallery shows you the whole plan, and only then does the work: metadata fixes, AVIF / WebP / AV1 / Opus
 compression, capture-date names and folders, backups. Your originals are never overwritten; they go
 to the trash only after every output is written **and verified**, and every run can be undone.
 
@@ -54,6 +55,14 @@ What the plan can do for each target, per output folder:
   `optipng`, with a quality ladder that keeps the original bytes when a re-encode would not be smaller.
 - **Rename pipe:** capture-date names (`20260412_103314.avif`), `year/month` folders, your own
   templates.
+- **Ordered targets** instead of fixed stages: one list, the first matching target takes a file.
+  A target can place files into folders (`folders`), send them to the trash (`trash`) or protect them
+  from the targets below (`keep`).
+- **Rich filters:** capture date and time of day, places (`geo`, with named points), events and
+  neighbouring files across sources (`near`, `expand = "event"`: photos taken together by two
+  phones), device, file properties (size, codecs, blur score), duplicates, burst series (with a
+  side-by-side best-shot review), folders (`path`) and the AI as one more condition. A scan never
+  trashes the last copy of a group of duplicates or of a series.
 - **Named masks** with `@refs` and `!` exclusions (`["@photo", "!@edited"]`) and built-ins for screenshots,
   WhatsApp, TikTok, camera-phone names, RAW and more.
 
@@ -155,21 +164,21 @@ Create `~/.config/gallery/gallery.toml` (the app's default location):
 id = "camera"
 path = "~/Sync/Camera"
 
-[[targets.after_ai]]
+[[targets]]
 name = "Timeline"
 
-[[targets.after_ai.filters]]
+[[targets.filters]]
 sources = ["camera"]
 match = ["@photo", "@video"]
 
 # Processed copy: fix metadata, then compress photos (AVIF), PNGs and videos (AV1).
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Media/Timeline/{YYYY}/{MM}"
 content = ["meta-full", "compress-all"]
 rename = ["capture-date"]
 
 # Backup: a byte-for-byte copy.
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Backup/Timeline/{YYYY}/{MM}"
 ```
 
@@ -178,6 +187,26 @@ date into `Media/Timeline/<year>/<month>` and a byte-for-byte backup, then trash
 Everything else is left alone and listed as *unmatched*. The full reference is
 [docs/configuration.md](docs/configuration.md); [`examples/gallery.toml`](examples/gallery.toml) is a
 bigger example with screenshots, AI categories and per-source prompts.
+
+Targets are an ordered list: the first target whose filter matches takes the file. A bigger taste:
+
+```toml
+[[targets]]                       # copies of the same file go to the trash (never the last copy)
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera", "olga"]
+duplicate = { of = ["sources", "outputs"] }
+
+[[targets]]                       # photos taken together with Olga's phone (and the rest of that event)
+name = "Together"
+[[targets.filters]]
+sources = ["camera"]
+near = { sources = ["olga"], time = "2h", km = 1 }
+expand = "event"
+[[targets.outputs]]
+dir = "~/Sync/Shared/{YYYY}"
+```
 
 ### 2. First run in the GUI
 
@@ -205,22 +234,22 @@ gallery undo plan-pilot.plan.report.json                      # if the pilot loo
 
 ## AI setup
 
-The AI stage is optional: without AI targets (`[[targets.ai]]`) Gallery never contacts Anthropic.
+The AI is optional: unless some filter has an `ai` condition, Gallery never contacts Anthropic.
 
 1. **Key.** Set `ANTHROPIC_API_KEY` (or `CLAUDE_API_KEY`), or put the key in
    `~/.config/gallery/api-key` and make it owner-only (`chmod 600`; a key file readable by others is
    ignored with a warning). An app started from the application menu may not inherit your shell's
    environment, so the key file is the dependable choice for the GUI.
-2. **Categories.** Each `[[targets.ai]]` is a category with a `description`; the model chooses one
-   or "none".
+2. **Categories.** A filter with an `ai` condition makes its target a category; the target name is the
+   category and `ai` is its description. The model chooses one category or "none".
    ```toml
-   [[targets.ai]]
+   [[targets]]
    name = "Receipts"
+   [[targets.filters]]
    sources = ["camera"]
-   description = "Photos of receipts, invoices and price tags."
-   [targets.ai.prefilter]
    match = "@photo"              # only photos are sent at all
-   [[targets.ai.outputs]]
+   ai = "Photos of receipts, invoices and price tags."
+   [[targets.outputs]]
    dir = "~/Documents/Receipts"
    rename = ["capture-date"]
    ```
@@ -261,7 +290,7 @@ Plan on the desktop (where the AI and your decisions live), apply on the machine
    path = "~/Sync/Camera"
    server_path = "/srv/sync/camera"
 
-   [[targets.after_ai.outputs]]
+   [[targets.outputs]]
    dir = "~/Media/Timeline/{YYYY}/{MM}"
    server_dir = "/srv/media/Timeline/{YYYY}/{MM}"
    ```
@@ -277,7 +306,7 @@ Plan on the desktop (where the AI and your decisions live), apply on the machine
 
 | Command | Purpose |
 |---|---|
-| `gallery check` | Tools, versions, capabilities |
+| `gallery check [-c CONFIG]` | Tools, versions, capabilities; with `-c` also validates the config |
 | `gallery presets` | Built-in presets, bundles and masks |
 | `gallery scan -c CONFIG -o PLAN [--server] [--accept-low] [--no-ai] [--overrides FILE]` | Scan → plan + summary |
 | `gallery scan -c CONFIG --estimate` | AI cost estimate only |

@@ -20,33 +20,37 @@ Rules that hold everywhere:
 
 - [How a file is routed](#how-a-file-is-routed)
 - [`[[sources]]`](#sources)
-- [Targets](#targets): [before AI / after AI](#mask-targets-before_ai-and-after_ai), [AI targets](#ai-targets-targetsai), [outputs](#outputs)
+- [`[places]`](#places)
+- [Targets](#targets): [kinds](#target-kinds-folders-trash-keep), [filters](#filters), [outputs](#outputs)
+- [Filter conditions](#filter-conditions): [`match` / `exclude`](#match-and-exclude), [`path`](#path), [`date`](#date), [`geo`](#geo), [`event` and `expand`](#event-and-expand), [`near`](#near), [`device`](#device), [`props`](#props), [`duplicate`](#duplicate), [`series`](#series), [`ai`](#ai-condition), [`not`](#negation-not)
+- [Trash and keep targets](#trash-and-keep-targets)
+- [Series review](#series-review)
 - [Masks](#masks) (syntax, `@refs`, `!` exclusions, built-in masks)
 - [Content presets](#content-presets-the-content-pipe) (built-ins, your own, bundles)
 - [Name presets](#name-presets-the-rename-pipe)
 - [`[ai]`](#ai)
+- [Migration from the three stages](#migration-from-the-three-stages)
 - [Where related files live](#related-files)
 
 ## How a file is routed
 
-Every file found in a source goes through three stages, in this order. **Each stage is
-first-match-wins and a file ends up in exactly one target.**
+Targets are **one ordered list**, `[[targets]]`. You sort it by hand (the GUI has drag handles and
+up/down buttons); the order alone decides which target takes a file.
 
-1. **`targets.before_ai`**: name masks. The first target with a filter that takes the file wins.
-   Use it for files you can recognise by name (screenshots, TikTok downloads, files already in
-   their final place). These files are never sent to the AI.
-2. **`targets.ai`**: one Claude request per file that is still unrouted and fits at least one AI
-   target (its source is listed and the `prefilter` mask lets it through). The model picks one of the
-   categories (your AI targets) or "none". An unsure answer goes to the review list instead of being
-   applied (unless you pass `--accept-low`).
-3. **`targets.after_ai`**: name masks again, for everything still unrouted, including files the AI
-   called "none".
+1. The sources are scanned once. That list of files is frozen for the run: a file placed by this
+   run is not seen again from its new place.
+2. Your manual decisions (made in the GUI review/Check screens) apply first, per file.
+3. Every other file walks the list from the top. The first target that has a filter matching the
+   file takes it, and later targets never see it. **A file ends up in exactly one target.**
+4. A file that no target takes is *unmatched*: Gallery leaves it alone and lists it (see
+   `gallery unmatched` and the triage view in the GUI). A file that a filter would take but for an
+   `exclude` mask is left alone on purpose and is not reported as unmatched.
 
-A file that no target takes is *unmatched*; Gallery leaves it alone and lists it (see
-`gallery unmatched` and the triage view in the GUI). A file that a filter would take but for an
-`exclude` mask is left alone on purpose and is not reported as unmatched.
-
-Your manual decisions (made in the GUI review/Check screens) override all of this per file.
+Conditions that need more than the file itself (events, neighbours, duplicates, series) are
+computed on the whole frozen file list, before routing, so they do not depend on the order of the
+targets. The AI is just one more condition, `ai`; see [`ai`](#ai-condition). The order is strict for
+it too: a file reaches the AI only when the walk reaches a filter with `ai` whose other conditions
+hold for it.
 
 ## `[[sources]]`
 
@@ -76,71 +80,79 @@ ai_suffix_file = "ai/camera-suffix.md"
 Changing a prefix or suffix changes the prompt, so the AI is asked again for that source's files
 (answers are cached per prompt). See [AI setup in the README](../README.md#ai-setup).
 
-## Targets
+## `[places]`
 
-A *target* is "a kind of file" plus where it goes. Target names must be unique across all stages.
-
-### Mask targets (`before_ai` and `after_ai`)
-
-```toml
-[[targets.before_ai]]
-name = "Screenshots"
-
-[[targets.before_ai.filters]]
-sources = ["camera", "partner"]            # source ids this filter reads
-match   = ["@screenshot", "@screen-recording"]   # mask: which file names (list = OR); omit = any file
-exclude = ["*-edited*"]                    # optional: names this filter must NOT take
-
-[[targets.before_ai.outputs]]
-dir = "~/Media/Screenshots/{YYYY}"
-content = ["meta-full"]
-rename  = ["capture-date"]
-```
-
-A target has any number of `filters` (it takes a file if **any** filter matches) and any number of
-`outputs` (each output is produced for every file the target takes).
-
-| Filter key | Meaning |
-|---|---|
-| `sources` | List of source ids. A filter with no sources matches nothing. |
-| `match` | [Mask](#masks) on the file **name** (not the path). Omitted: any file. |
-| `exclude` | Mask; a name matching it is not taken by this filter. |
-
-### AI targets (`targets.ai`)
-
-An AI target is a *category* the model can choose.
+Named points for the [`geo`](#geo) and [`event`](#event-and-expand) conditions. There is no reverse
+geocoding (no country or city names): a place is a point and a radius that you define. The GUI edits
+them under Settings → Places.
 
 ```toml
-[[targets.ai]]
-name = "Receipts"
-sources = ["camera"]
-description = "Photos of receipts, invoices and price tags."   # required, not empty
-
-[targets.ai.prefilter]          # optional: only files whose name passes are sent to the AI at all
-match = "@photo"
-exclude = "@screenshot"
-
-[[targets.ai.outputs]]
-dir = "~/Documents/Receipts"
-rename = ["capture-date"]
+[places]
+home  = { lat = 47.0245, lon = 28.8323, km = 2 }
+dacha = { lat = 46.98,   lon = 28.70,   km = 1 }
 ```
 
 | Key | Meaning |
 |---|---|
-| `name` | The category name the model answers with. |
-| `description` | Shown to the model next to the name; this is your main lever on accuracy. Required. |
-| `sources` | Source ids whose files may be classified into this category. |
-| `prefilter.match` / `prefilter.exclude` | Name masks deciding which files can be offered this category (e.g. only photos). A file that fits no AI target is not sent to the AI. |
+| `lat`, `lon` | Decimal degrees. |
+| `km` | Radius in kilometres. A file is "in" the place when its GPS point is at most `km` from the centre. |
 
-The model sees a 512 px preview of a photo, or three 400 px frames of a video, never the original.
-If it answers "none" or is unsure, see the routing rules above.
+A place is used as `"@home"` (the name after `@`). Using a place that is not defined is an error.
+
+## Targets
+
+A *target* is "a kind of file" plus what happens to it. Target names must be unique. The list order
+is the routing order (see above).
+
+```toml
+[[targets]]
+name = "Documents"                    # required, unique
+kind = "folders"                      # "folders" (default) | "trash" | "keep"
+
+[[targets.filters]]                   # a target takes a file when ANY filter matches
+sources = ["camera"]                  # source ids this filter reads
+match = "@photo"                      # file-name mask
+ai = "Photos of documents: passports, contracts, forms, printed pages."
+
+[[targets.outputs]]                   # only for kind = "folders"
+dir = "~/Documents/Scans"
+rename = ["capture-date"]
+```
+
+### Target kinds: folders, trash, keep
+
+| `kind` | What happens to a file the target takes | `outputs` |
+|---|---|---|
+| `folders` (default) | The outputs are written and verified, then the source goes to the trash (or is moved, see [Outputs](#outputs)). | any number |
+| `trash` | The source goes to the trash, nothing is written. See [Trash and keep targets](#trash-and-keep-targets). | none (an error if given) |
+| `keep` | The file stays exactly where it is, and no target below sees it. | none (an error if given) |
+
+### Filters
+
+A target has any number of `filters` (it takes a file if **any** filter matches). A filter is
+`sources` plus conditions; **every condition of a filter must hold (AND)**. All conditions are
+optional: a filter with only `sources` takes every file of those sources.
+
+| Filter key | Meaning |
+|---|---|
+| `sources` | List of source ids. A filter with no sources matches nothing. |
+| `match` | [Mask](#masks) on the file **name**. Omitted: any file. |
+| `exclude` | Mask; a name matching it is not taken by this filter. |
+| `path` | Glob on the path inside the source. See [`path`](#path). |
+| `date`, `geo`, `event`, `near`, `device`, `props`, `duplicate`, `series` | Conditions, one subsection each below. |
+| `ai` | The AI condition: a category description. |
+| `expand` | `"event"`: take the whole event of a matching file. See [`event` and `expand`](#event-and-expand). |
+
+Each condition holds when **all** of its given sub-options hold. A condition with missing data (a
+photo without a capture date, without GPS, without a tag) is **false**, never an error; the explain
+panel says why ("no capture date", "no GPS").
 
 ### Outputs
 
 Every target has `[[...outputs]]`. An output is one destination for the file:
 
 ```toml
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir        = "~/Media/Timeline/{YYYY}/{MM}"
 server_dir = "/srv/media/Timeline/{YYYY}/{MM}"   # optional; used for server plans
 content    = ["meta-full", "compress-all"]
@@ -171,8 +183,308 @@ Safety-relevant behaviour of outputs (details in [architecture](architecture.md#
 - **In place:** if an output's folder is the source's own folder (or inside its source root) and the
   content pipe is empty, the source is not copied or trashed: it is *renamed or moved* there
   (a file that already has the right name is left out of the plan as "unchanged"). This is how the
-  "Screenshots (in place)" example sorts files into `year/month` folders without duplicating them.
+  "Screenshots" example in `examples/gallery.toml` sorts files into `year/month` folders without duplicating them.
 - An output with no `content` and no `rename` is a backup copy (byte for byte).
+
+## Filter conditions
+
+All conditions below go directly into a `[[targets.filters]]` table, next to `sources` and `match`.
+Conditions that look at neighbouring files (`event`, `near`, `duplicate`, `series`) look at **every
+file of the scan**, not only at files still unmatched when the walk reaches the target.
+
+### `match` and `exclude`
+
+The mask syntax is the same as everywhere else ([Masks](#masks)): `@name` refers to a named mask,
+a list means OR, an item starting with `!` excludes.
+
+```toml
+match   = ["@photo", "@video"]
+exclude = "*-edited*"
+```
+
+`match` and `exclude` see only the **file name**; use [`path`](#path) for folders.
+
+### `path`
+
+A glob (or a list, OR) on the path **relative to the source root**. A `!` item excludes.
+
+```toml
+path = "WhatsApp/**"                       # everything below the WhatsApp folder
+path = ["Trips/**", "!Trips/**/raw/**"]    # trips, but not their raw folders
+```
+
+### `date`
+
+Which date to look at and which constraints it has to meet.
+
+```toml
+date = { source = "capture",                     # capture (default) | file_mtime | name
+         range = "2026-08-12..2026-08-18",       # open ends allowed: "2026-01-01.."
+         older_than = "30d", newer_than = "1y",
+         months = [6, 7, 8], weekdays = ["sat", "sun"],
+         time = "22:00..05:00" }                 # a time of day; may wrap midnight
+```
+
+- `capture` is the same capture-date resolution as the name presets (EXIF, QuickTime, the file name,
+  the file time as a last resort), in the plan's time zone. `name` is the date written in the file
+  name; `file_mtime` is the modification time.
+- A file without the chosen date never matches a `date` condition.
+- `older_than` / `newer_than` are ages measured from now. Durations everywhere (`gap`, `time`, `min_duration`, ...) are a whole number and a unit: `s`, `m` (minutes), `h`, `d`, `w`, `y` (365 days).
+- `time` is a time-of-day window and may wrap midnight (`22:00..05:00`).
+
+### `geo`
+
+```toml
+geo = "@home"                                  # inside the place
+geo = "!@home"                                 # outside the place (the file must have GPS)
+geo = ["@home", "@dacha"]                      # inside any of them (OR)
+geo = { lat = 46.5, lon = 30.7, km = 5 }       # an inline circle
+geo = { has_gps = false }                      # files without GPS
+```
+
+Places come from [`[places]`](#places). A file without GPS does not match `geo` (not even `"!@home"`),
+but it matches `has_gps = false`. The table form also takes `not = true`; for the string and list
+forms write `"!@place"`.
+
+### `event` and `expand`
+
+Events group the files of some sources by time: files sorted by capture time, and a gap longer
+than `gap` starts a new event. Optionally a jump in place (`km`) between two consecutive GPS-tagged
+files splits an event too. `event` is a condition on the event a file belongs to:
+
+```toml
+event = { sources = ["camera", "olga"],    # which files form events (default: the filter's sources)
+          gap = "4h", km = 30,             # split on a pause over 4 h or a jump over 30 km
+          min_files = 10,                  # the event has at least 10 files
+          min_duration = "1d", max_duration = "30d",
+          away_from = "@home" }            # at least one file of the event is outside the place
+```
+
+Events are computed on the whole frozen file list, per set of event parameters. A file without a
+capture date belongs to no event.
+
+`expand = "event"` is a filter-level flag. If the filter's **other** conditions hold for at least
+one file of an event, the filter matches **every file of that event** that is in its `sources`
+(still subject to `match` / `exclude`, and only files that no earlier target took). The event's
+parameters come from the filter's `event` table if there is one, else the defaults (`gap = "4h"`,
+the filter's sources).
+
+```toml
+# Everything shot on a trip: some file of the event is far from home, so all of it goes here.
+[[targets]]
+name = "Trips"
+[[targets.filters]]
+sources = ["camera"]
+match = "@media"
+event = { gap = "12h", away_from = "@home" }
+expand = "event"
+[[targets.outputs]]
+dir = "~/Media/Trips/{YYYY}"
+```
+
+The seed must be a file that is still untaken when the walk reaches this target, so the order is
+respected. `expand` and `ai` in one filter is a config error.
+
+### `near`
+
+The file has at least `min` neighbours among the files of the given sources, in the whole scan:
+
+```toml
+near = { sources = ["olga"], time = "2h", km = 1, min = 1 }
+```
+
+| Key | Meaning |
+|---|---|
+| `sources` | Required: whose files count as neighbours. |
+| `time` | Largest time difference (default `"2h"`). |
+| `km` | Largest distance. Checked only when **both** files have GPS; if either lacks it, the time alone decides. |
+| `min` | Neighbours needed (default 1). |
+| `require_gps` | `true`: a pair where either file has no GPS does not count. |
+
+Times are compared in the plan's time zone, the same as the name presets, so two phones set to
+different zones are compared by the real moment, not by the clock on the screen. Explain shows a
+miss as `near: 0 files of olga within 2h / 1.0 km, at least 1 needed`.
+
+**Photos taken together** (two phones, `camera` and `olga`): both people's photos go to a shared
+folder, frames with neither person in them included, and the private ones stay with their owner.
+
+```toml
+[[targets]]
+name = "Together"
+
+[[targets.filters]]
+sources = ["camera"]
+match = "@media"
+near = { sources = ["olga"], time = "2h", km = 1 }
+expand = "event"
+event = { sources = ["camera", "olga"], gap = "4h" }
+
+[[targets.filters]]
+sources = ["olga"]
+match = "@media"
+near = { sources = ["camera"], time = "2h", km = 1 }
+expand = "event"
+event = { sources = ["camera", "olga"], gap = "4h" }
+
+[[targets.outputs]]
+dir = "~/Sync/Shared/{YYYY}"
+rename = ["capture-date"]
+```
+
+There is no special "together" concept: it is `near` for the seed and `expand` for the rest of the
+event. Put the target above the ones that take each person's photos.
+
+### `device`
+
+EXIF / QuickTime make, model and software. Each is a glob or a list, case-insensitive, with the
+usual `!` exclusion:
+
+```toml
+device = { make = "Google", model = "Pixel*", software = "!*Snapseed*" }
+```
+
+A missing tag means no match.
+
+### `props`
+
+Media and file properties. Numeric values take ranges: `"1MB..20MB"`, `"..1080"`, `">=60"`.
+
+```toml
+props = { size = "..500KB", width = ">=3000", height = "..1080",
+          megapixels = ">=12", orientation = "portrait",   # portrait | landscape | square
+          aspect = "16:9", duration = "..10s", fps = ">=50",
+          video_codec = ["hevc", "h264"], audio_codec = "aac",
+          has_audio = false, container = "mp4",
+          sharpness = "<40",                              # blur score, 0..100
+          has_tag = ["GPSLatitude"], missing_tag = ["DateTimeOriginal"] }
+```
+
+- Dimensions follow the EXIF orientation (a portrait shot stored sideways is still portrait).
+- Codecs, `fps`, `duration` and `container` come from the video probe; the rest from exiftool.
+- `has_tag` / `missing_tag` take exiftool tag names, with an optional group (`EXIF:Make`).
+- `sharpness` is a blur score from 0 (blurry) to 100, computed in Rust on a downscaled decode
+  (variance of the Laplacian) and cached. Photos only; a video has no score, so the condition is false.
+
+### `duplicate`
+
+Byte-identical content (compared by size, then a hash):
+
+```toml
+duplicate = { of = ["sources", "outputs"] }
+```
+
+- `sources`: another file in the scan has the same content. The copy treated as the *original* (so
+  it is not a duplicate) is the first by source order in `[[sources]]`, then the oldest capture
+  date, then the path. Exactly one copy of a group never matches.
+- `outputs`: the same content already exists in an output folder of any `folders` target (the part
+  of `dir` before the first `{`, scanned recursively, hashed lazily and cached). A file is never its
+  own duplicate. Only files that exist at plan time count, not files this run is about to place.
+
+A scan never trashes the last copy of a group, see [Trash and keep targets](#trash-and-keep-targets).
+
+### `series`
+
+Near-identical shots taken seconds apart (a burst, re-takes). Files of one source are sorted by
+capture time; consecutive files closer than `gap` whose thumbnails look alike (a perceptual hash,
+`similar = true`) form a series.
+
+```toml
+series = { gap = "5s", similar = true, keep = "best", by = "sharpness" }
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `gap` | `"5s"` | Consecutive shots closer than this may belong to one series. |
+| `similar` | `true` | The shots must also look alike. |
+| `keep` | `"best"` | The condition holds for every shot of a series **except** the best one. |
+| `by` | `"sharpness"` | How the best shot is chosen: `sharpness`, `size` or `resolution`. |
+
+A single file (no series) never matches. All `series` conditions of a config must use the same
+`gap`, `similar` and `by`. The typical use is a `trash` target for the blurry re-takes; the best
+shot walks on to the targets below. Matches never go straight to the target: they are held for
+[series review](#series-review).
+
+<a id="ai-condition"></a>
+
+### `ai`
+
+A category description for the AI, like the old AI targets: the model sees a 512 px preview of a
+photo, or three 400 px frames of a video, never the original and never the file name.
+
+```toml
+[[targets]]
+name = "Receipts"
+[[targets.filters]]
+sources = ["camera"]
+match = "@photo"                              # keeps non-photos from being sent at all
+ai = "Photos of receipts, invoices and price tags."
+[[targets.outputs]]
+dir = "~/Documents/Receipts"
+```
+
+- The category the model answers with is the **target name**. If several filters of one target have
+  `ai`, the description sent is the one of the filters whose other conditions hold, joined with `; `.
+- **Strict order, one request.** When a file reaches the first target with a matching `ai` filter,
+  one request is sent with every AI category the file could still reach (the AI filters of this and
+  later targets whose other conditions hold for it). The model picks the best category or "none".
+  The walk then goes on in order: an `ai` condition holds only for the chosen category, and a non-AI
+  target between two AI targets still gets the file first if it matches.
+- An unsure answer goes to the review list instead of being applied (unless you pass `--accept-low`).
+  Cached answers and your learned corrections stay valid.
+- `description` must not be empty. `ai` and `expand` in one filter is an error.
+
+<a id="negation-not"></a>
+
+### Negation: `not`
+
+Every condition **table** accepts `not = true`, which negates the whole table (an AND of its
+sub-options): `near = { sources = ["olga"], time = "2h", not = true }` means "no olga file within two
+hours". A condition with missing data is false, so with `not = true` it is true. `geo` also accepts
+`"!@home"`.
+
+## Trash and keep targets
+
+A `kind = "trash"` target moves the files it takes to the trash, with no outputs. It is an
+ordinary target in the list: it takes a file when the walk reaches it and a filter matches.
+
+- The move happens in the apply phase after all placements, with the same journal, verification
+  skip and undo rules as an original that is trashed after its outputs are placed: a trashed file
+  has no outputs to verify, so it is trashed directly, and **undo restores it**.
+- `GALLERY_TRASH=folder` applies as everywhere else.
+- **Never lose the last copy.** After routing, a plan check keeps one file of every group of
+  identical files (see [`duplicate`](#duplicate), also with `of = ["outputs"]` only) and one shot of
+  every [series](#series) out of the trash. If every copy or shot would be trashed (for example the
+  original is taken by an earlier `trash` target, or both copies match trash targets), the original
+  or best one is downgraded to review ("every other copy goes to the trash too: this one is kept for
+  review") and nothing is lost.
+- A plan with a trash or keep item has plan format version 2; see
+  [architecture](architecture.md#plan-versions).
+
+A `kind = "keep"` target takes the file and does nothing: the file stays where it is and is not
+counted as unmatched. Use it to protect files from the targets below, for example photos shot at
+home at night:
+
+```toml
+[[targets]]
+name = "Night shots at home"
+kind = "keep"
+[[targets.filters]]
+sources = ["camera"]
+geo = "@home"
+date = { time = "22:00..05:00" }
+```
+
+## Series review
+
+Files matched through a [`series`](#series) condition never go straight to the target. They are
+held in the review list, where the Decide screen shows the whole series side by side with the
+suggested best shot marked. You confirm it or pick another best shot, and only then do the others go
+to the matching target (for example the trash). The confirmation is a manual decision stored per
+series, so later runs do not ask again. The best shot is never sent to the target; it walks on to the
+targets below. In the CLI the plan shows these files in its review list with the series members.
+
+A negated series condition (`not = true`) is not held: it matches the files that are *not* in the
+way, so those go straight to the target.
 
 ## Masks
 
@@ -415,6 +727,33 @@ examples = 20                    # default: how many of your latest corrections 
 Answers are cached per file (path, size, mtime), model and prompt in
 `<cache dir>/gallery/ai-cache.jsonl`, so a file is asked about only once; examples are deliberately
 not part of the cache key.
+
+## Migration from the three stages
+
+Older configs have three fixed stages instead of one list:
+
+```toml
+[[targets.before_ai]]      # name masks
+[[targets.ai]]             # name, sources, description, [targets.ai.prefilter], outputs
+[[targets.after_ai]]       # name masks
+```
+
+They still load and mean the same as before: `Config::load` concatenates `before_ai`, `ai` and
+`after_ai`, in that order, into one `[[targets]]` list. An AI target becomes a target with one filter
+`{ sources, match / exclude from its prefilter, ai = description }`. Targets are referred to by name
+in plans, overrides and reports, so those stay valid.
+
+- `gallery check -c CONFIG` (and every command that loads the config) prints a one-line notice
+  when the file uses the old shape. `gallery check` exits 0.
+- The GUI saves in the new shape. It writes a `.bak` copy of the file first, then rewrites it
+  once, keeping the comments where it can. Routing does not change.
+- An empty `[targets]` table is not the old shape.
+- `gallery scan --no-ai` now means "no `ai` condition holds for any file"; in the old shape, that
+  is the same as the old "skip the AI stage".
+
+To migrate by hand, rename the tables to `[[targets]]`/`[[targets.filters]]`/`[[targets.outputs]]`,
+keep the order, and turn the AI target's `description` and `prefilter` into `ai` and `match` /
+`exclude` of its filter.
 
 ## Related files
 
