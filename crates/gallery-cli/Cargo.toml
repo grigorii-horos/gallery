@@ -18,6 +18,7 @@ serde_json = "1"
 tempfile = "3"
 
 [dev-dependencies]
+gallery-core = { path = "../gallery-core", features = ["test-paths"] }
 assert_cmd = "2"
 blake3 = "1"
 wiremock = "0.6.5"

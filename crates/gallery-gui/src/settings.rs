@@ -58,10 +58,8 @@ impl TraySettings {
 /// `settings.json` in the GUI data dir (`$GALLERY_DATA_DIR/` in debug builds
 /// when set, else `<user data dir>/gallery/`).
 pub fn data_dir() -> Option<PathBuf> {
-    match crate::data_dir_override() {
-        Some(dir) => Some(dir),
-        None => dirs::data_dir().map(|d| d.join("gallery")),
-    }
+    // The core's own rule (it also keeps test runs off the real folder).
+    gallery_core::paths::data_dir()
 }
 
 /// A missing or broken file gives the defaults.
