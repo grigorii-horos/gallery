@@ -9,6 +9,13 @@
 
 use std::path::{Path, PathBuf};
 
+// A release test run would ignore `$GALLERY_DATA_DIR` and hit the real dirs.
+#[cfg(all(not(debug_assertions), feature = "test-paths"))]
+compile_error!(
+    "the `test-paths` feature needs debug assertions (`cargo test`, not `--release`): \
+     only then are test runs kept off the real data and cache dirs"
+);
+
 /// `$GALLERY_DATA_DIR`, debug builds only; in test runs, a folder of the
 /// process when it is not set.
 #[cfg(debug_assertions)]
@@ -17,20 +24,19 @@ pub fn data_override() -> Option<PathBuf> {
         .filter(|v| !v.is_empty())
         .map(|v| crate::config::expand_tilde(Path::new(&v)));
     #[cfg(any(test, feature = "test-paths"))]
-    let var = var.or_else(|| Some(test_root().to_path_buf()));
+    let var = var.or_else(|| test_root().map(Path::to_path_buf));
     var
 }
 
 /// `<target dir>/test-state/<pid>`: not tmpfs, and the folders of earlier
-/// runs (older than a day) are removed when a new one is made.
+/// runs (older than a day) are removed when a new one is made. `None` when
+/// this is not a test-harness binary (see `test_state_dir_for`).
 #[cfg(all(debug_assertions, any(test, feature = "test-paths")))]
-fn test_root() -> &'static Path {
-    static ROOT: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+fn test_root() -> Option<&'static Path> {
+    static ROOT: std::sync::OnceLock<Option<PathBuf>> = std::sync::OnceLock::new();
     ROOT.get_or_init(|| {
         let exe = std::env::current_exe().unwrap_or_default();
-        // target/debug/deps/<test binary>: the target dir is three levels up.
-        let target = exe.ancestors().nth(3).unwrap_or(Path::new("."));
-        let all = target.join("test-state");
+        let all = test_state_dir_for(&exe)?;
         let day = std::time::Duration::from_secs(24 * 3600);
         for old in std::fs::read_dir(&all).into_iter().flatten().flatten() {
             let aged = old
@@ -43,8 +49,24 @@ fn test_root() -> &'static Path {
         }
         let own = all.join(std::process::id().to_string());
         let _ = std::fs::create_dir_all(&own);
-        own
+        Some(own)
     })
+    .as_deref()
+}
+
+/// Where test runs keep their state for the executable `exe`: only a
+/// test-harness binary (`target/<profile>/deps/<name>`) is redirected, to
+/// `target/test-state`. Cargo builds the plain binaries with the `test-paths`
+/// feature too during `cargo test`; those (`target/<profile>/gallery`) must
+/// keep the real places.
+#[cfg(all(debug_assertions, any(test, feature = "test-paths")))]
+fn test_state_dir_for(exe: &Path) -> Option<PathBuf> {
+    let deps = exe.parent()?;
+    if deps.file_name()? != "deps" {
+        return None;
+    }
+    // target/<profile>/deps/<exe>: the target dir is three levels up.
+    Some(exe.ancestors().nth(3)?.join("test-state"))
 }
 
 #[cfg(not(debug_assertions))]
@@ -95,6 +117,19 @@ mod tests {
             assert!(p.starts_with(target.join("test-state")), "{p:?}");
         }
         assert_ne!(cache_dir(), dirs::cache_dir().map(|d| d.join("gallery")));
+    }
+
+    #[test]
+    fn only_test_harness_binaries_are_redirected() {
+        let t = Path::new("/r/target");
+        assert_eq!(
+            test_state_dir_for(&t.join("debug/deps/gallery-1a2b")),
+            Some(t.join("test-state"))
+        );
+        // The plain binaries Cargo leaves in target/<profile>.
+        assert_eq!(test_state_dir_for(&t.join("debug/gallery")), None);
+        assert_eq!(test_state_dir_for(&t.join("debug/gallery-gui")), None);
+        assert_eq!(test_state_dir_for(Path::new("gallery")), None);
     }
 
     #[test]

@@ -188,7 +188,7 @@ fn read_cached(
 
 /// For each shard with new entries: re-read it from disk (another process
 /// may have written it while exiftool ran), add the entries, drop entries of
-/// vanished files, write it atomically. A failure to write only costs the
+/// files gone from a folder that is still there, write it atomically. A failure to write only costs the
 /// next run a re-read.
 fn save_shards(dir: &Path, tool: &str, fresh: HashMap<String, Vec<(String, Entry)>>) {
     if fresh.is_empty() {
@@ -198,7 +198,12 @@ fn save_shards(dir: &Path, tool: &str, fresh: HashMap<String, Vec<(String, Entry
     for (shard, entries) in fresh {
         let mut cache = load_shard(dir, &shard, tool);
         cache.entries.extend(entries);
-        cache.entries.retain(|k, _| Path::new(k).exists());
+        // A missing file goes only when its folder is still there: an SD
+        // card or a share not mounted now keeps its entries.
+        cache.entries.retain(|k, _| {
+            let p = Path::new(k);
+            p.exists() || !p.parent().is_some_and(Path::is_dir)
+        });
         if let Ok(bytes) = serde_json::to_vec(&cache) {
             let _ = crate::paths::write_atomic(&dir.join(format!("{shard}.json")), &bytes);
         }
@@ -789,6 +794,34 @@ mod tests {
             3,
             "other2 in an untouched shard stays: {keys:?}"
         );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn saving_keeps_entries_of_an_unmounted_folder() {
+        let d = tempfile::tempdir().unwrap();
+        let cache = d.path().join("exif");
+        let entry = |k: &str| {
+            (
+                k.to_string(),
+                Entry {
+                    size: 1,
+                    mtime_ns: 1,
+                    rec: json!({}),
+                },
+            )
+        };
+        let away = d.path().join("sd-card/a.jpg");
+        let here_gone = d.path().join("gone.jpg");
+        let ka = away.to_string_lossy().into_owned();
+        let kg = here_gone.to_string_lossy().into_owned();
+        let shard = shard_of(&ka);
+        let mut batch = HashMap::from([(shard.clone(), vec![entry(&ka)])]);
+        batch.entry(shard_of(&kg)).or_default().push(entry(&kg));
+        save_shards(&cache, "T", batch);
+        let keys = cached_keys(&cache);
+        assert!(keys.contains(&ka), "unmounted folder kept: {keys:?}");
+        assert!(!keys.contains(&kg), "gone from a present folder: {keys:?}");
     }
 
     #[cfg(unix)]
