@@ -360,8 +360,8 @@ impl NearIndex {
 /// Everything computed over the frozen list; indices are into `files`.
 #[derive(Debug, Clone, Default)]
 pub struct Groups {
-    /// `(event parameters, file)` → index into `events[parameters]`.
-    pub event_of: HashMap<(EventKey, usize), usize>,
+    /// Event parameters → file → index into `events[parameters]`.
+    pub event_of: HashMap<EventKey, HashMap<usize, usize>>,
     pub events: HashMap<EventKey, Vec<Event>>,
     /// Duplicate → its original (the copy that never matches).
     pub dup_original: HashMap<usize, usize>,
@@ -383,7 +383,7 @@ pub struct Groups {
 impl Groups {
     /// The event file `i` belongs to under `key`.
     pub fn event(&self, key: &EventKey, i: usize) -> Option<&Event> {
-        let e = *self.event_of.get(&(key.clone(), i))?;
+        let e = *self.event_of.get(key)?.get(&i)?;
         self.events.get(key)?.get(e)
     }
 
@@ -397,9 +397,10 @@ impl Groups {
     }
 }
 
-/// How many neighbours file `i` has under `c` (`0` without a capture date):
-/// files of `c.sources` within `c.time`, and within `c.km` when both have
-/// GPS; a pair lacking GPS counts unless `require_gps`.
+/// How many neighbours file `i` has under `c`, counted up to `c.min` (enough
+/// to hold; `0` without a capture date): files of `c.sources` within
+/// `c.time`, and within `c.km` when both have GPS; a pair lacking GPS counts
+/// unless `require_gps`.
 pub fn near_count(groups_index: &NearIndex, i: usize, c: &NearCond) -> usize {
     let Some(Some((t, gps))) = groups_index.at.get(i).copied() else {
         return 0;
@@ -430,6 +431,9 @@ pub fn near_count(groups_index: &NearIndex, i: usize, c: &NearCond) -> usize {
                 _ => !c.require_gps,
             };
             n += usize::from(ok);
+            if n >= c.min {
+                return n;
+            }
         }
     }
     n
@@ -486,11 +490,12 @@ fn compute_with(
     }
     for key in &needs.events {
         let evs = events_for(key, files, facts);
-        for (e, ev) in evs.iter().enumerate() {
-            for &i in &ev.members {
-                g.event_of.insert((key.clone(), i), e);
-            }
-        }
+        let of = evs
+            .iter()
+            .enumerate()
+            .flat_map(|(e, ev)| ev.members.iter().map(move |&i| (i, e)))
+            .collect();
+        g.event_of.insert(key.clone(), of);
         g.events.insert(key.clone(), evs);
     }
     if needs.duplicates.is_empty() && !needs.series && !needs.sharpness {
@@ -555,15 +560,14 @@ impl Work<'_> {
     /// Sharpness and dHash of photo `i`; `None` when it cannot be measured.
     fn measure(&self, i: usize) -> Option<(f32, u64)> {
         let f = &self.files[i];
-        let key = thumbs::cache_name(&f.path, f.size, f.mtime_ns);
-        if let Some(m) = self.metrics.get(&key)
+        if let Some(m) = self.metrics.get(&f.path, f.size, f.mtime_ns)
             && let (Some(s), Some(d)) = (m.sharpness, m.dhash)
         {
             return Some((s, d));
         }
         let jpeg = (self.thumb)(&f.path).ok()?;
         let (s, d) = image_metrics::measure(&jpeg).ok()?;
-        self.metrics.update(&key, |m| {
+        self.metrics.update(&f.path, f.size, f.mtime_ns, |m| {
             m.sharpness = Some(s);
             m.dhash = Some(d);
         });
@@ -586,15 +590,19 @@ impl Work<'_> {
 
     /// blake3 of a file's content (cached by path, size, mtime).
     fn hash(&self, path: &Path, size: u64, mtime_ns: i128) -> Option<String> {
-        let key = thumbs::cache_name(path, size, mtime_ns);
-        if let Some(h) = self.metrics.get(&key).and_then(|m| m.blake3) {
+        if let Some(h) = self
+            .metrics
+            .get(path, size, mtime_ns)
+            .and_then(|m| m.blake3)
+        {
             return Some(h);
         }
         let mut file = std::fs::File::open(path).ok()?;
         let mut hasher = blake3::Hasher::new();
         hasher.update_reader(&mut file).ok()?;
         let h = hasher.finalize().to_hex().to_string();
-        self.metrics.update(&key, |m| m.blake3 = Some(h.clone()));
+        self.metrics
+            .update(path, size, mtime_ns, |m| m.blake3 = Some(h.clone()));
         Some(h)
     }
 
@@ -787,11 +795,25 @@ fn duplicates(
             Ok(h.map(|h| (i, h)))
         })
         .collect::<Result<Vec<_>>>()?;
+    // A scanned file that also lies under an output root (spelled another
+    // way: a source reached through a link) keeps the hash it already has.
+    let by_real: HashMap<PathBuf, &String> = if outputs.is_empty() {
+        HashMap::new()
+    } else {
+        hashed
+            .iter()
+            .flatten()
+            .map(|(i, h)| (canon(&files[*i].path), h))
+            .collect()
+    };
     let out_hashed = outputs
         .par_iter()
         .map(|o| {
             work.cancel.check()?;
-            let h = work.hash(&o.path, o.size, o.mtime_ns);
+            let h = match by_real.get(&o.real) {
+                Some(h) => Some((*h).clone()),
+                None => work.hash(&o.path, o.size, o.mtime_ns),
+            };
             work.step(&done, total, &o.path);
             Ok(h.map(|h| ((o.size, h), o)))
         })
@@ -1497,6 +1519,25 @@ event = { gap = "45m", min_files = 2 }
     }
 
     #[test]
+    fn near_count_stops_at_min() {
+        let cfg = config(NEAR);
+        let files = vec![
+            virt("camera", "c.jpg"),
+            virt("olga", "o1.jpg"),
+            virt("olga", "o2.jpg"),
+            virt("olga", "o3.jpg"),
+        ];
+        let facts = vec![fact(Some("2026-08-01 12:00:00"), None); 4];
+        let g = run(&cfg, &files, &facts, &no_thumbs);
+        let mut c = cfg.targets[0].filters[0].near.clone().unwrap();
+        assert_eq!(near_count(&g.near, 0, &c), 1);
+        c.min = 2;
+        assert_eq!(near_count(&g.near, 0, &c), 2);
+        c.min = 5;
+        assert_eq!(near_count(&g.near, 0, &c), 3, "fewer than min: all of them");
+    }
+
+    #[test]
     fn near_without_capture_date_misses() {
         let cfg = config(NEAR);
         let files = vec![virt("camera", "c.jpg"), virt("olga", "o.jpg")];
@@ -1622,6 +1663,78 @@ dir = "{out}/{{YYYY}}"
         assert_eq!(before, after);
     }
 
+    /// A scanned file under an output root, its source spelled through a
+    /// link: hashed once, not again as an output file.
+    #[cfg(unix)]
+    #[test]
+    fn a_file_under_a_source_and_an_output_root_is_hashed_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(tmp.path()).unwrap();
+        let write = |rel: &str, body: &[u8]| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+            p
+        };
+        let cam = write("camera/b.jpg", b"placed before");
+        write("out/2026/b.jpg", b"placed before");
+        std::os::unix::fs::symlink(root.join("out"), root.join("link")).unwrap();
+        let r = root.display();
+        let text = format!(
+            r#"
+[[sources]]
+id = "camera"
+path = "{r}/camera"
+
+[[sources]]
+id = "outsrc"
+path = "{r}/link"
+
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera", "outsrc"]
+duplicate = {{ of = ["sources", "outputs"] }}
+
+[[targets]]
+name = "Album"
+[[targets.outputs]]
+dir = "{r}/out/{{YYYY}}"
+"#
+        );
+        let cfg: Config = toml::from_str(&text).unwrap();
+        let files = vec![
+            entry("camera", &cam),
+            entry("outsrc", &root.join("link/2026/b.jpg")),
+        ];
+        let facts = vec![fact(None, None); 2];
+        let cache = tempfile::tempdir().unwrap();
+        let g = compute_with(
+            &cfg,
+            &files,
+            &facts,
+            &needs(&cfg),
+            &no_thumbs,
+            Some(cache.path()),
+            &NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert!(g.dup_in_outputs.contains(&0));
+        assert!(!g.dup_in_outputs.contains(&1));
+        let cached: HashMap<String, image_metrics::Metric> =
+            serde_json::from_slice(&std::fs::read(cache.path().join("metrics.json")).unwrap())
+                .unwrap();
+        let mut hashed: Vec<_> = cached
+            .values()
+            .filter(|m| m.blake3.is_some())
+            .filter_map(|m| m.path.clone())
+            .collect();
+        hashed.sort();
+        assert_eq!(hashed, vec![cam, root.join("link/2026/b.jpg")]);
+    }
+
     #[test]
     fn stale_cached_hash_is_not_a_duplicate() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1669,8 +1782,8 @@ dir = "{outdir}/{{YYYY}}"
             let forged = MetricsCache::load(cache.path());
             for p in paths {
                 let m = std::fs::metadata(p).unwrap();
-                let key = thumbs::cache_name(p, m.len(), crate::scan::mtime_ns(&m).unwrap());
-                forged.update(&key, |m| m.blake3 = Some("stale".into()));
+                let mtime_ns = crate::scan::mtime_ns(&m).unwrap();
+                forged.update(p, m.len(), mtime_ns, |m| m.blake3 = Some("stale".into()));
             }
             forged.save().unwrap();
         };

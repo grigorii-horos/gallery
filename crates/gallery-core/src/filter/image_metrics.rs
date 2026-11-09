@@ -108,6 +108,10 @@ pub struct Metric {
     /// blake3 of the whole content, hex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub blake3: Option<String>,
+    /// The file, so a save can drop the entries of files gone or changed;
+    /// entries written before it was recorded get it when next looked up.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub path: Option<PathBuf>,
 }
 
 /// The `metrics.json` cache; safe to share between worker threads.
@@ -144,22 +148,33 @@ impl MetricsCache {
         }
     }
 
-    pub fn get(&self, key: &str) -> Option<Metric> {
-        self.map.lock().unwrap().get(key).cloned()
+    /// What is known about `path` with this size and mtime.
+    pub fn get(&self, path: &Path, size: u64, mtime_ns: i128) -> Option<Metric> {
+        let mut map = self.map.lock().unwrap();
+        let m = map.get_mut(&crate::thumbs::cache_name(path, size, mtime_ns))?;
+        if m.path.is_none() {
+            m.path = Some(path.to_path_buf());
+            *self.dirty.lock().unwrap() = true;
+        }
+        Some(m.clone())
     }
 
-    /// Merge `f`'s changes into the entry `key`.
-    pub fn update(&self, key: &str, f: impl FnOnce(&mut Metric)) {
+    /// Merge `f`'s changes into the entry of `path` with this size and mtime.
+    pub fn update(&self, path: &Path, size: u64, mtime_ns: i128, f: impl FnOnce(&mut Metric)) {
         let mut map = self.map.lock().unwrap();
-        let m = map.entry(key.to_string()).or_default();
+        let key = crate::thumbs::cache_name(path, size, mtime_ns);
+        let m = map.entry(key).or_default();
         let before = m.clone();
         f(m);
+        m.path = Some(path.to_path_buf());
         if *m != before {
             *self.dirty.lock().unwrap() = true;
         }
     }
 
-    /// Write the file back when something changed.
+    /// Write the file back when something changed, without the entries of
+    /// files that are gone or no longer have the size and mtime they were
+    /// measured with.
     pub fn save(&self) -> Result<()> {
         let Some(path) = &self.path else {
             return Ok(());
@@ -167,8 +182,14 @@ impl MetricsCache {
         if !*self.dirty.lock().unwrap() {
             return Ok(());
         }
-        let bytes = serde_json::to_vec(&*self.map.lock().unwrap())
-            .map_err(|e| Error::Io(std::io::Error::other(e)))?;
+        let mut map = self.map.lock().unwrap();
+        map.retain(|key, m| {
+            m.path
+                .as_deref()
+                .is_none_or(|p| current_key(p).as_ref() == Some(key))
+        });
+        let bytes = serde_json::to_vec(&*map).map_err(|e| Error::Io(std::io::Error::other(e)))?;
+        drop(map);
         if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
@@ -176,6 +197,13 @@ impl MetricsCache {
         *self.dirty.lock().unwrap() = false;
         Ok(())
     }
+}
+
+/// The cache key of `p` as it is on disk now; `None` when it is gone.
+fn current_key(p: &Path) -> Option<String> {
+    let m = std::fs::metadata(p).ok()?;
+    let mtime_ns = crate::scan::mtime_ns(&m).ok()?;
+    Some(crate::thumbs::cache_name(p, m.len(), mtime_ns))
 }
 
 #[cfg(test)]
@@ -260,9 +288,42 @@ mod tests {
         let c = MetricsCache::load(dir.path());
         c.save().unwrap();
         assert!(!dir.path().join("metrics.json").exists());
-        c.update("k", |m| m.dhash = Some(u64::MAX));
+        let f = dir.path().join("a.jpg");
+        std::fs::write(&f, b"a").unwrap();
+        let (size, mtime) = stamp(&f);
+        c.update(&f, size, mtime, |m| m.dhash = Some(u64::MAX));
         c.save().unwrap();
         let again = MetricsCache::load(dir.path());
-        assert_eq!(again.get("k").unwrap().dhash, Some(u64::MAX));
+        assert_eq!(again.get(&f, size, mtime).unwrap().dhash, Some(u64::MAX));
+    }
+
+    fn stamp(p: &Path) -> (u64, i128) {
+        let m = std::fs::metadata(p).unwrap();
+        (m.len(), crate::scan::mtime_ns(&m).unwrap())
+    }
+
+    #[test]
+    fn save_drops_entries_of_gone_or_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let mk = |n: &str| {
+            let p = dir.path().join(n);
+            std::fs::write(&p, n).unwrap();
+            p
+        };
+        let (kept, gone, changed) = (mk("kept.jpg"), mk("gone.jpg"), mk("changed.jpg"));
+        let c = MetricsCache::load(dir.path());
+        for p in [&kept, &gone, &changed] {
+            let (size, mtime) = stamp(p);
+            c.update(p, size, mtime, |m| m.dhash = Some(1));
+        }
+        let old = stamp(&changed);
+        std::fs::remove_file(&gone).unwrap();
+        std::fs::write(&changed, "changed, longer").unwrap();
+        c.save().unwrap();
+        let again = MetricsCache::load(dir.path());
+        assert_eq!(again.map.lock().unwrap().len(), 1);
+        let (size, mtime) = stamp(&kept);
+        assert!(again.get(&kept, size, mtime).is_some());
+        assert!(again.get(&changed, old.0, old.1).is_none());
     }
 }
