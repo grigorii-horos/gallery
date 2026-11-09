@@ -193,7 +193,7 @@ pub struct Explanation {
     pub path: PathBuf,
     pub scope: Scope,
     /// Targets that list the file's source (and any that took it).
-    pub stages: Vec<TargetCheck>,
+    pub targets: Vec<TargetCheck>,
     /// Names of the other targets, which do not concern the file's source.
     pub other_targets: Vec<String>,
     pub ai: AiState,
@@ -280,7 +280,7 @@ fn filter_check(cfg: &Config, index: usize, f: &Filter, e: &FileEntry) -> Filter
 }
 
 /// Every target in list order, the order routing walks them.
-fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
+fn target_checks(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
     cfg.targets
         .iter()
         .map(|t| {
@@ -446,7 +446,7 @@ fn base(path: &Path, scope: Scope, verdict: String) -> Explanation {
     Explanation {
         path: path.to_path_buf(),
         scope,
-        stages: Vec::new(),
+        targets: Vec::new(),
         other_targets: Vec::new(),
         ai: AiState::NoCandidates,
         decision: None,
@@ -594,8 +594,8 @@ pub fn explain(
         .map(|(_, d)| d.clone());
     let decision = decision.expect("a routed file gives one decision");
 
-    let mut stages = stages(cfg, &entry);
-    let candidates: Vec<String> = stages
+    let mut checks = target_checks(cfg, &entry);
+    let candidates: Vec<String> = checks
         .iter()
         .filter(|t| t.filters.iter().any(|f| f.ai && f.fit == Fit::Match))
         .map(|t| t.name.clone())
@@ -638,13 +638,13 @@ pub fn explain(
         && info.kind == DecisionKind::Target
     {
         // The first target of that name in list order is the one routing took.
-        if let Some(c) = stages.iter_mut().find(|c| &c.name == t) {
+        if let Some(c) = checks.iter_mut().find(|c| &c.name == t) {
             c.taken = true;
         }
     }
     // Per target: the first condition the file fails (what the real walk
     // saw, groups included).
-    for (c, t) in stages.iter_mut().zip(&cfg.targets) {
+    for (c, t) in checks.iter_mut().zip(&cfg.targets) {
         if !c.taken {
             c.miss = first_miss(cfg, t, &entry, idx, &route_ctx).map(|m| TargetMiss {
                 condition: m.condition.to_string(),
@@ -655,7 +655,7 @@ pub fn explain(
 
     // Targets for other sources are noise: name them once.
     let mut other_targets = Vec::new();
-    let mut stages: Vec<TargetCheck> = stages
+    let mut checks: Vec<TargetCheck> = checks
         .into_iter()
         .filter_map(|mut t| {
             if t.taken || t.filters.iter().any(|f| f.source_ok) {
@@ -667,7 +667,7 @@ pub fn explain(
             }
         })
         .collect();
-    stages.shrink_to_fit();
+    checks.shrink_to_fit();
 
     // Plan as a scan does (the last copy of a duplicate group or a series is
     // held back from the trash), then read this file's part of it.
@@ -726,7 +726,7 @@ pub fn explain(
         scope: Scope::Scanned {
             source: entry.source_id.clone(),
         },
-        stages,
+        targets: checks,
         other_targets,
         ai: ai_state,
         decision: Some(info),
@@ -997,7 +997,7 @@ fn verdict(
             return crate::t!("explain.ai_unsure", target = target, reason = r);
         }
         DecisionKind::Excluded => {
-            let hit = ex.stages.iter().find_map(|t| {
+            let hit = ex.targets.iter().find_map(|t| {
                 t.filters.iter().find_map(|f| {
                     (f.fit == Fit::Excluded)
                         .then_some(f.exclude.as_ref())
@@ -1032,7 +1032,7 @@ fn verdict(
                 _ => {}
             }
             let mut why: Vec<(bool, String)> = ex
-                .stages
+                .targets
                 .iter()
                 .filter(|t| !t.ai)
                 .filter_map(|t| why_filter_misses(t, name))
@@ -1117,10 +1117,10 @@ impl Explanation {
             "├─ {}",
             crate::t!("explain.tree.source", scope = scope_text(&self.scope))
         );
-        if !self.stages.is_empty() {
+        if !self.targets.is_empty() {
             let _ = writeln!(o, "├─ {}", crate::t!("explain.tree.targets"));
         }
-        for t in &self.stages {
+        for t in &self.targets {
             let mark = if t.taken {
                 crate::t!("explain.mark_took")
             } else if t.candidate {

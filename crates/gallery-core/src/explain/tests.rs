@@ -123,7 +123,7 @@ fn processed_file_shows_steps_and_destination() {
         Some("no date for the template")
     );
     assert!(e.verdict.starts_with("Will be processed"), "{}", e.verdict);
-    assert!(e.stages.iter().any(|t| t.name == "pics" && t.taken));
+    assert!(e.targets.iter().any(|t| t.name == "pics" && t.taken));
 }
 
 #[test]
@@ -138,7 +138,7 @@ fn wrong_extension_names_the_match() {
         "{}",
         e.verdict
     );
-    let pics = e.stages.iter().find(|t| t.name == "pics").unwrap();
+    let pics = e.targets.iter().find(|t| t.name == "pics").unwrap();
     assert_eq!(pics.filters[0].fit, Fit::No);
     assert!(!pics.filters[0].matches.as_ref().unwrap().matched);
 }
@@ -170,7 +170,7 @@ fn exclude_hit() {
     let fx = fixture();
     let e = fx.explain("src/a_thumb.jpg");
     assert_eq!(e.decision.as_ref().unwrap().kind, DecisionKind::Excluded);
-    let f = &e.stages.iter().find(|t| t.name == "pics").unwrap().filters[0];
+    let f = &e.targets.iter().find(|t| t.name == "pics").unwrap().filters[0];
     assert_eq!(f.fit, Fit::Excluded);
     assert!(f.exclude.as_ref().unwrap().matched);
     assert!(
@@ -186,7 +186,12 @@ fn negated_item_hit() {
     let fx = fixture();
     let e = fx.explain("src/x_edit.gif");
     assert_eq!(e.decision.as_ref().unwrap().kind, DecisionKind::Unmatched);
-    let m = e.stages.iter().find(|t| t.name == "edits").unwrap().filters[0]
+    let m = e
+        .targets
+        .iter()
+        .find(|t| t.name == "edits")
+        .unwrap()
+        .filters[0]
         .matches
         .as_ref()
         .unwrap();
@@ -393,7 +398,7 @@ fn text_is_a_tree_ending_in_the_verdict() {
 fn targets_for_other_sources_are_collapsed() {
     let fx = fixture();
     let e = fx.explain("src/clip.mp4");
-    let names: Vec<_> = e.stages.iter().map(|t| t.name.as_str()).collect();
+    let names: Vec<_> = e.targets.iter().map(|t| t.name.as_str()).collect();
     assert_eq!(names, ["pics", "edits", "cats"]);
     assert_eq!(e.other_targets.len(), 23);
     assert_eq!(other_targets_text(&e), "23 more targets not for source s");
@@ -427,7 +432,7 @@ fn av1_file_is_excluded_by_the_video_mask_with_the_reason() {
         &opts,
     )
     .unwrap();
-    let m = e.stages[0].filters[0].matches.as_ref().unwrap();
+    let m = e.targets[0].filters[0].matches.as_ref().unwrap();
     assert_eq!(m.items[0].reason, "extension .mp4 does not match");
     assert_eq!(m.items[1].reason, "extension .mp4 does not match");
     let v = &m.items[2];
@@ -608,15 +613,15 @@ duplicate = { of = ["sources"] }
         (b, a)
     };
     assert_eq!(dup.outcome, Outcome::Trash, "{}", dup.to_text());
-    assert!(dup.stages[0].taken && dup.stages[0].miss.is_none());
+    assert!(dup.targets[0].taken && dup.targets[0].miss.is_none());
     assert_ne!(orig.outcome, Outcome::Trash);
-    let miss = orig.stages[0].miss.as_ref().expect("the original misses");
+    let miss = orig.targets[0].miss.as_ref().expect("the original misses");
     assert_eq!(miss.condition, "duplicate");
     assert_eq!(miss.detail, crate::t!("filter.miss.no_duplicate"));
     assert!(orig.to_text().contains("duplicate: "), "{}", orig.to_text());
     // A file with no twin misses the same way.
     let c = fx.explain("s/c.jpg");
-    assert_eq!(c.stages[0].miss.as_ref().unwrap().condition, "duplicate");
+    assert_eq!(c.targets[0].miss.as_ref().unwrap().condition, "duplicate");
 }
 
 #[test]
@@ -646,7 +651,7 @@ dir = "{r}/out"
     );
     // The only partner file within 30 minutes is none: 13:00 is an hour away.
     let ex = fx.explain("cam/20260101_120000.jpg");
-    let miss = ex.stages[0].miss.as_ref().expect("near misses");
+    let miss = ex.targets[0].miss.as_ref().expect("near misses");
     assert_eq!(miss.condition, "near");
     assert!(
         miss.detail.contains("partner")
@@ -666,7 +671,7 @@ dir = "{r}/out"
         Some(crate::filter::facts::Spec::parse("2h").unwrap());
     let fx2 = Fx { dir: fx.dir, cfg };
     let ex = fx2.explain("cam/20260101_120000.jpg");
-    assert!(ex.stages[0].taken && ex.stages[0].miss.is_none());
+    assert!(ex.targets[0].taken && ex.targets[0].miss.is_none());
     assert_eq!(ex.outcome, Outcome::Process);
 }
 

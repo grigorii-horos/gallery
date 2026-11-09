@@ -91,7 +91,7 @@ const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (c
       return {
         path: (args as { path: string }).path,
         scope: { kind: "scanned", source: "cam" },
-        stages: [],
+        targets: [],
         other_targets: [],
         ai: { kind: "no_candidates" },
         decision: { kind: "unmatched", target: null, via: null, detail: null },
