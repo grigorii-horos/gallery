@@ -714,6 +714,7 @@
   "cli.check.config": "同时加载并校验此配置文件（TOML）",
   "overrides.changed": "%{path}：文件在生成计划后已更改；请重新生成计划",
   "overrides.best_not_member": "%{path}：不是该系列中的文件",
+  "overrides.plan_changed": "自显示此审阅以来，计划已更改——请重新扫描",
   "undo.no_plan": "报告旁没有计划，无法得知目标",
   "undo.no_such_target": "报告中没有目标“%{target}”的文件",
   "undo.no_such_file": "不是此次运行的文件：%{path}",

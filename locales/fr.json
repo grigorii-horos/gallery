@@ -728,6 +728,7 @@
   "cli.check.config": "Charger et valider aussi ce fichier de configuration (TOML)",
   "overrides.changed": "%{path} : le fichier a changé depuis la création du plan ; recréez le plan",
   "overrides.best_not_member": "%{path} : ne fait pas partie des fichiers de la série",
+  "overrides.plan_changed": "Le plan a changé depuis l'affichage de cette revue — relancez l'analyse",
   "undo.no_plan": "pas de plan à côté du rapport pour connaître les cibles",
   "undo.no_such_target": "aucun fichier de la cible « %{target} » dans le rapport",
   "undo.no_such_file": "pas un fichier de cette exécution : %{path}",

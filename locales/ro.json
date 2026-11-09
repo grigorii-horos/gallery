@@ -728,6 +728,7 @@
   "cli.check.config": "Încarcă și validează și acest fișier de configurare (TOML)",
   "overrides.changed": "%{path}: fișierul s-a schimbat de la construirea planului; construiți planul din nou",
   "overrides.best_not_member": "%{path}: nu este unul dintre fișierele seriei",
+  "overrides.plan_changed": "Planul s-a schimbat de când a fost afișată această revizuire — scanează din nou",
   "undo.no_plan": "niciun plan lângă raport pentru a afla țintele",
   "undo.no_such_target": "niciun fișier al țintei „%{target}” în raport",
   "undo.no_such_file": "nu este un fișier al acestei rulări: %{path}",
