@@ -63,6 +63,9 @@ What the plan can do for each target, per output folder:
   phones), device, file properties (size, codecs, blur score), duplicates, burst series (with a
   side-by-side best-shot review), folders (`path`) and the AI as one more condition. A scan never
   trashes the last copy of a group of duplicates or of a series.
+- **AI keywords and a description** (in your language) written into the XMP/IPTC metadata of the
+  processed copies of files the AI sorted — from the same request, at no extra cost; byte-for-byte
+  backups stay untouched.
 - **Named masks** with `@refs` and `!` exclusions (`["@photo", "!@edited"]`) and built-ins for screenshots,
   WhatsApp, TikTok, camera-phone names, RAW and more.
 

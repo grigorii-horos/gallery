@@ -932,7 +932,7 @@ pub struct AiSettings {
     /// How many of the user's most recent corrections of a source go into
     /// its AI prompt as examples; 0 turns the learning off.
     pub examples: usize,
-    /// Language the model writes each `reason` in: a name or code ("en",
+    /// Language the model writes each `reason`, keywords and description in: a name or code ("en",
     /// "ru", "Ukrainian"); blank means the language of the interface.
     pub language: String,
 }

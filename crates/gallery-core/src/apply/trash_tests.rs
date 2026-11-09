@@ -58,6 +58,7 @@ fn put(p: &Path, body: &[u8]) -> SystemTime {
 fn item(root: &Path, src: &Path, target: &str, kind: TargetKind) -> PlanItem {
     let meta = std::fs::metadata(src).unwrap();
     PlanItem {
+        ai_meta: None,
         source: src.to_path_buf(),
         source_root: root.to_path_buf(),
         size: meta.len(),

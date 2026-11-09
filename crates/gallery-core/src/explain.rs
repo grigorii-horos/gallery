@@ -13,8 +13,8 @@ use serde_json::Value;
 
 use crate::Result;
 use crate::ai::AiClassifier;
-use crate::ai::cache::{self, Cache};
-use crate::ai::client::{system_prompt, to_answer};
+use crate::ai::cache::Cache;
+use crate::ai::client::cached_answer;
 use crate::config::{Config, Filter, Output, TargetKind, expand_tilde};
 use crate::datetime::{capture_date, file_created};
 use crate::mask::{ItemCheck, MaskCheck, MaskExpr};
@@ -218,12 +218,8 @@ impl Classifier for CachedAi {
         Ok(batch
             .iter()
             .map(|r| {
-                let system = system_prompt(&r.categories, &r.prompt);
-                let key = cache::key(&r.entry, &self.model, &cache::prompt_hash(&system));
-                let hit = self
-                    .cache
-                    .get(&key)
-                    .and_then(|s| to_answer(s, &r.categories).ok());
+                // The same key and check as the classifier itself.
+                let hit = cached_answer(&self.cache, &self.model, r);
                 self.seen
                     .borrow_mut()
                     .push((r.entry.path.clone(), hit.clone()));
@@ -231,6 +227,7 @@ impl Classifier for CachedAi {
                     category: None,
                     reason: String::new(),
                     confidence: Confidence::Ok,
+                    meta: None,
                 })
             })
             .collect())
@@ -619,7 +616,7 @@ pub fn explain(
     };
 
     let info = match &decision {
-        Decision::Target { name, via } => DecisionInfo {
+        Decision::Target { name, via, .. } => DecisionInfo {
             kind: DecisionKind::Target,
             target: Some(name.clone()),
             via: Some(via.clone()),

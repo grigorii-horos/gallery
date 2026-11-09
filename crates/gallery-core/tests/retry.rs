@@ -48,6 +48,7 @@ fn save(path: &Path, items: Vec<PlanItem>) {
 fn item(src: &Path, root: &Path, dests: &[PathBuf]) -> PlanItem {
     let meta = std::fs::metadata(src).unwrap();
     PlanItem {
+        ai_meta: None,
         source: src.to_path_buf(),
         source_root: root.to_path_buf(),
         size: meta.len(),

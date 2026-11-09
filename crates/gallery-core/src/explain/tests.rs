@@ -1,5 +1,5 @@
 use super::*;
-use crate::ai::cache::Stored;
+use crate::ai::cache::{self, Stored};
 use crate::overrides::Action;
 use crate::pipeline::NoAi;
 use crate::plan::build_plan;
@@ -272,12 +272,14 @@ fn ai_not_asked_then_cached() {
         mtime_ns,
     };
     let cats = vec![("cats".to_string(), "cats".to_string())];
-    let system = system_prompt(&cats, &crate::route::SourcePrompt::default());
+    let system = crate::ai::cache_prompt(&cats, &crate::route::SourcePrompt::default());
     let key = cache::key(&entry, &fx.cfg.ai.model, &cache::prompt_hash(&system));
     Cache::load(&fx.p("ai-cache.jsonl"))
         .put(
             key,
             Stored {
+                tags: Vec::new(),
+                description: String::new(),
                 category: "cats".into(),
                 reason: "a cat".into(),
                 confidence: "OK".into(),
@@ -337,7 +339,7 @@ fn agrees_with_build_plan() {
         let e = fx.explain_with(rel.to_str().unwrap(), &o);
         let d = e.decision.as_ref().expect("scanned file has a decision");
         match decision {
-            Decision::Target { name, via } => {
+            Decision::Target { name, via, .. } => {
                 assert_eq!(d.kind, DecisionKind::Target, "{rel:?}");
                 assert_eq!(d.target.as_ref(), Some(name), "{rel:?}");
                 // A cached AI answer would differ; the fixture has none.
@@ -736,7 +738,7 @@ rename = ["By extension"]
 "#,
     );
     let cats = vec![("cats".to_string(), "cats".to_string())];
-    let system = system_prompt(&cats, &crate::route::SourcePrompt::default());
+    let system = crate::ai::cache_prompt(&cats, &crate::route::SourcePrompt::default());
     let path = fx.p("s/cat.webp");
     let (size, mtime_ns) = stat(&path);
     let entry = FileEntry {
@@ -751,6 +753,8 @@ rename = ["By extension"]
         .put(
             key,
             Stored {
+                tags: Vec::new(),
+                description: String::new(),
                 category: "cats".into(),
                 reason: "a cat".into(),
                 confidence: "LOW".into(),

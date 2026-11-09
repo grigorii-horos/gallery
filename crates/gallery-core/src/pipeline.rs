@@ -54,6 +54,7 @@ impl Classifier for NoAi {
                 category: None,
                 reason: String::new(),
                 confidence: Confidence::Ok,
+                meta: None,
             })
             .collect())
     }
@@ -289,6 +290,7 @@ dir = "{out}/rest"
                     category: Some("cats".into()),
                     reason: "a cat".into(),
                     confidence: Confidence::Ok,
+                    meta: None,
                 })
                 .collect())
         }
@@ -425,7 +427,7 @@ dir = "{out}/rest"
         let files = scan::scan_sources(&f.cfg.sources).unwrap();
         let cat = files.iter().find(|e| e.path.ends_with("cat.jpg")).unwrap();
         let cats = vec![("cats".to_string(), "cats".to_string())];
-        let hash = cache::prompt_hash(&crate::ai::system_prompt(
+        let hash = cache::prompt_hash(&crate::ai::cache_prompt(
             &cats,
             &crate::route::SourcePrompt::default(),
         ));
@@ -433,6 +435,8 @@ dir = "{out}/rest"
         c.put(
             cache::key(cat, &f.cfg.ai.model, &hash),
             Stored {
+                tags: Vec::new(),
+                description: String::new(),
                 category: "cats".into(),
                 reason: "r".into(),
                 confidence: "OK".into(),

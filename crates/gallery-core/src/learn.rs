@@ -497,6 +497,7 @@ mod tests {
 
     fn item(path: &str, target: &str, via: Via) -> crate::plan::PlanItem {
         crate::plan::PlanItem {
+            ai_meta: None,
             source: path.into(),
             source_root: "/cam".into(),
             size: 1,

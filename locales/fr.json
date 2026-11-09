@@ -136,6 +136,8 @@
   "apply.exif_not_read": "EXIF non lu : %{error} ; source intacte",
   "apply.earlier_failed": "ignoré : une sortie précédente a échoué",
   "apply.kept_in_place": "laissé en place : la source a déjà ce nom",
+  "apply.ai_meta_unwritable": "exiftool n’écrit pas %{container} : mots-clés de l’IA non écrits",
+  "apply.ai_meta_failed": "mots-clés de l’IA non écrits : %{error}",
   "apply.discrepancy_allowed": "écart autorisé : %{message}",
   "apply.result_differs": "le résultat diffère de la source : %{details} ; non placé, source intacte",
   "apply.check_not_performed": "vérification non effectuée : %{error}",

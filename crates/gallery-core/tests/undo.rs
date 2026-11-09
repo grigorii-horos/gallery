@@ -32,6 +32,7 @@ fn hash(p: &Path) -> blake3::Hash {
 fn item(src: &Path, root: &Path, outs: Vec<(PathBuf, Vec<&str>)>) -> PlanItem {
     let meta = std::fs::metadata(src).unwrap();
     PlanItem {
+        ai_meta: None,
         source: src.to_path_buf(),
         source_root: root.to_path_buf(),
         size: meta.len(),

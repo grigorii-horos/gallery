@@ -138,6 +138,8 @@
   "apply.exif_not_read": "EXIF nieodczytany: %{error}; źródło nietknięte",
   "apply.earlier_failed": "pominięto: poprzednie wyjście nie powiodło się",
   "apply.kept_in_place": "zostawiono na miejscu: źródło ma już tę nazwę",
+  "apply.ai_meta_unwritable": "exiftool nie zapisuje %{container}: słowa kluczowe AI nie zapisane",
+  "apply.ai_meta_failed": "słowa kluczowe AI nie zapisane: %{error}",
   "apply.discrepancy_allowed": "rozbieżność dozwolona: %{message}",
   "apply.result_differs": "wynik różni się od źródła: %{details}; nie umieszczono, źródło nietknięte",
   "apply.check_not_performed": "nie wykonano sprawdzenia: %{error}",

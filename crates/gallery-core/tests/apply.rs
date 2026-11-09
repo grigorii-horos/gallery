@@ -3,7 +3,7 @@ mod support;
 use gallery_core::apply::{ApplyOptions, ItemResult, ItemStatus, Report, apply, report_path};
 use gallery_core::config::{ContentPreset, MetadataPreset, PhotoPreset, VideoPreset};
 use gallery_core::plan::{OutputOp, PLAN_VERSION, Plan, PlanItem, PlannedOutput, Side};
-use gallery_core::route::Via;
+use gallery_core::route::{AiMeta, Via};
 use gallery_core::tools::Tools;
 use gallery_core::trash::{TrashMode, TrashRef};
 use std::collections::BTreeMap;
@@ -42,6 +42,7 @@ fn mtime_ns(p: &Path) -> i128 {
 /// Plan item for an existing `src` with outputs `(dest, steps)`.
 fn item(src: &Path, root: &Path, outs: Vec<(PathBuf, Vec<&str>)>) -> PlanItem {
     PlanItem {
+        ai_meta: None,
         source: src.to_path_buf(),
         source_root: root.to_path_buf(),
         size: std::fs::metadata(src).unwrap().len(),
@@ -693,4 +694,135 @@ fn apply_outputs_take_the_source_permissions() {
             assert_eq!(mode(p), want, "{} (source {src_mode:o})", p.display());
         }
     }
+}
+
+/// exiftool's `-G1` record of `p` for the given tags.
+fn tags_of(p: &Path, tags: &[&str]) -> serde_json::Value {
+    let out = std::process::Command::new("exiftool")
+        .args(["-j", "-G1", "-charset", "filename=utf8"])
+        .args(tags.iter().map(|t| format!("-{t}")))
+        .arg(p)
+        .output()
+        .unwrap();
+    let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    v[0].clone()
+}
+
+#[test]
+fn apply_writes_ai_tags_into_processed_outputs_only() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("src");
+    std::fs::create_dir_all(&root).unwrap();
+    let photo = support::fixture_jpeg(
+        &root,
+        "a.jpg",
+        Some("2026:04:12 10:33:14"),
+        Some((52.52, 13.405)),
+    );
+    // A keyword the source already has stays, and is not repeated.
+    support::exiftool_set(&photo, &["-XMP-dc:Subject=семья", "-XMP-dc:Subject=кот"]);
+    let clip = support::fixture_mp4(&root, "v.mp4", 1, Some("2026:04:12 08:33:14"));
+    let orig = hash(&photo);
+    let meta = AiMeta {
+        tags: vec!["кот".into(), "диван".into()],
+        description: "Рыжий кот спит на диване.".into(),
+    };
+    let ai = |mut it: PlanItem| {
+        it.via = Via::Ai {
+            reason: "кот".into(),
+            low: false,
+        };
+        it.ai_meta = Some(meta.clone());
+        it
+    };
+    let out = d.path().join("out");
+    let plan = save_plan(
+        d.path(),
+        vec![
+            ai(item(
+                &photo,
+                &root,
+                vec![
+                    (out.join("copy.jpg"), vec![]),
+                    (out.join("meta.jpg"), vec!["Metadata"]),
+                    (out.join("small.avif"), vec!["AVIF"]),
+                ],
+            )),
+            ai(item(
+                &clip,
+                &root,
+                vec![(out.join("v.mp4"), vec!["Metadata"])],
+            )),
+        ],
+    );
+    let rep = run(&plan, &opts());
+    for r in &rep.items {
+        assert!(matches!(r.status, ItemStatus::Done { .. }), "{r:?}");
+        for o in &r.outputs {
+            assert!(o.error.is_none() && o.anomalies.is_empty(), "{o:?}");
+            assert!(o.warnings.is_empty(), "{o:?}");
+        }
+    }
+
+    // The byte copy is the source exactly.
+    assert_eq!(hash(&out.join("copy.jpg")), orig);
+    assert_eq!(
+        tags_of(&out.join("copy.jpg"), &["XMP-dc:Subject"])["XMP-dc:Subject"],
+        serde_json::json!(["семья", "кот"])
+    );
+
+    let jpeg = tags_of(
+        &out.join("meta.jpg"),
+        &["XMP-dc:Subject", "XMP-dc:Description", "IPTC:Keywords"],
+    );
+    assert_eq!(
+        jpeg["XMP-dc:Subject"],
+        serde_json::json!(["семья", "кот", "диван"]),
+        "{jpeg}"
+    );
+    assert_eq!(jpeg["XMP-dc:Description"], "Рыжий кот спит на диване.");
+    assert_eq!(jpeg["IPTC:Keywords"], serde_json::json!(["кот", "диван"]));
+
+    // The AVIF encoder carries the source's XMP over; the clip had none.
+    for (p, subject) in [
+        (
+            out.join("small.avif"),
+            serde_json::json!(["семья", "кот", "диван"]),
+        ),
+        (out.join("v.mp4"), serde_json::json!(["кот", "диван"])),
+    ] {
+        let t = tags_of(&p, &["XMP-dc:Subject", "XMP-dc:Description"]);
+        assert_eq!(t["XMP-dc:Subject"], subject, "{p:?}: {t}");
+        assert_eq!(t["XMP-dc:Description"], "Рыжий кот спит на диване.");
+    }
+}
+
+#[test]
+fn apply_warns_when_the_format_takes_no_ai_tags() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("src");
+    std::fs::create_dir_all(&root).unwrap();
+    let clip = support::fixture_mkv(&root, "v.mkv");
+    let mut it = item(
+        &clip,
+        &root,
+        vec![(d.path().join("out/v.mkv"), vec!["Metadata"])],
+    );
+    it.via = Via::Ai {
+        reason: "cat".into(),
+        low: false,
+    };
+    it.ai_meta = Some(AiMeta {
+        tags: vec!["cat".into()],
+        description: "A cat.".into(),
+    });
+    let rep = run(&save_plan(d.path(), vec![it]), &opts());
+    let r = &rep.items[0];
+    // Keywords are a nicety: the file is placed all the same.
+    assert!(matches!(r.status, ItemStatus::Done { .. }), "{r:?}");
+    let w = &r.outputs[0].warnings;
+    assert!(w.len() == 1 && w[0].contains("mkv"), "{w:?}");
+    assert!(d.path().join("out/v.mkv").exists());
 }

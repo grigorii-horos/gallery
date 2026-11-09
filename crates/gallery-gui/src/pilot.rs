@@ -270,6 +270,7 @@ mod tests {
         assert!(st.success());
         let meta = std::fs::metadata(&src).unwrap();
         PlanItem {
+            ai_meta: None,
             source: src,
             source_root: dir.join("src"),
             size: meta.len(),

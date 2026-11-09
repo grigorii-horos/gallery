@@ -33,6 +33,7 @@ use crate::media::{kind_of, split_name};
 use crate::name::reserve;
 use crate::plan::{OutputOp, Plan, PlanItem, PlannedOutput, inside_root, same_dir};
 use crate::progress::{Cancel, NoProgress, Progress, ProgressEvent, Stage};
+use crate::route::Via;
 use crate::scan::mtime_ns;
 use crate::syncthing::SyncPause;
 use crate::tools::{Capabilities, Tools};
@@ -1305,7 +1306,24 @@ impl Run<'_> {
             capture,
             tmp_dir: work.path(),
         };
-        let r = run_pipe(&ctx, &steps)?;
+        let mut r = run_pipe(&ctx, &steps)?;
+        // The AI's keywords go into processed outputs only: a byte copy (no
+        // steps) stays the source exactly. `r.path` is the pipe's own file.
+        if let Some(meta) = item.ai_meta.as_ref().filter(|_| {
+            !steps.is_empty() && matches!(item.via, Via::Ai { .. }) && r.path != item.source
+        }) {
+            match crate::content::metadata::write_ai_meta(self.tools, &r.path, meta) {
+                Ok(()) => {}
+                // exiftool leaves the file untouched when it fails.
+                Err(Error::Unwritable(_)) => r.warnings.push(crate::t!(
+                    "apply.ai_meta_unwritable",
+                    container = r.ext.rsplit('.').next().unwrap_or_default()
+                )),
+                Err(e) => r
+                    .warnings
+                    .push(crate::t!("apply.ai_meta_failed", error = e)),
+            }
+        }
 
         let (_, staged) = tempfile::Builder::new()
             .prefix(&prefix)
@@ -1907,6 +1925,7 @@ mod tests {
             tz: None,
             content_presets: BTreeMap::from([("P".to_string(), preset)]),
             items: vec![PlanItem {
+                ai_meta: None,
                 source: src.clone(),
                 source_root: d.join("src"),
                 size: meta.len(),
@@ -2155,6 +2174,7 @@ mod tests {
             tz: None,
             content_presets: BTreeMap::new(),
             items: vec![PlanItem {
+                ai_meta: None,
                 source: src.clone(),
                 source_root: root,
                 size: meta.len(),
@@ -2951,6 +2971,7 @@ mod cancel_tests {
             std::fs::write(&src, format!("body {i}")).unwrap();
             let meta = std::fs::metadata(&src).unwrap();
             items.push(PlanItem {
+                ai_meta: None,
                 source: src.clone(),
                 source_root: root.clone(),
                 size: meta.len(),
@@ -3208,6 +3229,7 @@ mod exif_failure_tests {
             tz: None,
             content_presets: BTreeMap::new(),
             items: vec![PlanItem {
+                ai_meta: None,
                 source: src.clone(),
                 source_root: root,
                 size: meta.len(),
@@ -3361,6 +3383,7 @@ mod mtime_tests {
             tz: None,
             content_presets: names.iter().cloned().zip(steps).collect(),
             items: vec![PlanItem {
+                ai_meta: None,
                 source: src.clone(),
                 source_root: root,
                 size: meta.len(),
@@ -3602,6 +3625,7 @@ mod verification {
             .map(|(s, o)| {
                 let meta = std::fs::metadata(s).unwrap();
                 PlanItem {
+                    ai_meta: None,
                     source: s.clone(),
                     source_root: root.clone(),
                     size: meta.len(),

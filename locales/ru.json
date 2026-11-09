@@ -138,6 +138,8 @@
   "apply.exif_not_read": "EXIF не прочитан: %{error}; источник не тронут",
   "apply.earlier_failed": "пропущен: предыдущий выход не удался",
   "apply.kept_in_place": "оставлен на месте: у источника уже такое имя",
+  "apply.ai_meta_unwritable": "exiftool не пишет %{container}: ключевые слова ИИ не записаны",
+  "apply.ai_meta_failed": "ключевые слова ИИ не записаны: %{error}",
   "apply.discrepancy_allowed": "расхождение допущено: %{message}",
   "apply.result_differs": "результат расходится с источником: %{details}; не размещён, источник не тронут",
   "apply.check_not_performed": "проверка не выполнена: %{error}",

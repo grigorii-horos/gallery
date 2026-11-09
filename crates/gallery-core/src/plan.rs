@@ -14,12 +14,13 @@ use crate::filter::groups::Groups;
 use crate::media::{kind_of, split_name};
 use crate::name::{NameCtx, Pipe, TraceStep, apply_name_pipe, reserve};
 use crate::progress::{Cancel, NoProgress, Progress, ProgressEvent, Stage};
-use crate::route::{Decision, SeriesReview, Via};
+use crate::route::{AiMeta, Decision, SeriesReview, Via};
 use crate::scan::FileEntry;
 use crate::{Error, Result};
 
 /// The newest plan version this build reads and writes. Version 2 adds
-/// `trash` items (`PlanItem::kind`) and the `kept` list; a plan without them
+/// `trash` items (`PlanItem::kind`), the `kept` list and the AI's keywords
+/// and description (`PlanItem::ai_meta`); a plan without them
 /// is written as version 1 (see [`Plan::needed_version`]), so an older
 /// `gallery apply` still runs it. Version 1 plans load.
 pub const PLAN_VERSION: u32 = 2;
@@ -81,6 +82,12 @@ pub struct PlanItem {
     #[serde(default, skip_serializing_if = "TargetKind::is_folders")]
     pub kind: TargetKind,
     pub outputs: Vec<PlannedOutput>,
+    /// Keywords and a description from the AI that routed the file
+    /// (`Via::Ai`), written into the metadata of its processed outputs
+    /// (written outputs with content steps; byte copies stay exact). `None`
+    /// for other items, items without such outputs, and in older plans.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_meta: Option<AiMeta>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -427,8 +434,8 @@ pub fn build_plan_with(
         };
         let captured =
             |c: Option<NaiveDateTime>| c.map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
-        let (target, via) = match decision {
-            Decision::Target { name, via } => (name, via),
+        let (target, via, ai_meta) = match decision {
+            Decision::Target { name, via, ai_meta } => (name, via, ai_meta),
             Decision::Review {
                 suggested,
                 reason,
@@ -471,6 +478,7 @@ pub fn build_plan_with(
                     via,
                     kind: TargetKind::Trash,
                     outputs: Vec::new(),
+                    ai_meta: None,
                 });
                 continue;
             }
@@ -664,6 +672,13 @@ pub fn build_plan_with(
             continue;
         }
         timeline.push((capture, target.clone(), source.clone()));
+        // Only an AI decision carries them, and only processed outputs get them.
+        let ai_meta = ai_meta.filter(|_| {
+            matches!(via, Via::Ai { .. })
+                && outputs
+                    .iter()
+                    .any(|o| o.op == OutputOp::Write && !o.steps.is_empty())
+        });
         items.push(PlanItem {
             source,
             source_root,
@@ -673,6 +688,7 @@ pub fn build_plan_with(
             via,
             kind: TargetKind::Folders,
             outputs,
+            ai_meta,
         });
     }
 
@@ -964,10 +980,14 @@ pub fn pilot(plan: &Plan, per_target: usize) -> (Plan, Plan) {
 
 impl Plan {
     /// The oldest version that holds everything in the plan: 2 with a
-    /// `trash` item or a `kept` file, else 1 (an older `gallery apply` loses
-    /// nothing reading it).
+    /// `trash` item, a `kept` file or an item with AI keywords, else 1 (an
+    /// older `gallery apply` loses nothing reading it).
     pub fn needed_version(&self) -> u32 {
-        let v2 = !self.kept.is_empty() || self.items.iter().any(|i| !i.kind.is_folders());
+        let v2 = !self.kept.is_empty()
+            || self
+                .items
+                .iter()
+                .any(|i| !i.kind.is_folders() || i.ai_meta.is_some());
         if v2 { 2 } else { 1 }
     }
 
@@ -1139,6 +1159,7 @@ mod tests {
         Decision::Target {
             name: target.into(),
             via: Via::Mask,
+            ai_meta: None,
         }
     }
 
@@ -2157,6 +2178,57 @@ mod tests {
     }
 
     #[test]
+    fn ai_meta_rides_on_ai_items_with_processed_outputs() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut c = cfg(
+            tmp.path(),
+            vec![output(
+                &tmp.path().join("out"),
+                vec![step("*.jpg", "AVIF")],
+                vec![],
+            )],
+        );
+        // `u` only copies bytes: nothing to write the keywords into.
+        let mut u = c.targets[0].clone();
+        u.name = "u".into();
+        u.outputs = vec![output(&tmp.path().join("copies"), vec![], vec![])];
+        c.targets.push(u);
+        let meta = AiMeta {
+            tags: vec!["cat".into()],
+            description: "A cat.".into(),
+        };
+        let ai = |target: &str| Decision::Target {
+            name: target.into(),
+            via: Via::Ai {
+                reason: "cat".into(),
+                low: false,
+            },
+            ai_meta: Some(meta.clone()),
+        };
+        let p = local(
+            &c,
+            vec![
+                (entry(tmp.path(), "phone", "a.jpg"), ai("t")),
+                (entry(tmp.path(), "phone", "b.jpg"), ai("u")),
+                (entry(tmp.path(), "phone", "c.jpg"), to("t")),
+            ],
+        );
+        let metas: Vec<Option<&AiMeta>> = p.items.iter().map(|i| i.ai_meta.as_ref()).collect();
+        assert_eq!(metas, [Some(&meta), None, None]);
+        assert_eq!(p.needed_version(), 2);
+        let path = tmp.path().join("plan.json");
+        p.save(&path).unwrap();
+        let q = Plan::load(&path).unwrap();
+        assert_eq!(q.version, 2);
+        assert_eq!(q.items, p.items);
+
+        // Without it the plan stays version 1, and the field is not written.
+        let p = local(&c, vec![(entry(tmp.path(), "phone", "a.jpg"), to("t"))]);
+        assert_eq!(p.needed_version(), 1);
+        assert!(!serde_json::to_string(&p).unwrap().contains("ai_meta"));
+    }
+
+    #[test]
     fn plan_json_roundtrip() {
         let tmp = tempfile::tempdir().unwrap();
         let out = tmp.path().join("out");
@@ -2179,6 +2251,7 @@ mod tests {
                             reason: "cat".into(),
                             low: false,
                         },
+                        ai_meta: None,
                     },
                 ),
                 (
@@ -2314,6 +2387,7 @@ mod tests {
 
     fn subplan_item(path: &Path, size: u64, mtime_ns: i128) -> PlanItem {
         PlanItem {
+            ai_meta: None,
             source: path.to_path_buf(),
             source_root: path.parent().unwrap().to_path_buf(),
             size,
@@ -2510,6 +2584,7 @@ mod tests {
 
     fn pilot_item(target: &str, name: &str) -> PlanItem {
         PlanItem {
+            ai_meta: None,
             source: PathBuf::from(format!("/src/{target}/{name}")),
             source_root: PathBuf::from("/src"),
             size: 1,

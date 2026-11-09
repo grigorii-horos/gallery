@@ -15,7 +15,7 @@ use super::thumb;
 use crate::config::AiSettings;
 use crate::media::{MediaKind, kind_of};
 use crate::progress::{Cancel, NoProgress, Progress, ProgressEvent, Stage};
-use crate::route::{AiAnswer, AiRequest, Classifier, Confidence, SourcePrompt};
+use crate::route::{AiAnswer, AiMeta, AiRequest, Classifier, Confidence, SourcePrompt};
 use crate::tools::Tools;
 use crate::{Error, Result};
 
@@ -25,6 +25,8 @@ const NONE_CATEGORY: &str = "NONE";
 /// entries made before the prompt became English still carry it.
 const LEGACY_NONE_CATEGORY: &str = "НИКАКАЯ";
 const MAX_TOKENS: u32 = 4000;
+/// At most this many keywords of an answer are kept.
+const MAX_TAGS: usize = 10;
 const MAX_RETRIES: u32 = 6;
 const TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
@@ -103,16 +105,14 @@ pub fn system_prompt(categories: &[(String, String)], source: &SourcePrompt) -> 
 }
 
 /// The prompt the cache key is computed from: the same text without the
-/// examples section, so the examples never invalidate cached answers.
+/// examples section and without the tags/description lines of the answer
+/// format, so neither invalidates cached answers (an answer cached before
+/// tags were asked for is used as is, without them).
 pub fn cache_prompt(categories: &[(String, String)], source: &SourcePrompt) -> String {
     build_prompt(categories, source, false)
 }
 
-fn build_prompt(
-    categories: &[(String, String)],
-    source: &SourcePrompt,
-    with_examples: bool,
-) -> String {
+fn build_prompt(categories: &[(String, String)], source: &SourcePrompt, full: bool) -> String {
     let mut list = String::new();
     for (name, desc) in categories {
         list.push_str(&format!("- {name} — {desc}\n"));
@@ -124,7 +124,7 @@ fn build_prompt(
     };
     let (prefix, suffix) = (slot(&source.prefix), slot(&source.suffix));
     // The user's corrections follow the suffix; none means no section.
-    let examples = if !with_examples || source.examples.is_empty() {
+    let examples = if !full || source.examples.is_empty() {
         String::new()
     } else {
         let lines: String = source.examples.iter().map(|l| format!("- {l}\n")).collect();
@@ -134,6 +134,15 @@ fn build_prompt(
     let language = match source.language.trim() {
         "" => crate::i18n::language_name(),
         l => l,
+    };
+    // Not part of the cache key: see `cache_prompt`.
+    let meta = if full {
+        format!(
+            "- tags — 3-10 short keywords for what the frame shows, lowercase, written in {language};\n\
+- description — one sentence describing the frame, written in {language}.\n"
+        )
+    } else {
+        String::new()
     };
     format!(
         "{prefix}You sort photos and videos into categories. \
@@ -149,7 +158,7 @@ a doubtful frame is better left uncategorized\n\
 - category — exactly one category name from the list (no description); \
 {NONE_CATEGORY} — no category fits;\n\
 - reason — the reason in 3-6 words, written in {language} (\"Lidl receipt\", \"ESP32 board close-up\");\n\
-- confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n"
+- confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n{meta}"
     )
 }
 
@@ -162,6 +171,8 @@ fn schema(categories: &[(String, String)]) -> Value {
             "category": {"type": "string", "enum": names},
             "reason": {"type": "string"},
             "confidence": {"type": "string", "enum": ["OK", "LOW"]},
+            "tags": {"type": "array", "items": {"type": "string"}},
+            "description": {"type": "string"},
         },
         "required": ["category", "reason", "confidence"],
         "additionalProperties": false,
@@ -279,17 +290,33 @@ pub(crate) fn to_answer(stored: &Stored, categories: &[(String, String)]) -> Res
     };
     Ok(AiAnswer {
         category,
-        reason: stored
-            .reason
-            .split_whitespace()
-            .collect::<Vec<_>>()
-            .join(" "),
+        reason: one_line(&stored.reason),
         confidence: if stored.confidence == "OK" {
             Confidence::Ok
         } else {
             Confidence::Low
         },
+        meta: to_meta(stored),
     })
+}
+
+/// Whitespace runs (newlines too) collapsed to single spaces, trimmed.
+fn one_line(s: &str) -> String {
+    s.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// The answer's keywords (one line each, lowercase, no blanks or repeats, at
+/// most [`MAX_TAGS`]) and description; `None` when neither is left.
+fn to_meta(stored: &Stored) -> Option<AiMeta> {
+    let mut tags: Vec<String> = Vec::new();
+    for t in &stored.tags {
+        let t = one_line(t).to_lowercase();
+        if !t.is_empty() && !tags.contains(&t) && tags.len() < MAX_TAGS {
+            tags.push(t);
+        }
+    }
+    let description = one_line(&stored.description);
+    (!tags.is_empty() || !description.is_empty()).then_some(AiMeta { tags, description })
 }
 
 fn backoff(base_ms: u64, attempt: u32) -> Duration {
@@ -393,6 +420,8 @@ impl Shared {
                     category: NONE_CATEGORY.into(),
                     reason: crate::t!("ai.refused"),
                     confidence: "LOW".into(),
+                    tags: Vec::new(),
+                    description: String::new(),
                 });
             }
             Some("max_tokens") => return Err(Error::Ai(crate::t!("ai.truncated"))),
@@ -446,6 +475,8 @@ async fn run_job(
                 category: NONE_CATEGORY.into(),
                 reason: crate::t!("ai.no_preview"),
                 confidence: "LOW".into(),
+                tags: Vec::new(),
+                description: String::new(),
             };
             return Ok((job.idx, None, stored));
         }

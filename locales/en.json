@@ -134,6 +134,8 @@
   "apply.exif_not_read": "EXIF not read: %{error}; source untouched",
   "apply.earlier_failed": "skipped: an earlier output failed",
   "apply.kept_in_place": "kept in place: the source already has this name",
+  "apply.ai_meta_unwritable": "exiftool does not write %{container}: AI keywords not written",
+  "apply.ai_meta_failed": "AI keywords not written: %{error}",
   "apply.discrepancy_allowed": "discrepancy allowed: %{message}",
   "apply.result_differs": "result differs from the source: %{details}; not placed, source untouched",
   "apply.check_not_performed": "check not performed: %{error}",

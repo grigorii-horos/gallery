@@ -166,6 +166,7 @@ impl Classifier for CachedOnly<'_> {
                         category: None,
                         reason: String::new(),
                         confidence: Confidence::Ok,
+                        meta: None,
                     }
                 })
             })
@@ -683,11 +684,13 @@ mod tests {
             prompt: Default::default(),
         };
         let hash =
-            crate::ai::cache::prompt_hash(&crate::ai::system_prompt(&req.categories, &req.prompt));
+            crate::ai::cache::prompt_hash(&crate::ai::cache_prompt(&req.categories, &req.prompt));
         cache
             .put(
                 crate::ai::cache::key(shot, &new.ai.model, &hash),
                 crate::ai::cache::Stored {
+                    tags: Vec::new(),
+                    description: String::new(),
                     category: "pics".into(),
                     reason: "r".into(),
                     confidence: "OK".into(),

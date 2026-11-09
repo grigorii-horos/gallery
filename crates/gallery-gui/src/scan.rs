@@ -386,6 +386,7 @@ pub(crate) mod tests {
                     category: Some("cats".into()),
                     reason: "a cat".into(),
                     confidence: Confidence::Low,
+                    meta: None,
                 })
                 .collect())
         }
