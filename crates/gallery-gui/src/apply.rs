@@ -462,6 +462,7 @@ mod tests {
                 })
                 .collect(),
             kind: Default::default(),
+            captured: None,
         }
     }
 

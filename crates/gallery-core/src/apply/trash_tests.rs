@@ -67,6 +67,7 @@ fn item(root: &Path, src: &Path, target: &str, kind: TargetKind) -> PlanItem {
         via: Via::Mask,
         kind,
         outputs: Vec::new(),
+        captured: None,
     }
 }
 
@@ -150,6 +151,31 @@ fn trash_item_goes_to_the_trash_after_every_placement_and_undo_restores_it() {
     assert_eq!(std::fs::read(&junk).unwrap(), b"junk bytes");
     assert_eq!(std::fs::metadata(&junk).unwrap().modified().unwrap(), mtime);
     assert!(d.path().join("src/a.jpg").exists());
+}
+
+#[test]
+fn trash_item_is_journaled_once() {
+    let d = tempfile::tempdir().unwrap();
+    let (plan_path, junk, _) = fixture(d.path());
+    let lines = Mutex::new(Vec::new());
+    let journal = journal_path(&report_path(&plan_path));
+    apply_impl(
+        &plan_path,
+        &no_tools(),
+        &caps(),
+        &opts(),
+        &NoProgress,
+        &Cancel::new(),
+        &|r: &ItemResult| {
+            if r.source == junk {
+                let text = std::fs::read_to_string(&journal).unwrap();
+                let n = text.lines().filter(|l| l.contains("junk.jpg")).count();
+                lines.lock().unwrap().push(n);
+            }
+        },
+    )
+    .unwrap();
+    assert_eq!(lines.into_inner().unwrap(), [1]);
 }
 
 #[test]

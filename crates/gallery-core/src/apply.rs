@@ -439,7 +439,7 @@ fn apply_impl(
         {
             stop.store(true, Ordering::SeqCst);
         }
-        run.journal(&r);
+        run.journal_result(item, &r);
         on_item(&r);
         collected
             .lock()
@@ -801,6 +801,16 @@ impl Run<'_> {
     fn journal(&self, r: &ItemResult) {
         if let Some(j) = self.journal {
             j.append(r);
+        }
+    }
+
+    /// Journal the result of `item`, unless [`Run::trash_source`] did at
+    /// once (a trashed `trash` item): one line per item is enough.
+    fn journal_result(&self, item: &PlanItem, r: &ItemResult) {
+        let journaled =
+            item.kind == TargetKind::Trash && matches!(r.status, ItemStatus::Done { .. });
+        if !journaled {
+            self.journal(r);
         }
     }
 
@@ -1945,6 +1955,7 @@ mod tests {
                     trace: vec![],
                 }],
                 kind: Default::default(),
+                captured: None,
             }],
             review: vec![],
             unmatched: vec![],
@@ -2195,6 +2206,7 @@ mod tests {
                     trace: vec![],
                 }],
                 kind: Default::default(),
+                captured: None,
             }],
             review: vec![],
             unmatched: vec![],
@@ -2992,6 +3004,7 @@ mod cancel_tests {
                     trace: vec![],
                 }],
                 kind: Default::default(),
+                captured: None,
             });
             sources.push(src);
         }
@@ -3250,6 +3263,7 @@ mod exif_failure_tests {
                     trace: vec![],
                 }],
                 kind: Default::default(),
+                captured: None,
             }],
             review: vec![],
             unmatched: vec![],
@@ -3404,6 +3418,7 @@ mod mtime_tests {
                     trace: vec![],
                 }],
                 kind: Default::default(),
+                captured: None,
             }],
             review: vec![],
             unmatched: vec![],
@@ -3646,6 +3661,7 @@ mod verification {
                         trace: vec![],
                     }],
                     kind: Default::default(),
+                    captured: None,
                 }
             })
             .collect();

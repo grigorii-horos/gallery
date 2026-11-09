@@ -284,6 +284,7 @@ mod tests {
                 trace: vec![],
             }],
             kind: Default::default(),
+            captured: None,
         }
     }
 

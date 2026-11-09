@@ -100,6 +100,7 @@ mod tests {
                 trace: vec![],
             }],
             kind: Default::default(),
+            captured: None,
         };
         let plan = Plan {
             version: PLAN_VERSION,

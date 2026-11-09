@@ -51,6 +51,7 @@ fn apply_expands_tilde_with_local_home() {
                 trace: vec![],
             }],
             kind: Default::default(),
+            captured: None,
         }],
         review: vec![],
         unmatched: vec![],

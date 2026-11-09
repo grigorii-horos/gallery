@@ -506,6 +506,7 @@ mod tests {
             via,
             outputs: vec![],
             kind: Default::default(),
+            captured: None,
         }
     }
 

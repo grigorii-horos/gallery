@@ -209,6 +209,8 @@ export interface PlanItem {
   /** What the target does; absent (folders) in version-1 plans. A `trash` item has no outputs. */
   kind?: "folders" | "trash" | "keep";
   outputs: PlannedOutput[];
+  /** Capture time, `YYYY-MM-DDTHH:MM:SS` local, on `trash` items; absent when unknown or in older plans. */
+  captured?: string | null;
 }
 
 export interface ReviewItem {

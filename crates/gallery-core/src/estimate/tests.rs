@@ -45,6 +45,7 @@ fn item(src: &str, target: &str, size: u64, ops: &[(OutputOp, &[&str])]) -> Plan
             })
             .collect(),
         kind: Default::default(),
+        captured: None,
     }
 }
 

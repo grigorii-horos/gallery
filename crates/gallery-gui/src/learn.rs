@@ -181,6 +181,7 @@ mod tests {
             via,
             outputs: vec![],
             kind: Default::default(),
+            captured: None,
         };
         let plan = Plan {
             version: 1,

@@ -177,6 +177,24 @@ fn guard_keeps_the_original_of_a_duplicate_pair_out_of_the_trash() {
 }
 
 #[test]
+fn a_guard_held_item_keeps_its_capture_time() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let files = vec![entry(root, "orig.jpg"), entry(root, "copy.jpg")];
+    let groups = groups_with(&[(1, 0)], vec![]);
+    let exif = HashMap::from([(
+        files[0].path.clone(),
+        serde_json::json!({ "ExifIFD:DateTimeOriginal": "2026:04:12 10:33:14" }),
+    )]);
+    let routed = files.iter().map(|f| (f.clone(), to("Junk"))).collect();
+    let mut p = build_plan(&cfg(root), routed, &exif, Side::Local).unwrap();
+    assert_eq!(p.items[0].captured.as_deref(), Some("2026-04-12T10:33:14"));
+    guard_last_copies(&mut p, &groups, &files);
+    assert_eq!(p.review[0].source, files[0].path);
+    assert_eq!(p.review[0].captured.as_deref(), Some("2026-04-12T10:33:14"));
+}
+
+#[test]
 fn guard_keeps_the_best_shot_of_a_series_trashed_by_manual_decisions() {
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
