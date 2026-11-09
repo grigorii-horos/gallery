@@ -366,6 +366,17 @@ pub fn shell_quote(s: &str) -> String {
 /// `gallery undo <the report's path on the server>`: the report records the
 /// plan's path there, and the report sits next to it.
 pub fn server_command(report: &Report, file_name: &str) -> String {
+    // The server may run another OS than this GUI (a Linux server seen from
+    // Windows): a `/`-rooted path is absolute there and is joined with `/`.
+    let plan = report.plan.to_string_lossy();
+    if plan.starts_with('/') && !cfg!(unix) {
+        if let Some((dir, _)) = plan.rsplit_once('/') {
+            return format!(
+                "gallery undo {}",
+                shell_quote(&format!("{dir}/{file_name}"))
+            );
+        }
+    }
     match report.plan.parent().filter(|d| d.is_absolute()) {
         Some(dir) => format!("gallery undo {}", shell_quote(&shown(&dir.join(file_name)))),
         None => gallery_core::t!("history.undo_command", file = file_name),
