@@ -426,7 +426,7 @@ mod tests {
         pipe: &[(&str, &str)],
         tail: &str,
     ) -> Config {
-        let r = dir.path().display();
+        let r = dir.path().to_string_lossy().replace('\\', "/");
         let ex = if exclude.is_empty() {
             String::new()
         } else {
@@ -549,7 +549,7 @@ mod tests {
     fn reorder_changes_first_match() {
         let f = fx();
         let two = |a: &str, b: &str| {
-            let r = f.dir.path().display();
+            let r = f.dir.path().to_string_lossy().replace('\\', "/");
             let t = |n: &str, m: &str| {
                 format!(
                     "[[targets.after_ai]]\nname = \"{n}\"\n[[targets.after_ai.filters]]\n\
@@ -577,7 +577,7 @@ mod tests {
     #[test]
     fn uncached_ai_files_wait_and_cached_ones_route() {
         let f = fx();
-        let r = f.dir.path().display();
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
         let cfg_toml = |extra: &str| {
             format!(
                 "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\

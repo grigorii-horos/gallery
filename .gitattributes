@@ -1,0 +1,5 @@
+# LF everywhere: tests compare files byte-for-byte across OSes.
+* text=auto eol=lf
+*.png binary
+*.ico binary
+*.icns binary

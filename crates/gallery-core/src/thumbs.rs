@@ -44,7 +44,7 @@ fn remove_stale_temp_dirs(dir: &Path) {
 
 /// `<user cache dir>/gallery/thumbs`.
 pub fn default_dir() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("gallery").join("thumbs"))
+    crate::paths::cache_dir().map(|d| d.join("thumbs"))
 }
 
 /// Cache file name for a file in this state: blake3 of path, size, mtime.
@@ -278,7 +278,14 @@ mod tests {
         std::fs::create_dir_all(&fresh).unwrap();
         std::fs::write(cache.join("keep.jpg"), b"x").unwrap();
         let two_hours_ago = std::time::SystemTime::now() - std::time::Duration::from_secs(2 * 3600);
-        std::fs::File::open(&old)
+        let mut open = std::fs::OpenOptions::new();
+        open.read(true);
+        // Windows opens a directory only with FILE_FLAG_BACKUP_SEMANTICS.
+        #[cfg(windows)]
+        std::os::windows::fs::OpenOptionsExt::custom_flags(&mut open, 0x0200_0000);
+        #[cfg(windows)]
+        open.write(true);
+        open.open(&old)
             .unwrap()
             .set_modified(two_hours_ago)
             .unwrap();

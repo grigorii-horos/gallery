@@ -106,7 +106,7 @@ mod tests {
                 "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\n\
                  [[targets.ai]]\nname = \"pets\"\nsources = [\"s\"]\ndescription = \"pets\"\n\
                  [[targets.ai.outputs]]\ndir = \"{r}/out\"\n",
-                r = d.path().display()
+                r = d.path().to_string_lossy().replace('\\', "/")
             ),
         )
         .unwrap();

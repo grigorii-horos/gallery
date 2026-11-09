@@ -540,6 +540,7 @@
   "gui.internal_scan": "erro interno de verificação: %{error}",
   "gui.internal_check": "erro interno de conferência: %{error}",
   "gui.no_config_dir": "sem diretório de configurações do usuário",
+  "desktop.linux_only": "a entrada de menu e o início no login existem só no Linux; neste sistema use as configurações do sistema operacional",
   "current.no_files": "O plano não tem arquivos para executar.",
   "triage.add_to_match": "Adicionar %{item} à máscara do destino “%{target}”",
   "triage.add_filter": "Adicionar um novo filtro ao destino “%{target}” para a origem %{source}: %{item}",

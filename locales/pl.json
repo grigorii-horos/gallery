@@ -544,6 +544,7 @@
   "gui.internal_scan": "błąd wewnętrzny skanowania: %{error}",
   "gui.internal_check": "błąd wewnętrzny sprawdzania: %{error}",
   "gui.no_config_dir": "brak katalogu ustawień użytkownika",
+  "desktop.linux_only": "wpis w menu i uruchamianie przy logowaniu są dostępne tylko w systemie Linux; tutaj użyj ustawień systemu",
   "current.no_files": "W planie nie ma plików do uruchomienia.",
   "triage.add_to_match": "Dodaj %{item} do maski celu „%{target}”",
   "triage.add_filter": "Dodaj nowy filtr do celu „%{target}” dla źródła %{source}: %{item}",

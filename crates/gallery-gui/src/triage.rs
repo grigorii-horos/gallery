@@ -403,7 +403,7 @@ mod tests {
              # pics\n[[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"   # only jpg\n\
              [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = r.display()
+            r = r.to_string_lossy().replace('\\', "/")
         );
         let cfg = r.join("gallery.toml");
         std::fs::write(&cfg, toml).unwrap();
@@ -532,7 +532,10 @@ mod tests {
         assert!(text.contains(".stfolder"), "defaults kept:\n{text}");
         let c = Config::load(&fx.cfg).unwrap();
         let listed = scan_sources(&c.sources).unwrap();
-        let rels: Vec<_> = listed.iter().map(|f| f.rel.display().to_string()).collect();
+        let rels: Vec<_> = listed
+            .iter()
+            .map(|f| f.rel.display().to_string().replace('\\', "/"))
+            .collect();
         assert!(
             !rels.contains(&"Screenshots/a.webm".to_string()),
             "{rels:?}"
@@ -576,7 +579,13 @@ mod tests {
             v.groups.iter().find(|g| g.group.ext == "avif").unwrap(),
             ActionKind::CreateTarget,
         );
-        assert!(dflt.dir.as_deref().unwrap().ends_with("shots/Screenshots"));
+        assert!(
+            dflt.dir
+                .as_deref()
+                .unwrap()
+                .replace('\\', "/")
+                .ends_with("shots/Screenshots")
+        );
 
         // An empty name does not validate: nothing is written.
         let bad = ops("");

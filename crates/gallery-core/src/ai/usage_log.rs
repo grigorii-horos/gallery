@@ -46,7 +46,7 @@ impl UsageRow {
 
 /// `<user cache dir>/gallery/ai-usage.jsonl`.
 pub fn default_path() -> Option<PathBuf> {
-    dirs::cache_dir().map(|d| d.join("gallery").join("ai-usage.jsonl"))
+    crate::paths::cache_dir().map(|d| d.join("ai-usage.jsonl"))
 }
 
 /// Append a row; a scan that made no request leaves no row.

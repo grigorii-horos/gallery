@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+env:
+  CARGO_TERM_COLOR: always
+
+permissions:
+  contents: write
+
+jobs:
+  app:
+    name: app (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux, os: ubuntu-22.04, target: '', args: '' }
+          - { name: windows, os: windows-latest, target: '', args: '' }
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, args: '--target aarch64-apple-darwin' }
+          - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin, args: '--target x86_64-apple-darwin' }
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ${{ matrix.name }}
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Linux packages
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev libsoup-3.0-dev libayatana-appindicator3-dev \
+            librsvg2-dev libgtk-3-dev libssl-dev pkg-config
+
+      - run: pnpm install --frozen-lockfile
+
+      # Bundles (AppImage/deb, msi/nsis, dmg) go to the draft release.
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          projectPath: crates/gallery-gui
+          tagName: ${{ github.ref_name }}
+          releaseName: Gallery ${{ github.ref_name }}
+          releaseBody: |
+            Unsigned builds. macOS: right-click the app, then Open (first launch only).
+            Windows: SmartScreen may ask to confirm ("More info", "Run anyway").
+            The external tools (ffmpeg, exiftool, avifenc, ImageMagick 7, optipng)
+            are not bundled; see the README.
+          releaseDraft: true
+          prerelease: false
+          args: ${{ matrix.args }}
+          tauriScript: pnpm tauri
+
+  cli:
+    name: cli (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { name: linux-x64, os: ubuntu-22.04, target: x86_64-unknown-linux-gnu, ext: '' , archive: tar.gz }
+          - { name: windows-x64, os: windows-latest, target: x86_64-pc-windows-msvc, ext: .exe, archive: zip }
+          - { name: macos-arm64, os: macos-latest, target: aarch64-apple-darwin, ext: '', archive: tar.gz }
+          - { name: macos-x64, os: macos-latest, target: x86_64-apple-darwin, ext: '', archive: tar.gz }
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: cli-${{ matrix.name }}
+      - run: cargo build --release -p gallery-cli --target ${{ matrix.target }}
+      - name: Package
+        run: |
+          out="gallery-${{ github.ref_name }}-${{ matrix.name }}"
+          mkdir "$out"
+          cp "target/${{ matrix.target }}/release/gallery${{ matrix.ext }}" LICENSE README.md "$out/"
+          if [ "${{ matrix.archive }}" = zip ]; then
+            7z a "$out.zip" "$out" >/dev/null
+            echo "ASSET=$out.zip" >> "$GITHUB_ENV"
+          else
+            tar czf "$out.tar.gz" "$out"
+            echo "ASSET=$out.tar.gz" >> "$GITHUB_ENV"
+          fi
+      - name: Attach to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The app job may not have created the draft yet: create it if missing.
+          for i in 1 2 3 4 5 6; do
+            gh release view "${{ github.ref_name }}" >/dev/null 2>&1 && break
+            gh release create "${{ github.ref_name }}" --draft --title "Gallery ${{ github.ref_name }}" --notes "" 2>/dev/null && break
+            sleep 10
+          done
+          gh release upload "${{ github.ref_name }}" "$ASSET" --clobber

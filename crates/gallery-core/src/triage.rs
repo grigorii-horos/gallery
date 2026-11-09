@@ -179,7 +179,7 @@ mod tests {
              [[sources]]\nid = \"lone\"\npath = \"{r}/lone\"\n\
              [[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"\n[[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = r.display()
+            r = r.to_string_lossy().replace('\\', "/")
         );
         let cfg = Config::from_str_at(&toml, r, Path::new("t.toml")).unwrap();
         cfg.validate().unwrap();

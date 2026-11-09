@@ -33,15 +33,7 @@ pub fn read_with(
         argfile.flush()?;
         let out = tools
             .command(&tools.exiftool)
-            .args([
-                "-j",
-                "-n",
-                "-G1",
-                "-api",
-                "QuickTimeUTC",
-                "-api",
-                "LargeFileSupport=1",
-            ])
+            .args(["-j", "-n", "-G1", "-api", "LargeFileSupport=1"])
             .args(["-charset", "filename=utf8", "-@"])
             .arg(argfile.path())
             .output()?;
@@ -53,7 +45,8 @@ pub fn read_with(
                 stderr = String::from_utf8_lossy(&out.stderr)
             ))
         })?;
-        for v in parsed {
+        for mut v in parsed {
+            quicktime_to_local(tools, &mut v);
             if let Some(src) = v.get("SourceFile").and_then(|s| s.as_str()) {
                 result.insert(PathBuf::from(src), v.clone());
             }
@@ -67,6 +60,47 @@ pub fn read_with(
         });
     }
     Ok(result)
+}
+
+/// QuickTime date tags exiftool stores as UTC: the movie, track and media
+/// header times.
+const QUICKTIME_DATES: [&str; 6] = [
+    "CreateDate",
+    "ModifyDate",
+    "TrackCreateDate",
+    "TrackModifyDate",
+    "MediaCreateDate",
+    "MediaModifyDate",
+];
+
+/// Turn the raw (UTC) QuickTime date tags of one exiftool record into local
+/// wall-clock times with an explicit offset ("2026:04:12 13:00:00+03:00") in
+/// the tools' zone. This is what `-api QuickTimeUTC` does, but exiftool does
+/// it with the process `TZ`, which Windows does not understand; here the
+/// zone's rules come from chrono-tz, so the result is the same on every OS.
+/// Values that are not plain dates (zero dates) stay as they are.
+pub(crate) fn quicktime_to_local(tools: &Tools, rec: &mut serde_json::Value) {
+    let Some(obj) = rec.as_object_mut() else {
+        return;
+    };
+    for (key, val) in obj.iter_mut() {
+        let Some((group, name)) = key.rsplit_once(':') else {
+            continue;
+        };
+        if !QUICKTIME_DATES.contains(&name) || !(group == "QuickTime" || group.starts_with("Track"))
+        {
+            continue;
+        }
+        let Some(utc) = val
+            .as_str()
+            .and_then(|s| chrono::NaiveDateTime::parse_from_str(s, "%Y:%m:%d %H:%M:%S").ok())
+        else {
+            continue;
+        };
+        if let Some(local) = tools.utc_to_local(utc) {
+            *val = serde_json::Value::String(local.format("%Y:%m:%d %H:%M:%S%:z").to_string());
+        }
+    }
 }
 
 /// Write tags to `path` in place (no `_original` backup, minor errors ignored).
@@ -100,4 +134,69 @@ pub fn write(tools: &Tools, path: &Path, args: &[String]) -> Result<()> {
         )));
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use std::path::PathBuf;
+
+    fn tools_in(tz: Option<&str>) -> Tools {
+        let p = PathBuf::from("unused");
+        Tools {
+            ffmpeg: p.clone(),
+            ffprobe: p.clone(),
+            exiftool: p.clone(),
+            avifenc: p.clone(),
+            magick: p,
+            optipng: None,
+            tz: tz.map(String::from),
+        }
+    }
+
+    fn record() -> serde_json::Value {
+        json!({
+            "SourceFile": "v.mp4",
+            "QuickTime:CreateDate": "2026:04:12 10:00:00",
+            "QuickTime:ModifyDate": "2026:04:12 10:00:00",
+            "Track1:TrackCreateDate": "2026:04:12 10:00:00",
+            "Track2:MediaModifyDate": "2026:01:10 10:00:00",
+            "QuickTime:MediaCreateDate": "0000:00:00 00:00:00",
+            "Keys:CreationDate": "2026:04:12 10:00:00+05:00",
+            "ExifIFD:CreateDate": "2026:04:12 10:00:00",
+            "ExifIFD:DateTimeOriginal": "2026:04:12 10:00:00",
+        })
+    }
+
+    #[test]
+    fn quicktime_utc_dates_become_zone_local_with_offset() {
+        let mut r = record();
+        quicktime_to_local(&tools_in(Some("Europe/Chisinau")), &mut r);
+        assert_eq!(r["QuickTime:CreateDate"], "2026:04:12 13:00:00+03:00");
+        assert_eq!(r["QuickTime:ModifyDate"], "2026:04:12 13:00:00+03:00");
+        assert_eq!(r["Track1:TrackCreateDate"], "2026:04:12 13:00:00+03:00");
+        // Winter time: +02:00.
+        assert_eq!(r["Track2:MediaModifyDate"], "2026:01:10 12:00:00+02:00");
+        // Zero dates, other groups and non-QuickTime tags are left alone.
+        assert_eq!(r["QuickTime:MediaCreateDate"], "0000:00:00 00:00:00");
+        assert_eq!(r["Keys:CreationDate"], "2026:04:12 10:00:00+05:00");
+        assert_eq!(r["ExifIFD:CreateDate"], "2026:04:12 10:00:00");
+        assert_eq!(r["ExifIFD:DateTimeOriginal"], "2026:04:12 10:00:00");
+        assert_eq!(r["SourceFile"], "v.mp4");
+
+        let mut r = record();
+        quicktime_to_local(&tools_in(Some("Asia/Tokyo")), &mut r);
+        assert_eq!(r["QuickTime:CreateDate"], "2026:04:12 19:00:00+09:00");
+        let mut r = record();
+        quicktime_to_local(&tools_in(Some("UTC")), &mut r);
+        assert_eq!(r["QuickTime:CreateDate"], "2026:04:12 10:00:00+00:00");
+    }
+
+    #[test]
+    fn unparsable_zone_leaves_dates_raw() {
+        let mut r = record();
+        quicktime_to_local(&tools_in(Some("Not/AZone")), &mut r);
+        assert_eq!(r["QuickTime:CreateDate"], "2026:04:12 10:00:00");
+    }
 }

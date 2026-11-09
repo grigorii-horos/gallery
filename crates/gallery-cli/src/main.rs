@@ -648,7 +648,8 @@ fn pending_cmd(config: &Path, overrides: Option<&Path>, json: bool) -> Result<()
 fn gui_exe(exe: Option<PathBuf>) -> Result<PathBuf> {
     let path = match exe {
         Some(p) => p,
-        None => std::env::current_exe()?.with_file_name("gallery-gui"),
+        None => std::env::current_exe()?
+            .with_file_name(format!("gallery-gui{}", std::env::consts::EXE_SUFFIX)),
     };
     if !path.is_file() {
         return Err(Error::Config(gallery_core::t!(
@@ -660,6 +661,9 @@ fn gui_exe(exe: Option<PathBuf>) -> Result<PathBuf> {
 }
 
 fn install_desktop_cmd(exe: Option<PathBuf>) -> Result<()> {
+    if !gallery_core::desktop::SUPPORTED {
+        return Err(gallery_core::desktop::linux_only());
+    }
     let exe = gui_exe(exe)?;
     let data_home =
         dirs::data_dir().ok_or_else(|| Error::Config(gallery_core::t!("lock.no_data_dir")))?;
@@ -734,6 +738,9 @@ fn check() -> Result<u8> {
                         "cli.check_missing_png"
                     })
                 );
+                if let Some(hint) = gallery_core::tools::install_hint(name) {
+                    println!("    {hint}");
+                }
             }
         }
     }

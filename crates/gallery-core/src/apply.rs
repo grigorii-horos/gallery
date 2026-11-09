@@ -1624,7 +1624,59 @@ fn rename_fallback(from: &Path, to: &Path) -> std::io::Result<()> {
         Err(e) if matches!(e.raw_os_error(), Some(libc::EINVAL | libc::ENOSYS)) => {}
         r => return r,
     }
+    rename_last_resort(from, to)
+}
+
+/// The final, non-atomic-where-unavoidable step of [`rename_fallback`].
+#[cfg(windows)]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
+    rename_exclusive_windows(from, to)
+}
+
+#[cfg(target_os = "macos")]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::ffi::CString;
+    use std::os::unix::ffi::OsStrExt;
+    let c = |p: &Path| CString::new(p.as_os_str().as_bytes()).map_err(std::io::Error::other);
+    let (f, t) = (c(from)?, c(to)?);
+    // SAFETY: both are valid NUL-terminated paths, alive for the call.
+    let r = unsafe { libc::renamex_np(f.as_ptr(), t.as_ptr(), libc::RENAME_EXCL) };
+    if r == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    // A file system without exclusive rename: the check-then-rename below.
+    if e.raw_os_error() == Some(libc::ENOTSUP) {
+        return std::fs::rename(from, to);
+    }
+    Err(e)
+}
+
+#[cfg(not(any(windows, target_os = "macos")))]
+fn rename_last_resort(from: &Path, to: &Path) -> std::io::Result<()> {
     std::fs::rename(from, to)
+}
+
+/// `MoveFileExW` without `MOVEFILE_REPLACE_EXISTING` (what `std::fs::rename`
+/// always sets): atomic, fails with `AlreadyExists` instead of overwriting,
+/// and, with no `MOVEFILE_COPY_ALLOWED`, never turns into a copy across
+/// volumes. The only way to place a file on FAT/exFAT without ever
+/// overwriting; NTFS goes through the hard link path first.
+#[cfg(windows)]
+fn rename_exclusive_windows(from: &Path, to: &Path) -> std::io::Result<()> {
+    use std::os::windows::ffi::OsStrExt;
+    let wide = |p: &Path| -> Vec<u16> { p.as_os_str().encode_wide().chain(Some(0)).collect() };
+    let (f, t) = (wide(from), wide(to));
+    // SAFETY: both are NUL-terminated UTF-16 paths alive for the call.
+    let ok =
+        unsafe { windows_sys::Win32::Storage::FileSystem::MoveFileExW(f.as_ptr(), t.as_ptr(), 0) };
+    if ok != 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    // ERROR_ALREADY_EXISTS (183) and ERROR_FILE_EXISTS (80) are AlreadyExists
+    // to std; ERROR_NOT_SAME_DEVICE (17) is CrossesDevices.
+    Err(e)
 }
 
 /// `renameat2(from, to, RENAME_NOREPLACE)`: fails with `AlreadyExists`
@@ -1754,10 +1806,15 @@ mod tests {
 
     fn fake_tools() -> Tools {
         let p = PathBuf::from("/nonexistent/tool");
+        // The shell-script stand-in needs unix; elsewhere the tool is absent.
+        #[cfg(unix)]
+        let exiftool = fake_exiftool();
+        #[cfg(not(unix))]
+        let exiftool = p.clone();
         Tools {
             ffmpeg: p.clone(),
             ffprobe: p.clone(),
-            exiftool: fake_exiftool(),
+            exiftool,
             avifenc: p.clone(),
             magick: p,
             optipng: None,
@@ -2070,6 +2127,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn in_place_failure_keeps_processed_output() {
         let d = tempfile::tempdir().unwrap();
         let (plan, src) = in_place_plan(d.path());
@@ -2109,6 +2167,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn damaged_byte_copy_is_not_placed() {
         let d = tempfile::tempdir().unwrap();
         let (plan_path, src) = in_place_plan(d.path());
@@ -2132,6 +2191,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn run_interrupted_after_the_trash_can_be_undone() {
         let d = tempfile::tempdir().unwrap();
         let (plan, src) = in_place_plan(d.path());
@@ -2259,6 +2319,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn finished_run_leaves_no_journal() {
         let d = tempfile::tempdir().unwrap();
         let (plan, _) = in_place_plan(d.path());
@@ -2280,7 +2341,11 @@ mod tests {
             .map(|e| e.unwrap().path())
             .collect();
         match apply_with_caps(&plan, &fake_tools(), &all_caps(), &folder_opts()) {
-            Err(Error::Plan(m)) => assert!(m.contains(&me) && m.contains("plan.lock"), "{m}"),
+            Err(Error::Plan(m)) => {
+                assert!(m.contains("plan.lock"), "{m}");
+                // Windows locks are mandatory: the holder's pid is unreadable.
+                assert!(!cfg!(unix) || m.contains(&me), "{m}");
+            }
             other => panic!("expected a lock error, got {other:?}"),
         }
         let after: Vec<_> = std::fs::read_dir(d.path())
@@ -2289,11 +2354,18 @@ mod tests {
             .collect();
         assert_eq!(before, after);
         assert_eq!(std::fs::read(&src).unwrap(), b"original");
+        // Windows locks are mandatory: the file cannot be read while held.
+        #[cfg(unix)]
         assert_eq!(std::fs::read_to_string(&lock).unwrap(), me);
+        #[cfg(not(unix))]
+        let _ = &lock;
         // Undo of the same plan waits for it too.
         let rp = report_path(&plan);
         std::fs::write(&rp, "{}").unwrap();
-        assert!(matches!(crate::undo::undo(&rp), Err(Error::Plan(m)) if m.contains(&me)));
+        assert!(matches!(
+            crate::undo::undo(&rp),
+            Err(Error::Plan(m)) if m.contains("plan.lock") && (!cfg!(unix) || m.contains(&me))
+        ));
         std::fs::remove_file(&rp).unwrap();
 
         // Once it is released, a run takes the lock and releases it at the end.
@@ -2382,6 +2454,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn rename_waits_for_every_write() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2406,6 +2479,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn failed_write_leaves_the_source_unrenamed() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2456,6 +2530,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn source_changed_after_the_writes_is_not_renamed() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2480,6 +2555,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn keep_with_backup_writes_the_backup_only() {
         let d = tempfile::tempdir().unwrap();
         let backup = d.path().join("backup/IMG_1.png");
@@ -2502,6 +2578,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(not(unix), ignore = "needs the sh exiftool stand-in")]
     fn rename_with_backup_is_undone() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/20260101_120000.png");
@@ -2524,6 +2601,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        any(target_os = "macos", windows),
+        ignore = "case-insensitive file system: the case-only target is the file itself"
+    )]
     fn case_only_rename_keeps_the_name() {
         let d = tempfile::tempdir().unwrap();
         let new = d.path().join("src/IMG.jpg");
@@ -2735,7 +2816,7 @@ mod tests {
 
 /// A stand-in exiftool for tests: answers every file of the `-@` argfile
 /// with an entry holding only its `SourceFile`.
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn fake_exiftool() -> PathBuf {
     use std::os::unix::fs::PermissionsExt;
     static PATH: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
@@ -2755,7 +2836,7 @@ pub(crate) fn fake_exiftool() -> PathBuf {
     .clone()
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod cancel_tests {
     use super::*;
     use crate::plan::{PLAN_VERSION, Side};
@@ -3017,7 +3098,7 @@ mod cancel_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod exif_failure_tests {
     use super::*;
     use crate::plan::{PLAN_VERSION, Side};
@@ -3130,7 +3211,7 @@ mod exif_failure_tests {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, unix))]
 mod mtime_tests {
     use super::*;
     use crate::config::{MetadataPreset, PhotoPreset};

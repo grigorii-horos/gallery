@@ -162,6 +162,16 @@ fn default_config_paths() -> Vec<PathBuf> {
     if let Some(h) = &home {
         v.push(h.join(".config/syncthing"));
     }
+    // Windows: %LOCALAPPDATA%\Syncthing; macOS: ~/Library/Application
+    // Support/Syncthing (`dirs::config_dir()` there).
+    #[cfg(windows)]
+    if let Some(d) = dirs::data_local_dir() {
+        v.insert(0, d.join("Syncthing"));
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(d) = dirs::config_dir() {
+        v.insert(0, d.join("Syncthing"));
+    }
     v.into_iter().map(|d| d.join("config.xml")).collect()
 }
 
@@ -364,7 +374,7 @@ pub struct PauseState {
 
 /// `<user data dir>/gallery/sync-paused.json`.
 pub fn default_state_path() -> Option<PathBuf> {
-    dirs::data_dir().map(|d| d.join("gallery").join("sync-paused.json"))
+    crate::paths::data_dir().map(|d| d.join("sync-paused.json"))
 }
 
 /// The state file; a missing one is `None`. An unreadable one is an error:
