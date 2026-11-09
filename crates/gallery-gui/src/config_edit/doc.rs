@@ -5,9 +5,12 @@
 
 use toml_edit::{Array, ArrayOfTables, DocumentMut, InlineTable, Item, Table, TableLike, Value};
 
+use std::collections::BTreeMap;
+
+use super::cond::{CONDITION_KEYS, condition_toml, item_json};
 use super::model::{
-    ConfigDraft, FilterDraft, OutputDraft, PrefilterDraft, SourceDraft, Stage, StepDraft,
-    TargetDraft, TargetsDraft,
+    ConfigDraft, FilterDraft, OutputDraft, PlaceDraft, SourceDraft, StepDraft, TargetDraft,
+    TargetKind,
 };
 
 type R<T> = Result<T, String>;
@@ -147,11 +150,56 @@ fn source(t: &dyn TableLike, path: &str) -> R<SourceDraft> {
 }
 
 fn filter(t: &dyn TableLike, path: &str) -> R<FilterDraft> {
+    let conditions: BTreeMap<String, serde_json::Value> = CONDITION_KEYS
+        .iter()
+        .filter_map(|k| t.get(k).map(|i| (k.to_string(), item_json(i))))
+        .collect();
     Ok(FilterDraft {
         sources: str_list_at(t, "sources", path)?.unwrap_or_default(),
         matches: mask_at(t, "match", path)?,
         exclude: mask_at(t, "exclude", path)?.unwrap_or_default(),
+        ai: str_at(t, "ai", path)?,
+        expand: str_at(t, "expand", path)?,
+        conditions,
     })
+}
+
+fn kind_at(t: &dyn TableLike, path: &str) -> R<TargetKind> {
+    match str_at(t, "kind", path)?.as_deref() {
+        None | Some("folders") => Ok(TargetKind::Folders),
+        Some("trash") => Ok(TargetKind::Trash),
+        Some("keep") => Ok(TargetKind::Keep),
+        Some(_) => Err(wrong(&format!("{path}.kind"), "edit.what.kind")),
+    }
+}
+
+fn num_at(t: &dyn TableLike, key: &str, path: &str) -> R<f64> {
+    t.get(key)
+        .and_then(|i| i.as_float().or_else(|| i.as_integer().map(|x| x as f64)))
+        .ok_or_else(|| wrong(&format!("{path}.{key}"), "edit.what.number"))
+}
+
+fn places(doc: &DocumentMut) -> R<Vec<PlaceDraft>> {
+    let Some(p) = doc.get("places") else {
+        return Ok(Vec::new());
+    };
+    let p = p
+        .as_table_like()
+        .ok_or_else(|| wrong("places", "edit.what.table"))?;
+    p.iter()
+        .map(|(name, item)| {
+            let pp = format!("places.{name}");
+            let t = item
+                .as_table_like()
+                .ok_or_else(|| wrong(&pp, "edit.what.table"))?;
+            Ok(PlaceDraft {
+                name: name.to_string(),
+                lat: num_at(t, "lat", &pp)?,
+                lon: num_at(t, "lon", &pp)?,
+                km: num_at(t, "km", &pp)?,
+            })
+        })
+        .collect()
 }
 
 fn output(t: &dyn TableLike, path: &str) -> R<OutputDraft> {
@@ -174,25 +222,10 @@ fn target(t: &dyn TableLike, path: &str) -> R<TargetDraft> {
         .enumerate()
         .map(|(i, o)| output(o, &format!("{path}.outputs[{i}]")))
         .collect::<R<_>>()?;
-    let prefilter = match t.get("prefilter") {
-        None => None,
-        Some(i) => {
-            let pp = format!("{path}.prefilter");
-            let p = i
-                .as_table_like()
-                .ok_or_else(|| wrong(&pp, "edit.what.table"))?;
-            Some(PrefilterDraft {
-                matches: mask_at(p, "match", &pp)?,
-                exclude: mask_at(p, "exclude", &pp)?.unwrap_or_default(),
-            })
-        }
-    };
     Ok(TargetDraft {
         name: str_at(t, "name", path)?.unwrap_or_default(),
+        kind: kind_at(t, path)?,
         filters,
-        sources: str_list_at(t, "sources", path)?.unwrap_or_default(),
-        description: str_at(t, "description", path)?,
-        prefilter,
         outputs,
     })
 }
@@ -205,24 +238,14 @@ pub fn read_draft(doc: &DocumentMut) -> R<ConfigDraft> {
         .enumerate()
         .map(|(i, s)| source(s, &format!("sources[{i}]")))
         .collect::<R<_>>()?;
-    let mut targets = TargetsDraft::default();
-    if let Some(t) = doc.get("targets") {
-        let t = t
-            .as_table_like()
-            .ok_or_else(|| wrong("targets", "edit.what.table"))?;
-        for stage in Stage::ALL {
-            let list = tables_at(t, stage.key(), "targets")?
-                .into_iter()
-                .enumerate()
-                .map(|(i, x)| target(x, &format!("targets.{}[{i}]", stage.key())))
-                .collect::<R<Vec<_>>>()?;
-            match stage {
-                Stage::BeforeAi => targets.before_ai = list,
-                Stage::Ai => targets.ai = list,
-                Stage::AfterAi => targets.after_ai = list,
-            }
-        }
-    }
+    // An old-shape `[targets]` table is migrated before it is read
+    // (`super::migrate`): here it is not a list.
+    let targets = tables_at(root, "targets", "")
+        .map_err(|_| wrong("targets", "edit.what.tables"))?
+        .into_iter()
+        .enumerate()
+        .map(|(i, x)| target(x, &format!("targets[{i}]")))
+        .collect::<R<Vec<_>>>()?;
     let masks = doc
         .get("masks")
         .and_then(Item::as_table_like)
@@ -231,6 +254,7 @@ pub fn read_draft(doc: &DocumentMut) -> R<ConfigDraft> {
     let (name_presets, content_presets, mask_defs) = super::presets::read(doc)?;
     Ok(ConfigDraft {
         sources,
+        places: places(doc)?,
         targets,
         masks,
         name_presets,
@@ -379,6 +403,20 @@ fn write_filter(t: &mut Table, old: &FilterDraft, new: &FilterDraft) {
             Some(&new.exclude).filter(|e| !e.is_empty()).map(|e| &e[..]),
         );
     }
+    if changed!(old, new, ai) {
+        put(t, "ai", new.ai.as_deref().map(Value::from));
+    }
+    if changed!(old, new, expand) {
+        put(t, "expand", new.expand.as_deref().map(Value::from));
+    }
+    let keys: std::collections::BTreeSet<&String> =
+        old.conditions.keys().chain(new.conditions.keys()).collect();
+    for k in keys {
+        let n = new.conditions.get(k);
+        if old.conditions.get(k) != n {
+            put(t, k, n.map(|j| condition_toml(k, j)));
+        }
+    }
 }
 
 fn write_output(t: &mut Table, old: &OutputDraft, new: &OutputDraft) {
@@ -425,12 +463,12 @@ pub struct Style {
 
 impl Style {
     pub fn of(doc: &DocumentMut) -> Style {
-        // The first filters/outputs/prefilter header decides.
+        // The first filters/outputs header decides.
         let mut found = None;
         for (_, p) in super::order::render_order(doc) {
             if let Some(super::order::Seg::Idx(k, _) | super::order::Seg::Key(k)) = p.last()
-                && matches!(k.as_str(), "filters" | "outputs" | "prefilter")
-                && p.len() > 2
+                && matches!(k.as_str(), "filters" | "outputs")
+                && p.len() > 1
             {
                 let t = super::order::table(doc, &p);
                 let prefix = t
@@ -523,100 +561,36 @@ fn write_list<T: PartialEq + Default>(
     }
 }
 
-fn write_prefilter(
-    t: &mut Table,
-    old: &Option<PrefilterDraft>,
-    new: &Option<PrefilterDraft>,
-    pos: Option<isize>,
-    style: &Style,
-) {
-    if old == new {
-        return;
-    }
-    let Some(n) = new else {
-        t.remove("prefilter");
-        return;
-    };
-    let write = |p: &mut Table, o: &PrefilterDraft| {
-        if o.matches != n.matches {
-            put_mask(p, "match", n.matches.as_deref());
-        }
-        if o.exclude != n.exclude {
-            put_mask(
-                p,
-                "exclude",
-                Some(&n.exclude).filter(|e| !e.is_empty()).map(|e| &e[..]),
-            );
-        }
-    };
-    match (t.get_mut("prefilter"), old) {
-        (Some(Item::Table(p)), Some(o)) => write(p, o),
-        (Some(item), _) if item.is_inline_table() => {
-            let mut p = Table::new();
-            write(&mut p, &PrefilterDraft::default());
-            let decor = item.as_value().map(|v| v.decor().clone());
-            let mut v = Value::InlineTable(p.into_inline_table());
-            if let Some(d) = decor {
-                *v.decor_mut() = d;
-            }
-            *item = Item::Value(v);
-        }
-        _ => {
-            let mut p = Table::new();
-            write(&mut p, &PrefilterDraft::default());
-            // Right after the target's header, before its outputs.
-            p.set_position(pos);
-            p.decor_mut().set_prefix(style.sub_prefix.clone());
-            t.insert("prefilter", Item::Table(p));
-        }
-    }
-}
-
-/// Write target `t` of `stage` from `old` to `new`.
-pub fn write_target(
-    t: &mut Table,
-    stage: Stage,
-    old: &TargetDraft,
-    new: &TargetDraft,
-    style: &Style,
-) {
+/// Write target `t` from `old` to `new`.
+pub fn write_target(t: &mut Table, old: &TargetDraft, new: &TargetDraft, style: &Style) {
     if changed!(old, new, name) {
         put(t, "name", Some(new.name.as_str().into()));
     }
-    let own = t.position();
-    if stage.is_mask() {
-        write_list(
+    if changed!(old, new, kind) {
+        // `folders` is the default: not written.
+        put(
             t,
-            "filters",
-            &old.filters,
-            &new.filters,
-            write_filter,
-            filter_inline,
-            own,
-            style,
+            "kind",
+            (!new.kind.is_folders()).then(|| Value::from(new.kind.as_str())),
         );
-    } else {
-        if changed!(old, new, sources) {
-            put(t, "sources", Some(str_list(&new.sources)));
-        }
-        if changed!(old, new, description) {
-            put(
-                t,
-                "description",
-                new.description.as_deref().map(Value::from),
-            );
-        }
-        write_prefilter(t, &old.prefilter, &new.prefilter, own, style);
     }
+    let own = t.position();
+    write_list(
+        t,
+        "filters",
+        &old.filters,
+        &new.filters,
+        write_filter,
+        filter_inline,
+        own,
+        style,
+    );
     // New outputs go after everything else of the target.
-    let after = [t.get("filters"), t.get("prefilter")]
+    let after = t
+        .get("filters")
+        .and_then(Item::as_array_of_tables)
+        .and_then(last_position)
         .into_iter()
-        .flatten()
-        .filter_map(|i| match i {
-            Item::ArrayOfTables(a) => last_position(a),
-            Item::Table(p) => p.position(),
-            _ => None,
-        })
         .chain(own)
         .max();
     write_list(
@@ -631,10 +605,10 @@ pub fn write_target(
     );
 }
 
-/// A new `[[targets.<stage>]]` table for `d`.
-pub fn new_target(stage: Stage, d: &TargetDraft, style: &Style) -> Table {
+/// A new `[[targets]]` table for `d`.
+pub fn new_target(d: &TargetDraft, style: &Style) -> Table {
     let mut t = Table::new();
-    write_target(&mut t, stage, &TargetDraft::default(), d, style);
+    write_target(&mut t, &TargetDraft::default(), d, style);
     t
 }
 

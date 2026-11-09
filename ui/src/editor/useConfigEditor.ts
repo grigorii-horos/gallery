@@ -162,7 +162,7 @@ export function useConfigEditor(configPath: string | null, onSaved: () => void):
         setFormGen((g) => g + 1);
         if (o.saved) {
           setRetargetable(o.renames.filter((r) => r.overrides > 0));
-          setNotice({ tone: "ok", text: t("editor_saved") });
+          setNotice({ tone: "ok", text: o.backup ? t("editor_saved_as", { file: o.backup }) : t("editor_saved") });
           onSaved();
         }
       }

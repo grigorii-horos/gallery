@@ -908,6 +908,7 @@
   "settings_last": "Ultima verificare: {{total, number}} de sortat (gata de rulare {{ready, number}}, așteaptă IA {{ai, number}}).",
   "editor_not_applied": "Modificarea nu a fost aplicată: {{error}}",
   "editor_saved": "Salvat. Versiunea anterioară se află lângă el, ca gallery.toml.bak.",
+  "editor_saved_as": "Salvat. Versiunea anterioară se află lângă el, ca {{file}}.",
   "editor_moved": "Deciziile manuale au fost mutate la noul nume de țintă: {{n, number}}.",
   "editor_not_moved": "Deciziile nu au fost mutate: {{error}}",
   "dialog_text_filter": "Text",

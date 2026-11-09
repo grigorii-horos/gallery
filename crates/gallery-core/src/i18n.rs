@@ -368,6 +368,8 @@ pub fn extract(key: &str, placeholder: &str, text: &str) -> Option<String> {
     [locale(), DEFAULT].iter().find_map(|loc| {
         let template = fill(lookup(loc, key), &[(placeholder, MARK.to_string())]);
         let (head, tail) = template.split_once(MARK)?;
+        // Other placeholders are not filled: the tail ends before the next.
+        let tail = tail.split("%{").next().unwrap_or("");
         let start = text.find(head)? + head.len();
         let rest = &text[start..];
         let end = if tail.is_empty() {

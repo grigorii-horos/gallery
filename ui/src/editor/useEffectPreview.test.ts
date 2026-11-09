@@ -6,7 +6,7 @@ const invoke = vi.fn<(cmd: string, args: unknown) => Promise<unknown>>();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args: unknown) => invoke(cmd, args) }));
 const { useEffectPreview, EFFECT_PAUSE_MS } = await import("./useEffectPreview");
 
-const op = (name: string): EditOp => ({ op: "remove_target", stage: "ai", index: name.length });
+const op = (name: string): EditOp => ({ op: "remove_target", index: name.length });
 
 describe("useEffectPreview", () => {
   beforeEach(() => {

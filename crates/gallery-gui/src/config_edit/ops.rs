@@ -1,16 +1,19 @@
 //! Typed edit operations on the document.
 
+use gallery_core::config::Place;
 use serde::{Deserialize, Serialize};
-use toml_edit::DocumentMut;
+use toml_edit::{DocumentMut, Item, Table, Value};
 
-use super::doc::{Style, new_source, new_target, read_draft, write_source, write_target};
+use super::cond::{CONDITION_KEYS, ConditionValue, place_toml};
+use super::doc::{Style, new_source, new_target, put, read_draft, write_source, write_target};
 use super::model::{
-    ContentPresetDraft, MaskDraft, NamePresetDraft, PresetKind, SourceDraft, Stage, TargetDraft,
+    ContentPresetDraft, MaskDraft, NamePresetDraft, PresetKind, SourceDraft, TargetDraft,
+    TargetKind,
 };
-use super::order::{Group, Shape, regroup, renumber};
+use super::order::{Group, Seg, Shape, regroup, render_order, renumber};
 use super::presets;
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case")]
 pub enum EditOp {
     AddSource {
@@ -26,26 +29,51 @@ pub enum EditOp {
     RemoveSource {
         id: String,
     },
-    /// Append a target to `stage`.
+    /// Append a target of `kind` to the end of the list: `target` (its
+    /// own `kind` is replaced), or an empty one.
     AddTarget {
-        stage: Stage,
+        kind: TargetKind,
+        #[serde(default)]
         target: TargetDraft,
     },
+    /// Replace target `index` (the list's position).
     UpdateTarget {
-        stage: Stage,
         index: usize,
         target: TargetDraft,
     },
     RemoveTarget {
-        stage: Stage,
         index: usize,
     },
-    /// Move a target within its stage, or between the two mask stages.
+    /// Move target `from` so that it ends up at position `to`.
     MoveTarget {
-        from: Stage,
-        index: usize,
-        to: Stage,
-        to_index: usize,
+        from: usize,
+        to: usize,
+    },
+    /// Change what target `name` does with the files it takes.
+    SetTargetKind {
+        name: String,
+        kind: TargetKind,
+    },
+    /// Set (add or replace) a condition of filter `filter` of target
+    /// `target` (by name).
+    SetCondition {
+        target: String,
+        filter: usize,
+        condition: ConditionValue,
+    },
+    /// Remove condition `key` (also `ai` or `expand`) of a filter.
+    RemoveCondition {
+        target: String,
+        filter: usize,
+        key: String,
+    },
+    /// Add or replace place `name` of `[places]`.
+    SetPlace {
+        name: String,
+        place: Place,
+    },
+    RemovePlace {
+        name: String,
     },
     AddNamePreset {
         preset: NamePresetDraft,
@@ -106,48 +134,188 @@ fn source_index(doc: &DocumentMut, id: &str) -> R<usize> {
         .ok_or_else(|| gallery_core::t!("edit.no_source", id = id))
 }
 
-fn check_index(doc: &DocumentMut, stage: Stage, index: usize) -> R<()> {
-    let n = read_draft(doc)?.targets.stage(stage).len();
+fn check_index(doc: &DocumentMut, index: usize) -> R<()> {
+    let n = read_draft(doc)?.targets.len();
     if index < n {
         Ok(())
     } else {
-        Err(gallery_core::t!(
-            "edit.no_target_at",
-            stage = stage.key(),
-            n = index + 1
-        ))
+        Err(gallery_core::t!("edit.no_target_at", n = index + 1))
     }
+}
+
+fn target_index(doc: &DocumentMut, name: &str) -> R<usize> {
+    read_draft(doc)?
+        .targets
+        .iter()
+        .position(|t| t.name == name)
+        .ok_or_else(|| gallery_core::t!("edit.no_target_named", name = name))
+}
+
+/// Change target `i` of the document with `f` on its draft.
+fn update_target(
+    doc: &mut DocumentMut,
+    i: usize,
+    f: impl FnOnce(&mut TargetDraft) -> R<()>,
+) -> R<()> {
+    check_index(doc, i)?;
+    let old = read_draft(doc)?.targets[i].clone();
+    let mut new = old.clone();
+    f(&mut new)?;
+    if new != old {
+        let style = Style::of(doc);
+        renumber(doc);
+        let t = target_table(doc, i)?;
+        write_target(t, &old, &new, &style);
+        renumber(doc);
+    }
+    Ok(())
+}
+
+/// Change filter `filter` of target `name` with `f`.
+fn update_filter(
+    doc: &mut DocumentMut,
+    name: &str,
+    filter: usize,
+    f: impl FnOnce(&mut super::model::FilterDraft) -> R<()>,
+) -> R<()> {
+    let i = target_index(doc, name)?;
+    update_target(doc, i, |t| {
+        let fl = t
+            .filters
+            .get_mut(filter)
+            .ok_or_else(|| gallery_core::t!("edit.no_filter_at", name = name, n = filter + 1))?;
+        f(fl)
+    })
 }
 
 /// Rewrite every target's source list with `f` (only targets it changes).
 fn map_target_sources(doc: &mut DocumentMut, f: impl Fn(&[String]) -> Vec<String>) -> R<()> {
     let draft = read_draft(doc)?;
     let style = Style::of(doc);
-    for (stage, i, t) in draft.targets.all() {
+    for (i, t) in draft.targets.iter().enumerate() {
         let mut new = t.clone();
         for fl in &mut new.filters {
             fl.sources = f(&fl.sources);
+            for key in ["near", "event"] {
+                if let Some(serde_json::Value::Object(o)) = fl.conditions.get_mut(key)
+                    && let Some(serde_json::Value::Array(a)) = o.get_mut("sources")
+                {
+                    let ids: Vec<String> = a
+                        .iter()
+                        .filter_map(|x| x.as_str().map(str::to_string))
+                        .collect();
+                    *a = f(&ids).into_iter().map(serde_json::Value::from).collect();
+                }
+            }
         }
-        new.sources = f(&new.sources);
         if new != *t {
             renumber(doc);
-            let tb = stage_table(doc, stage, i)?;
-            write_target(tb, stage, t, &new, &style);
+            let tb = target_table(doc, i)?;
+            write_target(tb, t, &new, &style);
         }
     }
     Ok(())
 }
 
-pub(super) fn stage_table(
-    doc: &mut DocumentMut,
-    stage: Stage,
-    i: usize,
-) -> R<&mut toml_edit::Table> {
+/// The table of target `i`.
+pub(super) fn target_table(doc: &mut DocumentMut, i: usize) -> R<&mut Table> {
     doc.get_mut("targets")
-        .and_then(|t| t.get_mut(stage.key()))
-        .and_then(|a| a.as_array_of_tables_mut())
+        .and_then(Item::as_array_of_tables_mut)
         .and_then(|a| a.get_mut(i))
-        .ok_or_else(|| gallery_core::t!("edit.target_not_table", stage = stage.key(), n = i + 1))
+        .ok_or_else(|| gallery_core::t!("edit.targets_not_list"))
+}
+
+/// `[places]` (made after the sources, else before the first target, when
+/// absent).
+fn places_mut(doc: &mut DocumentMut) -> R<&mut Table> {
+    match doc.get("places") {
+        None => {
+            renumber(doc);
+            let order = render_order(doc);
+            let first_of = |k: &str| {
+                order
+                    .iter()
+                    .filter(
+                        |(_, p)| matches!(p.first(), Some(Seg::Idx(x, _) | Seg::Key(x)) if x == k),
+                    )
+                    .map(|(pos, _)| *pos)
+                    .collect::<Vec<_>>()
+            };
+            let pos = match (first_of("sources").last(), first_of("targets").first()) {
+                (Some(s), _) => s + 1,
+                (None, Some(t)) => t - 1,
+                (None, None) => order.last().map_or(1, |(p, _)| p + 1),
+            };
+            let mut t = Table::new();
+            t.set_position(Some(pos));
+            t.decor_mut().set_prefix("\n");
+            doc.insert("places", Item::Table(t));
+            // Any table sharing the position: keep the file order.
+            renumber(doc);
+        }
+        Some(Item::Table(_)) => {}
+        Some(_) => {
+            return Err(gallery_core::t!("edit.group_not_table", key = "places"));
+        }
+    }
+    Ok(doc
+        .get_mut("places")
+        .and_then(Item::as_table_mut)
+        .expect("made above"))
+}
+
+fn set_place(doc: &mut DocumentMut, name: &str, p: &Place) -> R<()> {
+    if name.trim().is_empty() || name.trim() != name {
+        return Err(gallery_core::t!("edit.place_name", name = name));
+    }
+    let places = places_mut(doc)?;
+    match places.get_mut(name) {
+        Some(Item::Table(t)) => {
+            for (k, v) in [("lat", p.lat), ("lon", p.lon), ("km", p.km)] {
+                put(t, k, Some(Value::from(v)));
+            }
+        }
+        _ => put(places, name, Some(place_toml(p))),
+    }
+    Ok(())
+}
+
+fn remove_place(doc: &mut DocumentMut, name: &str) -> R<()> {
+    let gone = doc
+        .get_mut("places")
+        .and_then(Item::as_table_like_mut)
+        .and_then(|t| t.remove(name));
+    if gone.is_none() {
+        return Err(gallery_core::t!("edit.no_place", name = name));
+    }
+    if doc
+        .get("places")
+        .and_then(Item::as_table_like)
+        .is_some_and(|t| t.is_empty())
+    {
+        doc.remove("places");
+    }
+    Ok(())
+}
+
+/// Set condition `c` in a filter draft.
+fn set_condition(f: &mut super::model::FilterDraft, c: &ConditionValue) -> R<()> {
+    f.conditions.insert(c.key().to_string(), c.to_json()?);
+    Ok(())
+}
+
+fn remove_condition(f: &mut super::model::FilterDraft, key: &str) -> R<()> {
+    let had = match key {
+        "ai" => f.ai.take().is_some(),
+        "expand" => f.expand.take().is_some(),
+        k if CONDITION_KEYS.contains(&k) => f.conditions.remove(k).is_some(),
+        _ => return Err(gallery_core::t!("edit.unknown_condition", key = key)),
+    };
+    if had {
+        Ok(())
+    } else {
+        Err(gallery_core::t!("edit.no_condition", key = key))
+    }
 }
 
 pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
@@ -180,59 +348,61 @@ pub fn apply(doc: &mut DocumentMut, op: &EditOp) -> R<()> {
             regroup(doc, Group::Sources, Shape::Remove(i), |a| a.remove(i))?;
             map_target_sources(doc, |l| l.iter().filter(|s| *s != id).cloned().collect())?;
         }
-        EditOp::AddTarget { stage, target } => {
-            let t = new_target(*stage, target, &style);
-            regroup(doc, Group::Stage(*stage), Shape::Slots, |a| a.push(t))?;
+        EditOp::AddTarget { kind, target } => {
+            let target = TargetDraft {
+                kind: *kind,
+                ..target.clone()
+            };
+            let t = new_target(&target, &style);
+            regroup(doc, Group::Targets, Shape::Slots, |a| a.push(t))?;
         }
-        EditOp::UpdateTarget {
-            stage,
-            index,
-            target,
-        } => {
-            check_index(doc, *stage, *index)?;
-            let old = read_draft(doc)?.targets.stage(*stage)[*index].clone();
-            renumber(doc);
-            let t = stage_table(doc, *stage, *index)?;
-            write_target(t, *stage, &old, target, &style);
-            renumber(doc);
+        EditOp::UpdateTarget { index, target } => {
+            check_index(doc, *index)?;
+            target_table(doc, *index)?;
+            update_target(doc, *index, |t| {
+                *t = target.clone();
+                Ok(())
+            })?;
         }
-        EditOp::RemoveTarget { stage, index } => {
-            check_index(doc, *stage, *index)?;
-            stage_table(doc, *stage, *index)?;
-            regroup(doc, Group::Stage(*stage), Shape::Remove(*index), |a| {
+        EditOp::RemoveTarget { index } => {
+            check_index(doc, *index)?;
+            target_table(doc, *index)?;
+            regroup(doc, Group::Targets, Shape::Remove(*index), |a| {
                 a.remove(*index)
             })?;
         }
-        EditOp::MoveTarget {
-            from,
-            index,
-            to,
-            to_index,
-        } => {
-            check_index(doc, *from, *index)?;
-            stage_table(doc, *from, *index)?;
-            if from.is_mask() != to.is_mask() {
-                return Err(gallery_core::t!("edit.move_across_kinds"));
+        EditOp::MoveTarget { from, to } => {
+            check_index(doc, *from)?;
+            target_table(doc, *from)?;
+            let n = read_draft(doc)?.targets.len();
+            if *to >= n {
+                return Err(gallery_core::t!("edit.no_position", n = to + 1));
             }
-            let len_to = read_draft(doc)?.targets.stage(*to).len();
-            if from == to {
-                if *to_index >= len_to {
-                    return Err(gallery_core::t!("edit.no_position", n = to_index + 1));
-                }
-                regroup(doc, Group::Stage(*from), Shape::Slots, |a| {
-                    let t = a.remove(*index);
-                    a.insert(*to_index, t);
-                })?;
-            } else {
-                if *to_index > len_to {
-                    return Err(gallery_core::t!("edit.no_position", n = to_index + 1));
-                }
-                let t = regroup(doc, Group::Stage(*from), Shape::Slots, |a| a.remove(*index))?;
-                regroup(doc, Group::Stage(*to), Shape::Slots, |a| {
-                    a.insert(*to_index, t)
-                })?;
-            }
+            regroup(doc, Group::Targets, Shape::Slots, |a| {
+                let t = a.remove(*from);
+                a.insert(*to, t);
+            })?;
         }
+        EditOp::SetTargetKind { name, kind } => {
+            let i = target_index(doc, name)?;
+            target_table(doc, i)?;
+            update_target(doc, i, |t| {
+                t.kind = *kind;
+                Ok(())
+            })?;
+        }
+        EditOp::SetCondition {
+            target,
+            filter,
+            condition,
+        } => update_filter(doc, target, *filter, |f| set_condition(f, condition))?,
+        EditOp::RemoveCondition {
+            target,
+            filter,
+            key,
+        } => update_filter(doc, target, *filter, |f| remove_condition(f, key))?,
+        EditOp::SetPlace { name, place } => set_place(doc, name, place)?,
+        EditOp::RemovePlace { name } => remove_place(doc, name)?,
         EditOp::AddNamePreset { preset } => presets::add_name(doc, preset)?,
         EditOp::UpdateNamePreset { name, preset } => presets::update_name(doc, name, preset)?,
         EditOp::RemoveNamePreset { name } => presets::remove(doc, PresetKind::Name, name)?,

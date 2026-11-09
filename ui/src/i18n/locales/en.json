@@ -872,6 +872,7 @@
   "settings_last": "Last check: {{total, number}} to sort (ready to run {{ready, number}}, waiting for AI {{ai, number}}).",
   "editor_not_applied": "Change not applied: {{error}}",
   "editor_saved": "Saved. The previous version is next to it as gallery.toml.bak.",
+  "editor_saved_as": "Saved. The previous version is next to it as {{file}}.",
   "editor_moved": "Manual decisions moved to the new target name: {{n, number}}.",
   "editor_not_moved": "Decisions were not moved: {{error}}",
   "dialog_text_filter": "Text",

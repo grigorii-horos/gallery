@@ -102,80 +102,56 @@ pub fn renumber(doc: &mut DocumentMut) {
     assign(doc, &order);
 }
 
-/// A group of `[[...]]` blocks edited as a unit: `[[sources]]` or the
-/// targets of one stage.
+/// A group of `[[...]]` blocks edited as a unit: `[[sources]]` or
+/// `[[targets]]`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Group {
     Sources,
-    Stage(super::model::Stage),
+    Targets,
 }
 
 impl Group {
-    /// Path of the array's parent table and the array's key.
-    fn parent_and_key(self) -> (TablePath, &'static str) {
+    /// The array's key in the root table.
+    fn key(self) -> &'static str {
         match self {
-            Group::Sources => (Vec::new(), "sources"),
-            Group::Stage(s) => (vec![Seg::Key("targets".into())], s.key()),
+            Group::Sources => "sources",
+            Group::Targets => "targets",
         }
     }
 
     /// Whether table `path` belongs to element `index` of this group
     /// (`None`: to any element).
     fn owns(self, path: &[Seg], index: Option<usize>) -> bool {
-        let (parent, key) = self.parent_and_key();
-        path.len() > parent.len()
-            && path[..parent.len()] == parent[..]
-            && matches!(&path[parent.len()], Seg::Idx(k, i) if k == key && index.is_none_or(|x| x == *i))
+        matches!(path.first(), Some(Seg::Idx(k, i)) if k == self.key() && index.is_none_or(|x| x == *i))
     }
 
     fn rank(self) -> usize {
         match self {
             Group::Sources => 0,
-            Group::Stage(s) => 1 + s as usize,
+            Group::Targets => 1,
         }
     }
 }
 
 /// Check that group `g` can be edited as `[[...]]` blocks: its array is
-/// absent or an array of tables, and `targets` is a normal table.
+/// absent or an array of tables.
 fn check_group(doc: &DocumentMut, g: Group) -> Result<(), String> {
-    let (parent, key) = g.parent_and_key();
-    let name = if parent.is_empty() {
-        key.to_string()
-    } else {
-        format!("targets.{key}")
-    };
-    if !parent.is_empty() {
-        match doc.get("targets") {
-            None => {}
-            Some(Item::Table(_)) => {}
-            Some(_) => {
-                return Err("[targets] is not written as a table — edit it in the file".into());
-            }
-        }
-    }
-    match table(doc, &parent).and_then(|p| p.get(key)) {
-        None => Ok(()),
-        Some(Item::ArrayOfTables(_)) => Ok(()),
-        Some(_) => Err(format!(
-            "{name} is not written as [[{name}]] — edit it in the file"
-        )),
+    match doc.get(g.key()) {
+        None | Some(Item::ArrayOfTables(_)) => Ok(()),
+        Some(_) => Err(match g {
+            Group::Sources => gallery_core::t!("edit.sources_not_table"),
+            Group::Targets => gallery_core::t!("edit.targets_not_list"),
+        }),
     }
 }
 
 /// The group's array (made when absent); `check_group` has passed.
 fn aot_mut(doc: &mut DocumentMut, g: Group) -> &mut ArrayOfTables {
-    let (parent, key) = g.parent_and_key();
-    if !parent.is_empty() && table(doc, &parent).is_none() {
-        let mut t = Table::new();
-        t.set_implicit(true);
-        doc.insert("targets", Item::Table(t));
+    let root = doc.as_table_mut();
+    if !root.get(g.key()).is_some_and(Item::is_array_of_tables) {
+        root.insert(g.key(), Item::ArrayOfTables(ArrayOfTables::new()));
     }
-    let p = table_mut(doc, &parent).expect("parent made above");
-    if !p.get(key).is_some_and(Item::is_array_of_tables) {
-        p.insert(key, Item::ArrayOfTables(ArrayOfTables::new()));
-    }
-    p.get_mut(key)
+    root.get_mut(g.key())
         .and_then(Item::as_array_of_tables_mut)
         .expect("made above")
 }
@@ -277,9 +253,8 @@ pub fn regroup<T>(
             // After the last table of an earlier group, else before the
             // first of a later one, else at the end.
             let rank_of = |p: &TablePath| {
-                [Group::Sources]
+                [Group::Sources, Group::Targets]
                     .into_iter()
-                    .chain(super::model::Stage::ALL.map(Group::Stage))
                     .find(|x| x.owns(p, None))
                     .map(Group::rank)
             };
@@ -353,10 +328,7 @@ pub fn regroup<T>(
         }
     }
     if aot_mut(doc, g).is_empty() {
-        let (parent, key) = g.parent_and_key();
-        if let Some(p) = table_mut(doc, &parent) {
-            p.remove(key);
-        }
+        doc.as_table_mut().remove(g.key());
     }
     Ok(out)
 }

@@ -3,13 +3,11 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { ConfigSummary, PlanView, ReviewItem, TargetSummary } from "../api";
 
-const target = (name: string, stage: TargetSummary["stage"]): TargetSummary => ({
+const target = (name: string, ai = false): TargetSummary => ({
   name,
-  stage,
+  kind: "folders",
+  ai,
   filters: [],
-  sources: [],
-  description: null,
-  prefilter: null,
   outputs: [],
 });
 
@@ -19,11 +17,7 @@ const summary: ConfigSummary = {
   error: null,
   warnings: [],
   sources: [],
-  targets: {
-    before_ai: [target("Screenshots", "before_ai")],
-    ai: [target("Documents", "ai"), target("Photos", "ai")],
-    after_ai: [],
-  },
+  targets: [target("Screenshots"), target("Documents", true), target("Photos", true)],
   presets: { name: [], content: [], masks: [] },
   ai: { model: "m", effort: "low", jobs: 8 },
 };

@@ -1,13 +1,82 @@
 use std::path::{Path, PathBuf};
 
-use super::model::{
-    FilterDraft, OutputDraft, PrefilterDraft, SourceDraft, Stage, StepDraft, TargetDraft,
-};
+use super::model::{FilterDraft, OutputDraft, SourceDraft, StepDraft, TargetDraft, TargetKind};
 use super::*;
 
 /// A hand-written config: comments everywhere, mixed spacing, inline
 /// comments, single-string and list masks.
 const COMMENTED: &str = r#"# My gallery — hand-written, keep my notes!
+
+# The camera.
+[[sources]]
+id = "camera"   # phone
+path = "/tmp/gallery-edit-test/camera"
+ai_prefix_file = "prompts/camera.md"
+
+[[sources]]
+id = "shots"
+path = "/tmp/gallery-edit-test/shots"
+skip = [".stfolder", "*.md"]
+
+[ai]
+model = "claude-sonnet-5-5"   # cheap enough
+
+# ---- by name ----
+
+# Screenshots: renamed in place.
+[[targets]]
+name = "Screenshots"
+[[targets.filters]]
+sources = ["shots"]
+match = "*"
+exclude = ["@dated"]
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/shots"
+rename = ["capture-date"]
+
+# TikTok junk.
+[[targets]]
+name = "TikTok"
+[[targets.filters]]
+sources = ["camera"]
+match = "@tiktok"   # 32 hex digits
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/out/tiktok"
+
+# ---- AI ----
+
+[[targets]]
+name = "Documents"
+[[targets.filters]]
+sources = ["camera"]
+match = "@photo"
+ai = "Photos of documents."
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/out/docs"
+rename = ["capture-date"]
+
+# ---- the rest ----
+
+# The timeline: everything else.
+[[targets]]
+name = "Timeline"
+[[targets.filters]]
+sources = ["camera"]
+match = ["@photo", "@video"]   # photos and videos only
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/out/timeline/{YYYY}"
+content = ["meta-full", "avif-high", "av1-high"]
+rename = ["capture-date"]
+
+# Backup copy.
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/backup"
+
+# trailing note
+"#;
+
+/// The same config in the old three-stage shape.
+const STAGED: &str = r#"# My gallery — hand-written, keep my notes!
 
 # The camera.
 [[sources]]
@@ -50,6 +119,7 @@ dir = "/tmp/gallery-edit-test/out/tiktok"
 [[targets.ai]]
 name = "Documents"
 sources = ["camera"]
+# What the AI is told.
 description = "Photos of documents."
 [targets.ai.prefilter]
 match = "@photo"
@@ -99,13 +169,12 @@ fn version(p: &Path) -> String {
     file::version_of(&std::fs::read(p).unwrap())
 }
 
-fn target(fx: &Fx, stage: Stage, i: usize) -> TargetDraft {
-    draft(&fx.path, None, &[])
-        .unwrap()
-        .draft
-        .targets
-        .stage(stage)[i]
-        .clone()
+fn target(fx: &Fx, i: usize) -> TargetDraft {
+    draft(&fx.path, None, &[]).unwrap().draft.targets[i].clone()
+}
+
+fn update(index: usize, target: TargetDraft) -> EditOp {
+    EditOp::UpdateTarget { index, target }
 }
 
 /// The lines of `a` and `b` that differ, after the common head and tail.
@@ -134,12 +203,20 @@ fn save_ok(fx: &Fx, ops: &[EditOp]) -> EditOutcome {
     out
 }
 
+fn names(cfg: &Config) -> Vec<&str> {
+    cfg.targets.iter().map(|t| t.name.as_str()).collect()
+}
+
+fn condition(key: &str, value: serde_json::Value) -> ConditionValue {
+    ConditionValue::from_json(key, &value).unwrap()
+}
+
 #[test]
 fn reads_the_draft() {
     let fx = fixture(COMMENTED);
     let out = draft(&fx.path, None, &[]).unwrap();
     assert!(out.error.is_none(), "{:?}", out.error);
-    assert!(!out.changed);
+    assert!(!out.changed && !out.old_shape);
     let d = out.draft;
     assert_eq!(d.sources.len(), 2);
     assert_eq!(
@@ -151,36 +228,73 @@ fn reads_the_draft() {
         d.sources[1].skip.as_deref(),
         Some(&[".stfolder".to_string(), "*.md".into()][..])
     );
-    let b = &d.targets.before_ai[0];
+    let names: Vec<&str> = d.targets.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["Screenshots", "TikTok", "Documents", "Timeline"]);
+    let b = &d.targets[0];
+    assert_eq!(b.kind, TargetKind::Folders);
     assert_eq!(
         b.filters[0].matches.as_deref(),
         Some(&["*".to_string()][..])
     );
     assert_eq!(b.filters[0].exclude, vec!["@dated".to_string()]);
-    let a = &d.targets.ai[0];
-    assert_eq!(
-        a.prefilter.as_ref().unwrap().matches.as_deref(),
-        Some(&["@photo".to_string()][..])
-    );
-    let t = &d.targets.after_ai[0];
+    let a = &d.targets[2].filters[0];
+    assert_eq!(a.ai.as_deref(), Some("Photos of documents."));
+    assert_eq!(a.matches.as_deref(), Some(&["@photo".to_string()][..]));
+    let t = &d.targets[3];
     assert_eq!(t.outputs.len(), 2);
     assert_eq!(t.outputs[0].content.len(), 3);
     assert_eq!(out.version, version(&fx.path));
 }
 
 #[test]
+fn reads_kinds_conditions_and_places() {
+    let fx = fixture(
+        r#"[[sources]]
+id = "camera"
+path = "/tmp/gallery-edit-test/camera"
+
+[places]
+home = { lat = 47.0245, lon = 28.8323, km = 2 }
+
+[places.dacha]
+lat = 46.98
+lon = 28.7
+km = 1.5
+
+[[targets]]
+name = "Night at home"
+kind = "keep"
+[[targets.filters]]
+sources = ["camera"]
+geo = "@home"
+date = { time = "22:00..05:00", not = true }
+expand = "event"
+"#,
+    );
+    let out = draft(&fx.path, None, &[]).unwrap();
+    assert!(out.error.is_none(), "{:?}", out.error);
+    let d = out.draft;
+    assert_eq!(d.places.len(), 2);
+    assert_eq!(d.places[0].name, "home");
+    assert_eq!(d.places[0].km, 2.0);
+    assert_eq!(d.places[1].lon, 28.7);
+    let t = &d.targets[0];
+    assert_eq!(t.kind, TargetKind::Keep);
+    let f = &t.filters[0];
+    assert_eq!(f.expand.as_deref(), Some("event"));
+    assert_eq!(f.conditions["geo"], serde_json::json!("@home"));
+    assert_eq!(
+        f.conditions["date"],
+        serde_json::json!({ "time": "22:00..05:00", "not": true })
+    );
+}
+
+#[test]
 fn editing_one_target_changes_only_its_line() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.outputs[0].dir = "/tmp/gallery-edit-test/out/tt".into();
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 1,
-            target: t,
-        }],
-    );
+    save_ok(&fx, &[update(1, t)]);
     let after = read(&fx.path);
     let (old, new) = diff(COMMENTED, &after);
     assert_eq!(old, vec![r#"dir = "/tmp/gallery-edit-test/out/tiktok""#]);
@@ -190,16 +304,9 @@ fn editing_one_target_changes_only_its_line() {
 #[test]
 fn changed_value_keeps_its_inline_comment_and_list_form() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::AfterAi, 0);
+    let mut t = target(&fx, 3);
     t.filters[0].matches = Some(vec!["@photo".into()]);
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::AfterAi,
-            index: 0,
-            target: t,
-        }],
-    );
+    save_ok(&fx, &[update(3, t)]);
     let (old, new) = diff(COMMENTED, &read(&fx.path));
     assert_eq!(
         old,
@@ -214,30 +321,21 @@ fn changed_value_keeps_its_inline_comment_and_list_form() {
 #[test]
 fn no_op_edit_does_not_write() {
     let fx = fixture(COMMENTED);
-    let t = target(&fx, Stage::AfterAi, 0);
-    let out = save(
-        &fx.path,
-        &version(&fx.path),
-        &[EditOp::UpdateTarget {
-            stage: Stage::AfterAi,
-            index: 0,
-            target: t,
-        }],
-    )
-    .unwrap();
+    let t = target(&fx, 3);
+    let out = save(&fx.path, &version(&fx.path), &[update(3, t)]).unwrap();
     assert!(!out.changed && !out.saved);
     assert!(!file::backup_path(&fx.path).exists());
     assert_eq!(read(&fx.path), COMMENTED);
 }
 
 #[test]
-fn adds_filter_prefilter_outputs_and_masked_steps() {
+fn adds_filters_outputs_and_masked_steps() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.filters.push(FilterDraft {
         sources: vec!["shots".into()],
         matches: Some(vec!["@tiktok".into(), "*.webm".into()]),
-        exclude: vec![],
+        ..Default::default()
     });
     t.outputs.push(OutputDraft {
         dir: "/tmp/gallery-edit-test/out/tt2".into(),
@@ -251,31 +349,14 @@ fn adds_filter_prefilter_outputs_and_masked_steps() {
             mask: None,
         }],
     });
-    let mut ai = target(&fx, Stage::Ai, 0);
-    ai.prefilter = Some(PrefilterDraft {
-        matches: Some(vec!["@photo".into()]),
-        exclude: vec!["@screenshot".into()],
-    });
-    ai.description = Some("Documents and forms.".into());
-    save_ok(
-        &fx,
-        &[
-            EditOp::UpdateTarget {
-                stage: Stage::BeforeAi,
-                index: 1,
-                target: t.clone(),
-            },
-            EditOp::UpdateTarget {
-                stage: Stage::Ai,
-                index: 0,
-                target: ai.clone(),
-            },
-        ],
-    );
+    let mut ai = target(&fx, 2);
+    ai.filters[0].exclude = vec!["@screenshot".into()];
+    ai.filters[0].ai = Some("Documents and forms.".into());
+    save_ok(&fx, &[update(1, t.clone()), update(2, ai.clone())]);
     let text = read(&fx.path);
     let cfg = Config::load(&fx.path).unwrap();
     cfg.validate().unwrap();
-    let tt = stage(&cfg, Stage::BeforeAi)[1];
+    let tt = &cfg.targets[1];
     assert_eq!(tt.filters.len(), 2);
     assert_eq!(tt.outputs.len(), 2);
     assert_eq!(tt.outputs[1].server_dir.as_deref(), Some("/srv/tt"));
@@ -295,36 +376,40 @@ fn adds_filter_prefilter_outputs_and_masked_steps() {
         text.find(r#"match = "@tiktok"   # 32 hex digits"#).unwrap() < f2 && f2 < o1 && o1 < o2,
         "{text}"
     );
-    let docs = &stage(&cfg, Stage::Ai)[0].filters[0];
+    let docs = &cfg.targets[2].filters[0];
     assert_eq!(docs.ai.as_deref(), Some("Documents and forms."));
     assert!(!docs.exclude.is_empty());
     // And the draft reads back what was written.
     let d = draft(&fx.path, None, &[]).unwrap().draft;
-    assert_eq!(d.targets.before_ai[1], t);
-    assert_eq!(d.targets.ai[0], ai);
+    assert_eq!(d.targets[1], t);
+    assert_eq!(d.targets[2], ai);
 }
 
 #[test]
-fn new_prefilter_goes_before_outputs() {
-    let text = COMMENTED.replace("[targets.ai.prefilter]\nmatch = \"@photo\"\n", "");
-    let fx = fixture(&text);
-    let mut ai = target(&fx, Stage::Ai, 0);
-    assert!(ai.prefilter.is_none());
-    ai.prefilter = Some(PrefilterDraft {
-        matches: Some(vec!["@video".into()]),
-        exclude: vec![],
-    });
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::Ai,
-            index: 0,
-            target: ai,
-        }],
+fn new_filter_goes_before_outputs() {
+    let text = COMMENTED.replace(
+        "[[targets.filters]]\nsources = [\"camera\"]\nmatch = \"@photo\"\nai = \"Photos of documents.\"\n",
+        "",
     );
+    let fx = fixture(&text);
+    let mut t = target(&fx, 2);
+    assert!(t.filters.is_empty());
+    t.filters.push(FilterDraft {
+        sources: vec!["camera".into()],
+        ai: Some("Receipts.".into()),
+        ..Default::default()
+    });
+    save_ok(&fx, &[update(2, t)]);
     let (old, new) = diff(&text, &read(&fx.path));
     assert!(old.is_empty(), "{old:?}");
-    assert_eq!(new, vec!["[targets.ai.prefilter]", r#"match = "@video""#]);
+    assert_eq!(
+        new,
+        vec![
+            "[[targets.filters]]",
+            r#"sources = ["camera"]"#,
+            r#"ai = "Receipts.""#
+        ]
+    );
 }
 
 #[test]
@@ -378,99 +463,423 @@ fn add_update_remove_source() {
     assert!(
         out.warnings
             .iter()
-            .any(|w| w.path == "targets.before_ai[0].filters[0].sources"),
+            .any(|w| w.path == "targets[0].filters[0].sources"),
         "{:?}",
         out.warnings
     );
 }
 
-#[test]
-fn reorder_keeps_section_heading_in_place_and_comment_with_block() {
-    let fx = fixture(COMMENTED);
-    save_ok(
-        &fx,
-        &[EditOp::MoveTarget {
-            from: Stage::BeforeAi,
-            index: 1,
-            to: Stage::BeforeAi,
-            to_index: 0,
-        }],
-    );
-    let after = read(&fx.path);
-    let expect = COMMENTED.replace(
-        "# ---- stage 1: masks before AI ----\n\n# Screenshots: renamed in place.\n[[targets.before_ai]]\nname = \"Screenshots\"\n[[targets.before_ai.filters]]\nsources = [\"shots\"]\nmatch = \"*\"\nexclude = [\"@dated\"]\n[[targets.before_ai.outputs]]\ndir = \"/tmp/gallery-edit-test/shots\"\nrename = [\"capture-date\"]\n\n# TikTok junk.\n[[targets.before_ai]]\nname = \"TikTok\"\n[[targets.before_ai.filters]]\nsources = [\"camera\"]\nmatch = \"@tiktok\"   # 32 hex digits\n[[targets.before_ai.outputs]]\ndir = \"/tmp/gallery-edit-test/out/tiktok\"\n",
-        "# ---- stage 1: masks before AI ----\n\n# TikTok junk.\n[[targets.before_ai]]\nname = \"TikTok\"\n[[targets.before_ai.filters]]\nsources = [\"camera\"]\nmatch = \"@tiktok\"   # 32 hex digits\n[[targets.before_ai.outputs]]\ndir = \"/tmp/gallery-edit-test/out/tiktok\"\n\n# Screenshots: renamed in place.\n[[targets.before_ai]]\nname = \"Screenshots\"\n[[targets.before_ai.filters]]\nsources = [\"shots\"]\nmatch = \"*\"\nexclude = [\"@dated\"]\n[[targets.before_ai.outputs]]\ndir = \"/tmp/gallery-edit-test/shots\"\nrename = [\"capture-date\"]\n",
-    );
-    assert_ne!(expect, COMMENTED);
-    assert_eq!(after, expect);
-    // And back: the original text.
-    save_ok(
-        &fx,
-        &[EditOp::MoveTarget {
-            from: Stage::BeforeAi,
-            index: 0,
-            to: Stage::BeforeAi,
-            to_index: 1,
-        }],
-    );
-    assert_eq!(read(&fx.path), COMMENTED);
-}
+/// Two sources and two targets, for the conditions.
+const TWO_SOURCES: &str = r#"[[sources]]
+id = "camera"
+path = "/tmp/gallery-edit-test/camera"
+
+[[sources]]
+id = "partner"
+path = "/tmp/gallery-edit-test/partner"
+
+# Shared with Partner.
+[[targets]]
+name = "Together"
+[[targets.filters]]
+sources = ["camera"]   # mine
+match = "@media"
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/shared"
+
+[[targets]]
+name = "Timeline"
+[[targets.filters]]
+sources = ["camera", "partner"]
+[[targets.outputs]]
+dir = "/tmp/gallery-edit-test/timeline"
+"#;
 
 #[test]
-fn move_between_mask_stages_and_back() {
-    let fx = fixture(COMMENTED);
+fn set_condition_writes_an_inline_table_in_place() {
+    let fx = fixture(TWO_SOURCES);
+    let near = condition(
+        "near",
+        serde_json::json!({ "km": 1.0, "time": "2h", "sources": ["partner"] }),
+    );
     save_ok(
         &fx,
-        &[EditOp::MoveTarget {
-            from: Stage::BeforeAi,
-            index: 1,
-            to: Stage::AfterAi,
-            to_index: 1,
+        &[EditOp::SetCondition {
+            target: "Together".into(),
+            filter: 0,
+            condition: near,
         }],
     );
-    let after = read(&fx.path);
+    let (old, new) = diff(TWO_SOURCES, &read(&fx.path));
+    assert!(old.is_empty(), "{old:?}");
+    assert_eq!(
+        new,
+        vec![r#"near = { sources = ["partner"], time = "2h", km = 1.0 }"#]
+    );
     let cfg = Config::load(&fx.path).unwrap();
-    assert_eq!(stage(&cfg, Stage::BeforeAi).len(), 1);
-    assert_eq!(stage(&cfg, Stage::AfterAi)[1].name, "TikTok");
-    assert_eq!(stage(&cfg, Stage::AfterAi)[1].filters.len(), 1);
-    assert!(
-        after.contains(
-            "# TikTok junk.\n[[targets.after_ai]]\nname = \"TikTok\"\n[[targets.after_ai.filters]]"
-        ),
-        "{after}"
-    );
-    assert!(
-        after.ends_with("dir = \"/tmp/gallery-edit-test/out/tiktok\"\n\n# trailing note\n"),
-        "{after}"
+    cfg.validate().unwrap();
+    assert!(cfg.targets[0].filters[0].near.is_some());
+
+    // Replaced in place, its line kept.
+    let near = condition(
+        "near",
+        serde_json::json!({ "sources": ["partner"], "time": "30m", "not": true }),
     );
     save_ok(
         &fx,
-        &[EditOp::MoveTarget {
-            from: Stage::AfterAi,
-            index: 1,
-            to: Stage::BeforeAi,
-            to_index: 1,
+        &[EditOp::SetCondition {
+            target: "Together".into(),
+            filter: 0,
+            condition: near,
         }],
     );
-    assert_eq!(read(&fx.path), COMMENTED);
+    assert!(
+        read(&fx.path).contains(
+            "match = \"@media\"\nnear = { sources = [\"partner\"], time = \"30m\", not = true }\n"
+        ),
+        "{}",
+        read(&fx.path)
+    );
+
+    // A source renamed or removed follows into `near`.
+    let mut partner = draft(&fx.path, None, &[]).unwrap().draft.sources[1].clone();
+    partner.id = "wife".into();
+    save_ok(
+        &fx,
+        &[EditOp::UpdateSource {
+            id: "partner".into(),
+            source: partner,
+        }],
+    );
+    assert!(read(&fx.path).contains("near = { sources = [\"wife\"], time = \"30m\", not = true }"));
 }
 
 #[test]
-fn ai_target_cannot_move_to_a_mask_stage() {
-    let fx = fixture(COMMENTED);
-    let e = save(
+fn remove_condition_leaves_the_filter_valid() {
+    let fx = fixture(TWO_SOURCES);
+    let ops = [
+        EditOp::SetCondition {
+            target: "Together".into(),
+            filter: 0,
+            condition: condition("geo", serde_json::json!({ "has_gps": false })),
+        },
+        EditOp::SetCondition {
+            target: "Together".into(),
+            filter: 0,
+            condition: condition("duplicate", serde_json::json!({})),
+        },
+    ];
+    save_ok(&fx, &ops);
+    assert!(read(&fx.path).contains("geo = { has_gps = false }\nduplicate = {}\n"));
+    save_ok(
+        &fx,
+        &[
+            EditOp::RemoveCondition {
+                target: "Together".into(),
+                filter: 0,
+                key: "geo".into(),
+            },
+            EditOp::RemoveCondition {
+                target: "Together".into(),
+                filter: 0,
+                key: "duplicate".into(),
+            },
+        ],
+    );
+    assert_eq!(read(&fx.path), TWO_SOURCES);
+    let cfg = Config::load(&fx.path).unwrap();
+    cfg.validate().unwrap();
+
+    // A key that is not a condition, or not set, or a filter that is not there.
+    for (key, filter) in [("name", 0), ("near", 0), ("geo", 3)] {
+        let e = draft(
+            &fx.path,
+            None,
+            &[EditOp::RemoveCondition {
+                target: "Together".into(),
+                filter,
+                key: key.into(),
+            }],
+        )
+        .unwrap_err();
+        assert_eq!(e.kind, FailureKind::Op, "{key}");
+    }
+    let e = draft(
         &fx.path,
-        &version(&fx.path),
-        &[EditOp::MoveTarget {
-            from: Stage::Ai,
-            index: 0,
-            to: Stage::AfterAi,
-            to_index: 0,
+        None,
+        &[EditOp::SetTargetKind {
+            name: "Nope".into(),
+            kind: TargetKind::Trash,
         }],
     )
     .unwrap_err();
-    assert_eq!(e.kind, FailureKind::Op);
-    assert_eq!(e.op, Some(0));
+    assert!(e.message.contains("Nope"), "{e:?}");
+}
+
+#[test]
+fn set_place_writes_places_after_the_sources() {
+    let fx = fixture(TWO_SOURCES);
+    let home = gallery_core::config::Place {
+        lat: 47.0245,
+        lon: 28.8323,
+        km: 2.0,
+    };
+    save_ok(
+        &fx,
+        &[
+            EditOp::SetPlace {
+                name: "home".into(),
+                place: home,
+            },
+            EditOp::SetCondition {
+                target: "Together".into(),
+                filter: 0,
+                condition: condition("geo", serde_json::json!("@home")),
+            },
+        ],
+    );
+    let after = read(&fx.path);
+    assert!(
+        after.contains(
+            "path = \"/tmp/gallery-edit-test/partner\"\n\n[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 2.0 }\n\n# Shared with Partner.\n[[targets]]"
+        ),
+        "{after}"
+    );
+    let cfg = Config::load(&fx.path).unwrap();
+    cfg.validate().unwrap();
+    assert_eq!(cfg.places["home"], home);
+    let d = draft(&fx.path, None, &[]).unwrap().draft;
+    assert_eq!(d.places[0].name, "home");
+
+    // Replaced in place; another one added after it.
+    save_ok(
+        &fx,
+        &[
+            EditOp::SetPlace {
+                name: "home".into(),
+                place: gallery_core::config::Place { km: 3.0, ..home },
+            },
+            EditOp::SetPlace {
+                name: "dacha".into(),
+                place: gallery_core::config::Place {
+                    lat: 46.98,
+                    lon: 28.7,
+                    km: 1.0,
+                },
+            },
+        ],
+    );
+    assert!(read(&fx.path).contains(
+        "[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 3.0 }\ndacha = { lat = 46.98, lon = 28.7, km = 1.0 }\n"
+    ));
+
+    // A place still named by a condition cannot go: the check says why.
+    let out = draft(
+        &fx.path,
+        None,
+        &[EditOp::RemovePlace {
+            name: "home".into(),
+        }],
+    )
+    .unwrap();
+    let e = out.error.expect("unknown place");
+    assert_eq!(
+        e.path.as_deref(),
+        Some("targets[0].filters[0].geo"),
+        "{e:?}"
+    );
+    assert!(e.message.contains("@home"), "{e:?}");
+    // The last place gone: `[places]` too.
+    save_ok(
+        &fx,
+        &[
+            EditOp::RemoveCondition {
+                target: "Together".into(),
+                filter: 0,
+                key: "geo".into(),
+            },
+            EditOp::RemovePlace {
+                name: "home".into(),
+            },
+            EditOp::RemovePlace {
+                name: "dacha".into(),
+            },
+        ],
+    );
+    assert_eq!(read(&fx.path), TWO_SOURCES);
+}
+
+#[test]
+fn set_target_kind_and_its_check() {
+    let fx = fixture(TWO_SOURCES);
+    let trash = EditOp::SetTargetKind {
+        name: "Together".into(),
+        kind: TargetKind::Trash,
+    };
+    // A trash target keeps no outputs.
+    let out = draft(&fx.path, None, std::slice::from_ref(&trash)).unwrap();
+    let e = out.error.expect("outputs of a trash target");
+    assert_eq!(e.path.as_deref(), Some("targets[0].outputs"), "{e:?}");
+    assert_eq!(out.draft.targets[0].kind, TargetKind::Trash);
+    let mut t = out.draft.targets[0].clone();
+    t.outputs.clear();
+    save_ok(&fx, &[trash, update(0, t)]);
+    let after = read(&fx.path);
+    assert!(
+        after.contains("[[targets]]\nname = \"Together\"\nkind = \"trash\"\n[[targets.filters]]"),
+        "{after}"
+    );
+    assert!(!after.contains("/shared"));
+    // No warning about missing outputs for it.
+    let out = draft(&fx.path, None, &[]).unwrap();
+    assert!(
+        out.warnings.iter().all(|w| w.path != "targets[0].outputs"),
+        "{:?}",
+        out.warnings
+    );
+    // Back to folders: the key goes (it is the default).
+    save_ok(
+        &fx,
+        &[EditOp::SetTargetKind {
+            name: "Together".into(),
+            kind: TargetKind::Folders,
+        }],
+    );
+    assert!(!read(&fx.path).contains("kind ="));
+}
+
+#[test]
+fn checks_name_the_field() {
+    let fx = fixture(TWO_SOURCES);
+    // `expand` with `ai` in one filter.
+    let mut t = target(&fx, 1);
+    t.filters[0].ai = Some("Documents.".into());
+    t.filters[0].expand = Some("event".into());
+    let e = draft(&fx.path, None, &[update(1, t)])
+        .unwrap()
+        .error
+        .expect("expand with ai");
+    assert_eq!(
+        e.path.as_deref(),
+        Some("targets[1].filters[0].expand"),
+        "{e:?}"
+    );
+    assert!(e.message.contains("`expand`"), "{e:?}");
+
+    // An unknown `@place`.
+    let e = draft(
+        &fx.path,
+        None,
+        &[EditOp::SetCondition {
+            target: "Timeline".into(),
+            filter: 0,
+            condition: condition("geo", serde_json::json!(["@home", "!@dacha"])),
+        }],
+    )
+    .unwrap()
+    .error
+    .expect("unknown place");
+    assert_eq!(
+        e.path.as_deref(),
+        Some("targets[1].filters[0].geo"),
+        "{e:?}"
+    );
+
+    // `series` with other parameters than the first one.
+    let series = |gap: &str| condition("series", serde_json::json!({ "gap": gap }));
+    let e = draft(
+        &fx.path,
+        None,
+        &[
+            EditOp::SetCondition {
+                target: "Together".into(),
+                filter: 0,
+                condition: series("5s"),
+            },
+            EditOp::SetCondition {
+                target: "Timeline".into(),
+                filter: 0,
+                condition: series("10s"),
+            },
+        ],
+    )
+    .unwrap()
+    .error
+    .expect("series mismatch");
+    assert_eq!(
+        e.path.as_deref(),
+        Some("targets[1].filters[0].series"),
+        "{e:?}"
+    );
+
+    // An empty AI description.
+    let mut t = target(&fx, 0);
+    t.filters[0].ai = Some(" ".into());
+    let e = draft(&fx.path, None, &[update(0, t)])
+        .unwrap()
+        .error
+        .unwrap();
+    assert_eq!(e.path.as_deref(), Some("targets[0].filters[0].ai"));
+}
+
+#[test]
+fn a_bad_condition_value_is_shown_and_named() {
+    let fx = fixture(TWO_SOURCES);
+    let mut t = target(&fx, 0);
+    t.filters[0]
+        .conditions
+        .insert("date".into(), serde_json::json!({ "range": "soon" }));
+    let out = draft(&fx.path, None, &[update(0, t.clone())]).unwrap();
+    assert!(out.error.is_some());
+    // The draft still holds it, to be fixed.
+    assert_eq!(out.draft.targets[0], t);
+}
+
+#[test]
+fn move_target_reorders_the_list() {
+    let fx = fixture(COMMENTED);
+    save_ok(&fx, &[EditOp::MoveTarget { from: 3, to: 0 }]);
+    let cfg = Config::load(&fx.path).unwrap();
+    assert_eq!(
+        names(&cfg),
+        ["Timeline", "Screenshots", "TikTok", "Documents"]
+    );
+    let after = read(&fx.path);
+    // The section heading stays in its place; the comment goes with its block.
+    assert!(
+        after.contains("# ---- by name ----\n\n# The timeline: everything else.\n[[targets]]\nname = \"Timeline\""),
+        "{after}"
+    );
+    assert!(after.ends_with("# trailing note\n"), "{after}");
+    // And back: the original text.
+    save_ok(&fx, &[EditOp::MoveTarget { from: 0, to: 3 }]);
+    assert_eq!(read(&fx.path), COMMENTED);
+}
+
+#[test]
+fn reorder_keeps_section_heading_in_place_and_comment_with_block() {
+    let fx = fixture(COMMENTED);
+    save_ok(&fx, &[EditOp::MoveTarget { from: 1, to: 0 }]);
+    let after = read(&fx.path);
+    let expect = COMMENTED.replace(
+        "# ---- by name ----\n\n# Screenshots: renamed in place.\n[[targets]]\nname = \"Screenshots\"\n[[targets.filters]]\nsources = [\"shots\"]\nmatch = \"*\"\nexclude = [\"@dated\"]\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/shots\"\nrename = [\"capture-date\"]\n\n# TikTok junk.\n[[targets]]\nname = \"TikTok\"\n[[targets.filters]]\nsources = [\"camera\"]\nmatch = \"@tiktok\"   # 32 hex digits\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/out/tiktok\"\n",
+        "# ---- by name ----\n\n# TikTok junk.\n[[targets]]\nname = \"TikTok\"\n[[targets.filters]]\nsources = [\"camera\"]\nmatch = \"@tiktok\"   # 32 hex digits\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/out/tiktok\"\n\n# Screenshots: renamed in place.\n[[targets]]\nname = \"Screenshots\"\n[[targets.filters]]\nsources = [\"shots\"]\nmatch = \"*\"\nexclude = [\"@dated\"]\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/shots\"\nrename = [\"capture-date\"]\n",
+    );
+    assert_ne!(expect, COMMENTED);
+    assert_eq!(after, expect);
+}
+
+#[test]
+fn move_to_a_missing_position_is_refused() {
+    let fx = fixture(COMMENTED);
+    for op in [
+        EditOp::MoveTarget { from: 0, to: 4 },
+        EditOp::MoveTarget { from: 4, to: 0 },
+    ] {
+        let e = save(&fx.path, &version(&fx.path), &[op]).unwrap_err();
+        assert_eq!(e.kind, FailureKind::Op);
+        assert_eq!(e.op, Some(0));
+    }
     assert_eq!(read(&fx.path), COMMENTED);
 }
 
@@ -479,8 +888,11 @@ fn add_and_remove_targets() {
     let fx = fixture(COMMENTED);
     let new = TargetDraft {
         name: "Receipts".into(),
-        sources: vec!["camera".into()],
-        description: Some("Receipts.".into()),
+        filters: vec![FilterDraft {
+            sources: vec!["camera".into()],
+            ai: Some("Receipts.".into()),
+            ..Default::default()
+        }],
         outputs: vec![OutputDraft {
             dir: "/tmp/gallery-edit-test/out/receipts".into(),
             ..Default::default()
@@ -490,71 +902,71 @@ fn add_and_remove_targets() {
     save_ok(
         &fx,
         &[EditOp::AddTarget {
-            stage: Stage::Ai,
+            kind: TargetKind::Folders,
             target: new,
         }],
     );
-    let (old, added) = diff(COMMENTED, &read(&fx.path));
-    assert!(old.is_empty());
+    let after = read(&fx.path);
+    assert!(
+        after.ends_with("dir = \"/tmp/gallery-edit-test/backup\"\n\n[[targets]]\nname = \"Receipts\"\n[[targets.filters]]\nsources = [\"camera\"]\nai = \"Receipts.\"\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/out/receipts\"\n\n# trailing note\n"),
+        "{after}"
+    );
     assert_eq!(
-        added,
-        vec![
-            "[[targets.ai]]",
-            r#"name = "Receipts""#,
-            r#"sources = ["camera"]"#,
-            r#"description = "Receipts.""#,
-            "[[targets.ai.outputs]]",
-            r#"dir = "/tmp/gallery-edit-test/out/receipts""#,
-            "",
-        ]
+        names(&Config::load(&fx.path).unwrap()),
+        ["Screenshots", "TikTok", "Documents", "Timeline", "Receipts"]
     );
-    save_ok(
-        &fx,
-        &[EditOp::RemoveTarget {
-            stage: Stage::Ai,
-            index: 1,
-        }],
-    );
+    save_ok(&fx, &[EditOp::RemoveTarget { index: 4 }]);
     assert_eq!(read(&fx.path), COMMENTED);
 
-    // Removing the first target: the stage heading stays for the next one.
+    // A trash target: no outputs, `kind` written.
     save_ok(
         &fx,
-        &[EditOp::RemoveTarget {
-            stage: Stage::BeforeAi,
-            index: 0,
+        &[EditOp::AddTarget {
+            kind: TargetKind::Trash,
+            target: TargetDraft {
+                name: "Junk".into(),
+                ..Default::default()
+            },
         }],
     );
+    assert!(read(&fx.path).contains("\n[[targets]]\nname = \"Junk\"\nkind = \"trash\"\n"));
+    save_ok(&fx, &[EditOp::RemoveTarget { index: 4 }]);
+
+    // Removing the first target: the section heading stays for the next one.
+    save_ok(&fx, &[EditOp::RemoveTarget { index: 0 }]);
     let after = read(&fx.path);
-    assert!(after.contains("# ---- stage 1: masks before AI ----\n\n# TikTok junk.\n[[targets.before_ai]]\nname = \"TikTok\""), "{after}");
+    assert!(
+        after.contains("# ---- by name ----\n\n# TikTok junk.\n[[targets]]\nname = \"TikTok\""),
+        "{after}"
+    );
     assert!(!after.contains("Screenshots"));
 }
 
 #[test]
-fn adds_to_an_empty_stage_after_the_earlier_stages() {
-    let text = "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/s\"\n\n# AI\n[[targets.ai]]\nname = \"A\"\nsources = [\"s\"]\ndescription = \"a\"\n\n# after\n[[targets.after_ai]]\nname = \"B\"\n";
+fn adds_the_first_target_after_the_sources() {
+    let text =
+        "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/s\"\n\n[ai]\nmodel = \"m\"\n";
     let fx = fixture(text);
     let t = TargetDraft {
         name: "First".into(),
         filters: vec![FilterDraft {
             sources: vec!["s".into()],
             matches: Some(vec!["@photo".into()]),
-            exclude: vec![],
+            ..Default::default()
         }],
         ..Default::default()
     };
     save_ok(
         &fx,
         &[EditOp::AddTarget {
-            stage: Stage::BeforeAi,
+            kind: TargetKind::Keep,
             target: t,
         }],
     );
     let after = read(&fx.path);
-    let i = after.find("[[targets.before_ai]]").unwrap();
-    assert!(i < after.find("[[targets.ai]]").unwrap(), "{after}");
+    let i = after.find("[[targets]]").unwrap();
     assert!(i > after.find("[[sources]]").unwrap(), "{after}");
-    assert!(after.contains("[[targets.before_ai]]\nname = \"First\"\n\n[[targets.before_ai.filters]]\nsources = [\"s\"]\nmatch = \"@photo\"\n"), "{after}");
+    assert!(after.contains("[[targets]]\nname = \"First\"\nkind = \"keep\"\n\n[[targets.filters]]\nsources = [\"s\"]\nmatch = \"@photo\"\n"), "{after}");
     Config::load(&fx.path).unwrap().validate().unwrap();
 }
 
@@ -562,46 +974,30 @@ fn adds_to_an_empty_stage_after_the_earlier_stages() {
 fn new_subtables_follow_the_files_spacing() {
     // COMMENTED has no blank line before sub-tables: new ones neither.
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::AfterAi, 0);
+    let mut t = target(&fx, 3);
     t.outputs.push(OutputDraft {
         dir: "/tmp/gallery-edit-test/third".into(),
         ..Default::default()
     });
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::AfterAi,
-            index: 0,
-            target: t,
-        }],
-    );
-    assert!(read(&fx.path).contains("dir = \"/tmp/gallery-edit-test/backup\"\n[[targets.after_ai.outputs]]\ndir = \"/tmp/gallery-edit-test/third\"\n"));
+    save_ok(&fx, &[update(3, t)]);
+    assert!(read(&fx.path).contains("dir = \"/tmp/gallery-edit-test/backup\"\n[[targets.outputs]]\ndir = \"/tmp/gallery-edit-test/third\"\n"));
 }
 
 #[test]
 fn invalid_edit_is_not_written() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::AfterAi, 0);
+    let mut t = target(&fx, 3);
     t.outputs[0].content[1].preset = "avif-nope".into();
-    let out = save(
-        &fx.path,
-        &version(&fx.path),
-        &[EditOp::UpdateTarget {
-            stage: Stage::AfterAi,
-            index: 0,
-            target: t,
-        }],
-    )
-    .unwrap();
+    let out = save(&fx.path, &version(&fx.path), &[update(3, t)]).unwrap();
     assert!(!out.saved);
     let e = out.error.unwrap();
     assert!(e.message.contains("avif-nope"), "{e:?}");
-    assert_eq!(e.path.as_deref(), Some("targets.after_ai[0]"));
+    assert_eq!(e.path.as_deref(), Some("targets[3]"));
     assert_eq!(read(&fx.path), COMMENTED);
     assert!(!file::backup_path(&fx.path).exists());
     // The draft still shows the bad value, to be fixed.
     assert_eq!(
-        out.draft.targets.after_ai[0].outputs[0].content[1].preset,
+        out.draft.targets[3].outputs[0].content[1].preset,
         "avif-nope"
     );
 }
@@ -609,41 +1005,24 @@ fn invalid_edit_is_not_written() {
 #[test]
 fn bad_mask_names_its_field() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::BeforeAi, 0);
+    let mut t = target(&fx, 0);
     t.filters[0].exclude = vec!["^(".into()];
-    let out = draft(
-        &fx.path,
-        None,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 0,
-            target: t,
-        }],
-    )
-    .unwrap();
+    let out = draft(&fx.path, None, &[update(0, t)]).unwrap();
     let e = out.error.unwrap();
     assert_eq!(
         e.path.as_deref(),
-        Some("targets.before_ai[0].filters[0].exclude"),
+        Some("targets[0].filters[0].exclude"),
         "{e:?}"
     );
 
-    let mut t = target(&fx, Stage::BeforeAi, 0);
+    let mut t = target(&fx, 0);
     t.filters[0].matches = Some(vec!["@nope".into()]);
-    let e = draft(
-        &fx.path,
-        None,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 0,
-            target: t,
-        }],
-    )
-    .unwrap()
-    .error
-    .unwrap();
+    let e = draft(&fx.path, None, &[update(0, t)])
+        .unwrap()
+        .error
+        .unwrap();
     assert!(e.message.contains("@nope"), "{e:?}");
-    assert_eq!(e.path.as_deref(), Some("targets.before_ai[0]"));
+    assert_eq!(e.path.as_deref(), Some("targets[0]"));
 }
 
 #[test]
@@ -666,18 +1045,9 @@ fn external_change_is_refused() {
     let fx = fixture(COMMENTED);
     let v = version(&fx.path);
     std::fs::write(&fx.path, format!("{COMMENTED}# edited elsewhere\n")).unwrap();
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.name = "TT".into();
-    let e = save(
-        &fx.path,
-        &v,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 1,
-            target: t,
-        }],
-    )
-    .unwrap_err();
+    let e = save(&fx.path, &v, &[update(1, t)]).unwrap_err();
     assert_eq!(e.kind, FailureKind::Changed);
     assert!(read(&fx.path).ends_with("# edited elsewhere\n"));
 }
@@ -685,31 +1055,16 @@ fn external_change_is_refused() {
 #[test]
 fn save_keeps_a_backup_and_returns_the_new_version() {
     let fx = fixture(COMMENTED);
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.name = "TT".into();
-    let out = save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 1,
-            target: t,
-        }],
-    );
+    let out = save_ok(&fx, &[update(1, t)]);
     assert_eq!(read(&file::backup_path(&fx.path)), COMMENTED);
+    assert_eq!(out.backup.as_deref(), Some("gallery.toml.bak"));
     assert_eq!(out.version, version(&fx.path));
     // The returned version saves again.
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.name = "TT2".into();
-    let out2 = save(
-        &fx.path,
-        &out.version,
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 1,
-            target: t,
-        }],
-    )
-    .unwrap();
+    let out2 = save(&fx.path, &out.version, &[update(1, t)]).unwrap();
     assert!(out2.saved);
     assert!(read(&file::backup_path(&fx.path)).contains("name = \"TT\""));
 }
@@ -720,18 +1075,9 @@ fn save_through_a_symlink_writes_its_target() {
     let fx = fixture(COMMENTED);
     let link = fx.path.with_file_name("link.toml");
     std::os::unix::fs::symlink(&fx.path, &link).unwrap();
-    let mut t = target(&fx, Stage::BeforeAi, 1);
+    let mut t = target(&fx, 1);
     t.name = "TT".into();
-    let out = save(
-        &link,
-        &version(&link),
-        &[EditOp::UpdateTarget {
-            stage: Stage::BeforeAi,
-            index: 1,
-            target: t,
-        }],
-    )
-    .unwrap();
+    let out = save(&link, &version(&link), &[update(1, t)]).unwrap();
     assert!(out.saved, "{:?}", out.error);
     assert!(
         std::fs::symlink_metadata(&link)
@@ -749,16 +1095,12 @@ fn warnings_with_paths() {
     // The screenshots target writes into its own source.
     assert!(
         w.iter()
-            .any(|w| w.path == "targets.before_ai[0].outputs[0].dir"
-                && w.message.contains("“shots”")),
+            .any(|w| w.path == "targets[0].outputs[0].dir" && w.message.contains("“shots”")),
         "{w:?}"
     );
-    assert!(
-        !w.iter().any(|w| w.path.starts_with("targets.after_ai")),
-        "{w:?}"
-    );
+    assert!(!w.iter().any(|w| w.path.starts_with("targets[3]")), "{w:?}");
 
-    let mut t = target(&fx, Stage::AfterAi, 0);
+    let mut t = target(&fx, 3);
     t.outputs[0].content = vec![
         StepDraft {
             preset: "avif-high".into(),
@@ -770,35 +1112,17 @@ fn warnings_with_paths() {
         },
     ];
     t.outputs.truncate(1);
-    let mut b = target(&fx, Stage::BeforeAi, 1);
+    let mut b = target(&fx, 1);
     b.outputs.clear();
-    let w = draft(
-        &fx.path,
-        None,
-        &[
-            EditOp::UpdateTarget {
-                stage: Stage::AfterAi,
-                index: 0,
-                target: t,
-            },
-            EditOp::UpdateTarget {
-                stage: Stage::BeforeAi,
-                index: 1,
-                target: b,
-            },
-        ],
-    )
-    .unwrap()
-    .warnings;
+    let w = draft(&fx.path, None, &[update(3, t), update(1, b)])
+        .unwrap()
+        .warnings;
     let double = w
         .iter()
-        .find(|w| w.path == "targets.after_ai[0].outputs[0].content")
+        .find(|w| w.path == "targets[3].outputs[0].content")
         .expect("double encode");
     assert!(double.message.contains("*.jpg"), "{double:?}");
-    assert!(
-        w.iter().any(|w| w.path == "targets.before_ai[1].outputs"),
-        "{w:?}"
-    );
+    assert!(w.iter().any(|w| w.path == "targets[1].outputs"), "{w:?}");
 }
 
 #[test]
@@ -903,13 +1227,7 @@ fn mask_tester_uses_user_and_builtin_masks() {
 
 #[test]
 fn example_config_round_trips() {
-    // The GUI editor is still stage-based (Task 8): it round-trips the old
-    // three-stage example, kept as a fixture of the core crate. TODO(T8):
-    // point it back at examples/gallery.toml once the editor reads the new shape.
-    round_trip(
-        &Path::new(env!("CARGO_MANIFEST_DIR"))
-            .join("../gallery-core/tests/fixtures/staged-example.toml"),
-    );
+    round_trip(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gallery.toml"));
 }
 
 /// The same for any config (a copy of a real one):
@@ -925,18 +1243,12 @@ fn round_trip_env() {
 fn round_trip(p: &Path) {
     let text = read(p);
     let mut doc: toml_edit::DocumentMut = text.parse().unwrap();
+    assert!(!migrate::to_ordered(&mut doc).unwrap(), "the new shape");
     let d = doc::read_draft(&doc).unwrap();
+    assert!(!d.targets.is_empty() && !d.places.is_empty());
     // Rewriting every target and source with its own values changes nothing.
-    for (stage, i, t) in d.targets.all() {
-        ops::apply(
-            &mut doc,
-            &EditOp::UpdateTarget {
-                stage,
-                index: i,
-                target: t.clone(),
-            },
-        )
-        .unwrap();
+    for (i, t) in d.targets.iter().enumerate() {
+        ops::apply(&mut doc, &update(i, t.clone())).unwrap();
     }
     for s in &d.sources {
         ops::apply(
@@ -949,24 +1261,232 @@ fn round_trip(p: &Path) {
         .unwrap();
     }
     assert_eq!(doc.to_string(), text);
-    // Moving every mask target to the end of its stage and back, too.
-    for stage in [Stage::BeforeAi, Stage::AfterAi] {
-        let n = d.targets.stage(stage).len();
-        for _ in 0..n {
-            ops::apply(
-                &mut doc,
-                &EditOp::MoveTarget {
-                    from: stage,
-                    index: 0,
-                    to: stage,
-                    to_index: n - 1,
-                },
-            )
-            .unwrap();
-        }
+    // Moving every target to the end and back, too.
+    let n = d.targets.len();
+    for _ in 0..n {
+        ops::apply(&mut doc, &EditOp::MoveTarget { from: 0, to: n - 1 }).unwrap();
     }
     assert_eq!(doc.to_string(), text);
 }
+
+// ---------- the old three-stage shape ----------
+
+#[test]
+fn old_shape_is_edited_as_the_ordered_list() {
+    let fx = fixture(STAGED);
+    let out = draft(&fx.path, None, &[]).unwrap();
+    assert!(out.error.is_none(), "{:?}", out.error);
+    assert!(out.old_shape && !out.changed);
+    assert!(
+        out.warnings
+            .first()
+            .is_some_and(|w| w.path.is_empty() && w.message.contains(".bak")),
+        "{:?}",
+        out.warnings
+    );
+    let names: Vec<&str> = out.draft.targets.iter().map(|t| t.name.as_str()).collect();
+    assert_eq!(names, ["Screenshots", "TikTok", "Documents", "Timeline"]);
+    // Nothing is written without a change.
+    let out = save(&fx.path, &version(&fx.path), &[]).unwrap();
+    assert!(!out.saved);
+    assert_eq!(read(&fx.path), STAGED);
+    assert!(!file::backup_path(&fx.path).exists());
+}
+
+#[test]
+fn old_shape_is_migrated_on_the_first_save() {
+    let fx = fixture(STAGED);
+    let before = Config::load(&fx.path).unwrap();
+    assert!(before.was_staged);
+    let mut t = target(&fx, 1);
+    t.outputs[0].dir = "/tmp/gallery-edit-test/out/tt".into();
+    let out = save_ok(&fx, &[update(1, t)]);
+    assert_eq!(out.backup.as_deref(), Some("gallery.toml.bak"));
+    assert!(!out.old_shape);
+    // The original bytes are kept.
+    assert_eq!(read(&file::backup_path(&fx.path)), STAGED);
+    let after = read(&fx.path);
+    let cfg = Config::load(&fx.path).unwrap();
+    assert!(!cfg.was_staged);
+    cfg.validate().unwrap();
+    assert_eq!(names(&cfg), names(&before));
+    // The same filters as the migration on load.
+    for (a, b) in before.targets.iter().zip(&cfg.targets) {
+        assert_eq!(
+            serde_json::to_value(&a.filters).unwrap(),
+            serde_json::to_value(&b.filters).unwrap(),
+            "{}",
+            a.name
+        );
+    }
+    // The text: headers renamed, the AI target's filter built in the
+    // prefilter's place, comments and the rest kept.
+    let expect = COMMENTED
+        .replace(
+            "# ---- by name ----",
+            "# ---- stage 1: masks before AI ----",
+        )
+        .replace("# ---- AI ----", "# ---- stage 2: AI ----")
+        .replace("# ---- the rest ----", "# ---- stage 3: after AI ----")
+        .replace(
+            "ai = \"Photos of documents.\"",
+            "# What the AI is told.\nai = \"Photos of documents.\"",
+        )
+        .replace("out/tiktok", "out/tt");
+    assert_eq!(after, expect);
+
+    // A later save keeps the old-shape backup and uses the next name.
+    let mut t = target(&fx, 1);
+    t.name = "TT".into();
+    let out = save_ok(&fx, &[update(1, t)]);
+    assert_eq!(out.backup.as_deref(), Some("gallery.toml.bak.1"));
+    assert_eq!(read(&file::backup_path(&fx.path)), STAGED);
+    assert_eq!(read(&fx.path.with_file_name("gallery.toml.bak.1")), after);
+}
+
+#[test]
+fn migration_never_replaces_an_existing_backup() {
+    let fx = fixture(STAGED);
+    let bak = file::backup_path(&fx.path);
+    std::fs::write(&bak, "older backup\n").unwrap();
+    std::fs::write(
+        fx.path.with_file_name("gallery.toml.bak.1"),
+        "older still\n",
+    )
+    .unwrap();
+    let out = save_ok(
+        &fx,
+        &[EditOp::SetPlace {
+            name: "home".into(),
+            place: gallery_core::config::Place {
+                lat: 1.0,
+                lon: 2.0,
+                km: 3.0,
+            },
+        }],
+    );
+    assert_eq!(out.backup.as_deref(), Some("gallery.toml.bak.2"));
+    assert_eq!(read(&bak), "older backup\n");
+    assert_eq!(read(&fx.path.with_file_name("gallery.toml.bak.2")), STAGED);
+}
+
+#[test]
+fn staged_example_is_migrated_on_the_first_save() {
+    let repo = Path::new(env!("CARGO_MANIFEST_DIR")).join("../..");
+    let fixture_text = read(&repo.join("crates/gallery-core/tests/fixtures/staged-example.toml"));
+    // The prompt files, found from the copy.
+    let ai = std::fs::canonicalize(repo.join("examples/ai")).unwrap();
+    let text = fixture_text.replace(
+        "\"../../../../examples/ai/",
+        &format!("\"{}/", ai.display().to_string().replace('\\', "/")),
+    );
+    let fx = fixture(&text);
+    let before = Config::load(&fx.path).unwrap();
+    assert!(before.was_staged);
+    save_ok(
+        &fx,
+        &[EditOp::SetPlace {
+            name: "home".into(),
+            place: gallery_core::config::Place {
+                lat: 47.0,
+                lon: 28.8,
+                km: 2.0,
+            },
+        }],
+    );
+    assert_eq!(read(&file::backup_path(&fx.path)), text);
+    let after = read(&fx.path);
+    let cfg = Config::load(&fx.path).unwrap();
+    assert!(!cfg.was_staged);
+    cfg.validate().unwrap();
+    assert_eq!(names(&cfg), names(&before));
+    for (a, b) in before.targets.iter().zip(&cfg.targets) {
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap(),
+            "{}",
+            a.name
+        );
+    }
+    // Comments of untouched tables stay.
+    for line in fixture_text.lines().filter(|l| l.starts_with('#')).skip(1) {
+        assert!(after.contains(line), "lost: {line}");
+    }
+    assert!(!after.contains("[[targets.before_ai") && !after.contains("[[targets.after_ai"));
+    assert!(!after.contains("[[targets.ai") && !after.contains("[targets.ai.prefilter]"));
+}
+
+#[test]
+fn old_inline_stages_are_migrated_too() {
+    let text = r#"[[sources]]
+id = "camera"
+path = "/tmp/gallery-edit-test/camera"
+
+[targets]
+after_ai = [{ name = "X", filters = [{ sources = ["camera"] }], outputs = [{ dir = "/tmp/gallery-edit-test/x" }] }]
+ai = [{ name = "D", sources = ["camera"], description = "Docs.", prefilter = { match = "@photo" } }]
+"#;
+    let fx = fixture(text);
+    let before = Config::load(&fx.path).unwrap();
+    save_ok(
+        &fx,
+        &[EditOp::AddTarget {
+            kind: TargetKind::Keep,
+            target: TargetDraft {
+                name: "Y".into(),
+                ..Default::default()
+            },
+        }],
+    );
+    let cfg = Config::load(&fx.path).unwrap();
+    assert!(!cfg.was_staged);
+    assert_eq!(names(&cfg), ["D", "X", "Y"]);
+    for (a, b) in before.targets.iter().zip(&cfg.targets) {
+        assert_eq!(
+            serde_json::to_value(a).unwrap(),
+            serde_json::to_value(b).unwrap()
+        );
+    }
+}
+
+const MULTILINE: &str = r#"[[sources]]
+id = "camera"
+path = "/tmp/gallery-edit-test/camera"
+
+[[targets.ai]]
+name = "Docs"
+sources = ["camera"]
+description = """
+Photos of documents.
+Receipts too.
+"""
+[[targets.ai.outputs]]
+dir = "/tmp/gallery-edit-test/docs"
+"#;
+
+#[test]
+fn multi_line_description_stays_multi_line() {
+    let fx = fixture(MULTILINE);
+    let mut t = target(&fx, 0);
+    assert_eq!(
+        t.filters[0].ai.as_deref(),
+        Some("Photos of documents.\nReceipts too.\n")
+    );
+    t.filters[0].ai = Some("Photos of documents.\nReceipts, \"tickets\" and \\ more.\n".into());
+    save_ok(&fx, &[update(0, t.clone())]);
+    let after = read(&fx.path);
+    assert!(
+        after.contains("[[targets.filters]]\nsources = [\"camera\"]\nai = \"\"\"\nPhotos of documents.\nReceipts, \\\"tickets\\\" and \\\\ more.\n\"\"\"\n"),
+        "{after}"
+    );
+    assert_eq!(target(&fx, 0), t);
+    // A single-line replacement is still one line.
+    t.filters[0].ai = Some("One line.".into());
+    save_ok(&fx, &[update(0, t)]);
+    assert!(read(&fx.path).contains("ai = \"One line.\"\n"));
+}
+
+// ---------- refusals ----------
 
 const THREE: &str = r#"[[sources]]
 id = "camera"
@@ -975,38 +1495,32 @@ path = "/tmp/gallery-edit-test/camera"
 # == A ==
 
 # first
-[[targets.after_ai]]
+[[targets]]
 name = "A"
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-edit-test/a"
 
 # == B ==
 
 # second
-[[targets.after_ai]]
+[[targets]]
 name = "B"
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-edit-test/b"
 
 # == C ==
 
 # third
-[[targets.after_ai]]
+[[targets]]
 name = "C"
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-edit-test/c"
 
 # == end ==
 "#;
 
-fn remove_after_ai(fx: &Fx, index: usize) -> String {
-    save_ok(
-        fx,
-        &[EditOp::RemoveTarget {
-            stage: Stage::AfterAi,
-            index,
-        }],
-    );
+fn remove_target(fx: &Fx, index: usize) -> String {
+    save_ok(fx, &[EditOp::RemoveTarget { index }]);
     read(&fx.path)
 }
 
@@ -1014,13 +1528,13 @@ fn remove_after_ai(fx: &Fx, index: usize) -> String {
 fn removing_a_block_moves_its_heading_to_the_next_block() {
     // Middle: B's heading joins C's, C and its heading stay together.
     let fx = fixture(THREE);
-    let after = remove_after_ai(&fx, 1);
+    let after = remove_target(&fx, 1);
     assert!(
-        after.contains("# == B ==\n\n# == C ==\n\n# third\n[[targets.after_ai]]\nname = \"C\""),
+        after.contains("# == B ==\n\n# == C ==\n\n# third\n[[targets]]\nname = \"C\""),
         "{after}"
     );
     assert!(
-        after.contains("# == A ==\n\n# first\n[[targets.after_ai]]\nname = \"A\""),
+        after.contains("# == A ==\n\n# first\n[[targets]]\nname = \"A\""),
         "{after}"
     );
     assert!(!after.contains("second"));
@@ -1028,21 +1542,21 @@ fn removing_a_block_moves_its_heading_to_the_next_block() {
 
     // First: A's heading joins B's.
     let fx = fixture(THREE);
-    let after = remove_after_ai(&fx, 0);
+    let after = remove_target(&fx, 0);
     assert!(
-        after.contains("# == A ==\n\n# == B ==\n\n# second\n[[targets.after_ai]]\nname = \"B\""),
+        after.contains("# == A ==\n\n# == B ==\n\n# second\n[[targets]]\nname = \"B\""),
         "{after}"
     );
     assert!(
-        after.contains("# == C ==\n\n# third\n[[targets.after_ai]]\nname = \"C\""),
+        after.contains("# == C ==\n\n# third\n[[targets]]\nname = \"C\""),
         "{after}"
     );
 
     // Last: its heading is kept, in front of whatever follows.
     let fx = fixture(THREE);
-    let after = remove_after_ai(&fx, 2);
+    let after = remove_target(&fx, 2);
     assert!(
-        after.contains("# == B ==\n\n# second\n[[targets.after_ai]]\nname = \"B\""),
+        after.contains("# == B ==\n\n# second\n[[targets]]\nname = \"B\""),
         "{after}"
     );
     assert!(
@@ -1052,24 +1566,24 @@ fn removing_a_block_moves_its_heading_to_the_next_block() {
     assert!(!after.contains("third"));
 }
 
-const INLINE_BEFORE: &str = r#"[[sources]]
+const INLINE_LIST: &str = r#"targets = [{ name = "X", filters = [{ sources = ["camera"] }], outputs = [{ dir = "/tmp/gallery-edit-test/x" }] }]
+
+[[sources]]
 id = "camera"
 path = "/tmp/gallery-edit-test/camera"
-
-[targets]
-before_ai = [{ name = "X", filters = [{ sources = ["camera"] }], outputs = [{ dir = "/tmp/gallery-edit-test/x" }] }]
 "#;
 
 const INLINE_SOURCES: &str = r#"sources = [{ id = "camera", path = "/tmp/gallery-edit-test/camera" }]
 
-[[targets.after_ai]]
+[[targets]]
 name = "A"
+[[targets.filters]]
 sources = ["camera"]
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "/tmp/gallery-edit-test/a"
 "#;
 
-const INLINE_TARGETS: &str = r#"targets = { after_ai = [{ name = "X", outputs = [{ dir = "/tmp/gallery-edit-test/x" }] }] }
+const INLINE_TARGETS: &str = r#"targets = [{ name = "X", outputs = [{ dir = "/tmp/gallery-edit-test/x" }] }, { name = "Y", kind = "keep" }]
 
 [[sources]]
 id = "camera"
@@ -1100,13 +1614,8 @@ fn refused(text: &str, ops: &[EditOp]) {
         assert_eq!(err.kind, FailureKind::Op);
         assert_eq!(read(&fx.path), text);
         assert_eq!(
-            draft(&fx.path, None, &[])
-                .unwrap()
-                .draft
-                .targets
-                .all()
-                .count(),
-            before.draft.targets.all().count()
+            draft(&fx.path, None, &[]).unwrap().draft.targets.len(),
+            before.draft.targets.len()
         );
     }
 }
@@ -1114,17 +1623,16 @@ fn refused(text: &str, ops: &[EditOp]) {
 #[test]
 fn adding_to_an_inline_list_is_refused_not_wiped() {
     refused(
-        INLINE_BEFORE,
+        INLINE_LIST,
         &[
             EditOp::AddTarget {
-                stage: Stage::BeforeAi,
+                kind: TargetKind::Folders,
                 target: a_target("Y"),
             },
-            EditOp::MoveTarget {
-                from: Stage::BeforeAi,
-                index: 0,
-                to: Stage::AfterAi,
-                to_index: 0,
+            EditOp::RemoveTarget { index: 0 },
+            EditOp::SetTargetKind {
+                name: "X".into(),
+                kind: TargetKind::Keep,
             },
         ],
     );
@@ -1142,66 +1650,12 @@ fn adding_to_an_inline_list_is_refused_not_wiped() {
         INLINE_TARGETS,
         &[
             EditOp::AddTarget {
-                stage: Stage::AfterAi,
-                target: a_target("Y"),
+                kind: TargetKind::Folders,
+                target: a_target("Z"),
             },
-            EditOp::AddTarget {
-                stage: Stage::BeforeAi,
-                target: a_target("Y"),
-            },
+            EditOp::MoveTarget { from: 1, to: 0 },
         ],
     );
-}
-
-const MULTILINE: &str = r#"[[sources]]
-id = "camera"
-path = "/tmp/gallery-edit-test/camera"
-
-[[targets.ai]]
-name = "Docs"
-sources = ["camera"]
-description = """
-Photos of documents.
-Receipts too.
-"""
-[[targets.ai.outputs]]
-dir = "/tmp/gallery-edit-test/docs"
-"#;
-
-#[test]
-fn multi_line_description_stays_multi_line() {
-    let fx = fixture(MULTILINE);
-    let mut t = target(&fx, Stage::Ai, 0);
-    assert_eq!(
-        t.description.as_deref(),
-        Some("Photos of documents.\nReceipts too.\n")
-    );
-    t.description = Some("Photos of documents.\nReceipts, \"tickets\" and \\ more.\n".into());
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::Ai,
-            index: 0,
-            target: t.clone(),
-        }],
-    );
-    let after = read(&fx.path);
-    assert!(
-        after.contains("description = \"\"\"\nPhotos of documents.\nReceipts, \\\"tickets\\\" and \\\\ more.\n\"\"\"\n"),
-        "{after}"
-    );
-    assert_eq!(target(&fx, Stage::Ai, 0), t);
-    // A single-line replacement is still one line.
-    t.description = Some("One line.".into());
-    save_ok(
-        &fx,
-        &[EditOp::UpdateTarget {
-            stage: Stage::Ai,
-            index: 0,
-            target: t,
-        }],
-    );
-    assert!(read(&fx.path).contains("description = \"One line.\"\n"));
 }
 
 #[test]
@@ -1215,14 +1669,12 @@ fn draft_refuses_a_changed_file() {
     assert!(draft(&fx.path, Some(&version(&fx.path)), &[]).is_ok());
 }
 
+// ---------- renames and overrides ----------
+
 fn rename_op(fx: &Fx, to: &str) -> EditOp {
-    let mut t = target(fx, Stage::Ai, 0);
+    let mut t = target(fx, 2);
     t.name = to.into();
-    EditOp::UpdateTarget {
-        stage: Stage::Ai,
-        index: 0,
-        target: t,
-    }
+    update(2, t)
 }
 
 fn overrides_file(fx: &Fx, names: &[&str]) -> PathBuf {
@@ -1257,7 +1709,7 @@ fn renaming_a_target_warns_about_overrides_and_can_update_them() {
     let w = out
         .warnings
         .iter()
-        .find(|w| w.path == "targets.ai[0].name")
+        .find(|w| w.path == "targets[2].name")
         .expect("warning on the name");
     assert!(
         w.message.contains("Documents") && w.message.contains('2'),
@@ -1299,18 +1751,14 @@ fn renaming_a_target_warns_about_overrides_and_can_update_them() {
     let file = overrides_file(&fx, &["Timeline"]);
     let mut out = draft(&fx.path, None, &[rename_op(&fx, "Papers")]).unwrap();
     with_override_warnings(&mut out, &file);
-    assert!(out.warnings.iter().all(|w| w.path != "targets.ai[0].name"));
+    assert!(out.warnings.iter().all(|w| w.path != "targets[2].name"));
     assert_eq!(out.renames[0].overrides, 0);
 }
 
 fn update_named(fx: &Fx, index: usize, to: &str) -> EditOp {
-    let mut t = target(fx, Stage::BeforeAi, index);
+    let mut t = target(fx, index);
     t.name = to.into();
-    EditOp::UpdateTarget {
-        stage: Stage::BeforeAi,
-        index,
-        target: t,
-    }
+    update(index, t)
 }
 
 fn named_overrides(file: &Path) -> Vec<String> {
@@ -1327,7 +1775,7 @@ fn named_overrides(file: &Path) -> Vec<String> {
     v
 }
 
-const TWO: &str = "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/camera\"\n\n[[targets.before_ai]]\nname = \"A\"\n\n[[targets.before_ai]]\nname = \"B\"\n";
+const TWO: &str = "[[sources]]\nid = \"s\"\npath = \"/tmp/gallery-edit-test/camera\"\n\n[[targets]]\nname = \"A\"\n\n[[targets]]\nname = \"B\"\n";
 
 #[test]
 fn retarget_refuses_a_name_missing_from_the_config() {
@@ -1390,12 +1838,4 @@ fn swap_warning_counts_each_old_name_once_and_does_not_claim_a_missing_target() 
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().all(|w| w.message.contains("will belong")));
-}
-
-/// The loaded config's targets of one old stage, in order.
-fn stage(cfg: &Config, s: Stage) -> Vec<&gallery_core::config::Target> {
-    super::model::staged(cfg)
-        .filter(|(st, _, _)| *st == s)
-        .map(|(_, _, t)| t)
-        .collect()
 }

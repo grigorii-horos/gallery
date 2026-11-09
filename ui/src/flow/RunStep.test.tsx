@@ -10,7 +10,7 @@ const summary: ConfigSummary = {
   error: null,
   warnings: [],
   sources: [],
-  targets: { before_ai: [], ai: [], after_ai: [] },
+  targets: [],
   presets: { name: [], content: [], masks: [] },
   ai: { model: "m", effort: "low", jobs: 8 },
 };

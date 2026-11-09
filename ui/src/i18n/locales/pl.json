@@ -944,6 +944,7 @@
   "settings_last": "Ostatnie sprawdzenie: do posortowania {{total, number}} (gotowe do uruchomienia {{ready, number}}, czekają na AI {{ai, number}}).",
   "editor_not_applied": "Zmiana nie została zastosowana: {{error}}",
   "editor_saved": "Zapisano. Poprzednia wersja leży obok jako gallery.toml.bak.",
+  "editor_saved_as": "Zapisano. Poprzednia wersja leży obok jako {{file}}.",
   "editor_moved": "Decyzje ręczne przeniesiono na nową nazwę celu: {{n, number}}.",
   "editor_not_moved": "Decyzji nie przeniesiono: {{error}}",
   "dialog_text_filter": "Tekst",

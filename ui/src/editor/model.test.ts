@@ -25,15 +25,15 @@ const src = (over: Partial<SourceDraft> = {}): SourceDraft => ({
   ...over,
 });
 
-const tgt = (name: string): TargetDraft => ({ ...emptyTarget("after_ai"), name });
+const tgt = (name: string): TargetDraft => ({ ...emptyTarget(), name });
 
 describe("pushOp", () => {
   it("merges consecutive updates of the same target", () => {
     let ops: EditOp[] = [];
-    ops = pushOp(ops, { op: "update_target", stage: "after_ai", index: 0, target: tgt("A") });
-    ops = pushOp(ops, { op: "update_target", stage: "after_ai", index: 0, target: tgt("AB") });
-    expect(ops).toEqual([{ op: "update_target", stage: "after_ai", index: 0, target: tgt("AB") }]);
-    ops = pushOp(ops, { op: "update_target", stage: "after_ai", index: 1, target: tgt("C") });
+    ops = pushOp(ops, { op: "update_target", index: 0, target: tgt("A") });
+    ops = pushOp(ops, { op: "update_target", index: 0, target: tgt("AB") });
+    expect(ops).toEqual([{ op: "update_target", index: 0, target: tgt("AB") }]);
+    ops = pushOp(ops, { op: "update_target", index: 1, target: tgt("C") });
     expect(ops).toHaveLength(2);
   });
 
@@ -46,16 +46,16 @@ describe("pushOp", () => {
 
   it("keeps structural operations separate", () => {
     let ops: EditOp[] = [];
-    ops = pushOp(ops, { op: "remove_target", stage: "ai", index: 0 });
-    ops = pushOp(ops, { op: "remove_target", stage: "ai", index: 0 });
+    ops = pushOp(ops, { op: "remove_target", index: 0 });
+    ops = pushOp(ops, { op: "remove_target", index: 0 });
     expect(ops).toHaveLength(2);
   });
 
   it("does not merge an update into an earlier one across other operations", () => {
     let ops: EditOp[] = [];
-    ops = pushOp(ops, { op: "update_target", stage: "ai", index: 0, target: tgt("A") });
-    ops = pushOp(ops, { op: "move_target", from: "ai", index: 0, to: "ai", to_index: 1 });
-    ops = pushOp(ops, { op: "update_target", stage: "ai", index: 0, target: tgt("B") });
+    ops = pushOp(ops, { op: "update_target", index: 0, target: tgt("A") });
+    ops = pushOp(ops, { op: "move_target", from: 0, to: 1 });
+    ops = pushOp(ops, { op: "update_target", index: 0, target: tgt("B") });
     expect(ops).toHaveLength(3);
   });
 });
@@ -72,48 +72,32 @@ describe("dirty state", () => {
 });
 
 describe("dropMove", () => {
-  it("moves within a stage to the final index", () => {
+  it("moves within the list to the final index", () => {
     // Drop item 0 before item 2: it ends at index 1.
-    expect(dropMove({ stage: "before_ai", index: 0 }, "before_ai", 2)).toEqual({
-      op: "move_target",
-      from: "before_ai",
-      index: 0,
-      to: "before_ai",
-      to_index: 1,
-    });
-    expect(dropMove({ stage: "before_ai", index: 2 }, "before_ai", 0)?.to_index).toBe(0);
+    expect(dropMove(0, 2)).toEqual({ op: "move_target", from: 0, to: 1 });
+    expect(dropMove(2, 0)?.to).toBe(0);
+    // To the end of a list of 4.
+    expect(dropMove(1, 4)?.to).toBe(3);
     // Dropped onto its own place: nothing.
-    expect(dropMove({ stage: "before_ai", index: 1 }, "before_ai", 1)).toBeNull();
-    expect(dropMove({ stage: "before_ai", index: 1 }, "before_ai", 2)).toBeNull();
-  });
-
-  it("moves between the mask stages, never to or from AI", () => {
-    expect(dropMove({ stage: "before_ai", index: 1 }, "after_ai", 0)).toEqual({
-      op: "move_target",
-      from: "before_ai",
-      index: 1,
-      to: "after_ai",
-      to_index: 0,
-    });
-    expect(dropMove({ stage: "ai", index: 0 }, "after_ai", 0)).toBeNull();
-    expect(dropMove({ stage: "after_ai", index: 0 }, "ai", 0)).toBeNull();
+    expect(dropMove(1, 1)).toBeNull();
+    expect(dropMove(1, 2)).toBeNull();
   });
 });
 
 describe("issues by field path", () => {
   const warnings = [
-    { path: "targets.after_ai[0].outputs[1].dir", message: "a" },
-    { path: "targets.after_ai[0].outputs", message: "b" },
-    { path: "targets.after_ai[10]", message: "c" },
+    { path: "targets[0].outputs[1].dir", message: "a" },
+    { path: "targets[0].outputs", message: "b" },
+    { path: "targets[10]", message: "c" },
     { path: "", message: "d" },
   ];
   it("matches a path and what is below it, not a longer index", () => {
-    expect(issuesUnder(warnings, "targets.after_ai[0]").map((w) => w.message)).toEqual(["a", "b"]);
-    expect(issuesUnder(warnings, "targets.after_ai[0].outputs[1]").map((w) => w.message)).toEqual(["a"]);
-    expect(issuesUnder(warnings, "targets.after_ai[1]")).toEqual([]);
+    expect(issuesUnder(warnings, "targets[0]").map((w) => w.message)).toEqual(["a", "b"]);
+    expect(issuesUnder(warnings, "targets[0].outputs[1]").map((w) => w.message)).toEqual(["a"]);
+    expect(issuesUnder(warnings, "targets[1]")).toEqual([]);
   });
   it("builds paths", () => {
-    expect(pathOf("ai", 2)).toBe("targets.ai[2]");
+    expect(pathOf(2)).toBe("targets[2]");
   });
 });
 
@@ -140,8 +124,9 @@ describe("helpers", () => {
     expect(DEFAULT_SKIP).toContain(".stfolder");
   });
 
-  it("an AI target starts with a description slot, a mask target with a filter", () => {
-    expect(emptyTarget("ai").description).toBe("");
-    expect(emptyTarget("before_ai").filters).toHaveLength(1);
+  it("a new target places files and starts with one empty filter", () => {
+    expect(emptyTarget().kind).toBe("folders");
+    expect(emptyTarget("trash").kind).toBe("trash");
+    expect(emptyTarget().filters).toEqual([{ sources: [], match: null, exclude: [], ai: null, expand: null, conditions: {} }]);
   });
 });

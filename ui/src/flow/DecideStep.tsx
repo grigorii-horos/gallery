@@ -341,14 +341,10 @@ function SeriesBlock(p: SeriesProps) {
                 <option value="" disabled>
                   {t("decide_choose")}
                 </option>
-                {groupByStage(p.targets).map(([stage, ts]) => (
-                  <optgroup key={stage} label={stage}>
-                    {ts.map((x) => (
-                      <option key={x.name} value={x.name}>
-                        {x.name}
-                      </option>
-                    ))}
-                  </optgroup>
+                {p.targets.map((x) => (
+                  <option key={x.name} value={x.name}>
+                    {x.name}
+                  </option>
                 ))}
                 <option value={KEEP}>{t("trace_keep")}</option>
               </select>
@@ -365,12 +361,6 @@ function SeriesBlock(p: SeriesProps) {
       </div>
     </section>
   );
-}
-
-function groupByStage(targets: TargetChoice[]): [string, TargetChoice[]][] {
-  const m = new Map<string, TargetChoice[]>();
-  targets.forEach((x) => m.set(x.stage, [...(m.get(x.stage) ?? []), x]));
-  return [...m.entries()];
 }
 
 function ReviewCell({

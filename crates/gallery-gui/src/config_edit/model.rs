@@ -1,7 +1,11 @@
-//! The editable view of a config: sources and targets as written in the
-//! file (prompt file paths, not their text; masks as lists of strings, not
-//! parsed), so a draft with a typo can still be shown and fixed.
+//! The editable view of a config: sources, places and the ordered targets
+//! as written in the file (prompt file paths, not their text; masks as lists
+//! of strings and conditions as raw values, not parsed), so a draft with a
+//! typo can still be shown and fixed.
 
+use std::collections::BTreeMap;
+
+pub use gallery_core::config::TargetKind;
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -25,8 +29,9 @@ pub struct SourceDraft {
     pub ai_suffix_file: Option<String>,
 }
 
-/// A filter of a mask target. A mask is a list of alternatives (OR); in
-/// the file one alternative may be a bare string.
+/// A filter: `sources`, the name masks, `ai`, `expand` and the other
+/// conditions as written. A mask is a list of alternatives (OR); in the
+/// file one alternative may be a bare string.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FilterDraft {
     #[serde(default)]
@@ -36,14 +41,17 @@ pub struct FilterDraft {
     pub matches: Option<Vec<String>>,
     #[serde(default)]
     pub exclude: Vec<String>,
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PrefilterDraft {
-    #[serde(default, rename = "match")]
-    pub matches: Option<Vec<String>>,
+    /// AI category description.
     #[serde(default)]
-    pub exclude: Vec<String>,
+    pub ai: Option<String>,
+    /// `"event"`.
+    #[serde(default)]
+    pub expand: Option<String>,
+    /// The conditions ([`super::cond::CONDITION_KEYS`]) as written in the
+    /// file, TOML values as JSON (`"@home"`, `{ "time": "2h" }`), so that a
+    /// value the core does not accept can still be shown and fixed.
+    #[serde(default)]
+    pub conditions: BTreeMap<String, serde_json::Value>,
 }
 
 /// One pipe step: a preset with its own mask (`mask: None`) or an override.
@@ -65,112 +73,43 @@ pub struct OutputDraft {
     pub rename: Vec<StepDraft>,
 }
 
-/// A target of any stage: `filters` for the mask stages, `sources`,
-/// `description` and `prefilter` for the AI stage (ignored elsewhere).
+/// One entry of the ordered `[[targets]]` list.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetDraft {
     pub name: String,
     #[serde(default)]
+    pub kind: TargetKind,
+    #[serde(default)]
     pub filters: Vec<FilterDraft>,
-    #[serde(default)]
-    pub sources: Vec<String>,
-    #[serde(default)]
-    pub description: Option<String>,
-    #[serde(default)]
-    pub prefilter: Option<PrefilterDraft>,
     #[serde(default)]
     pub outputs: Vec<OutputDraft>,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum Stage {
-    BeforeAi,
-    Ai,
-    AfterAi,
-}
-
-impl Stage {
-    pub const ALL: [Stage; 3] = [Stage::BeforeAi, Stage::Ai, Stage::AfterAi];
-
-    /// The key under `[targets]`.
-    pub fn key(self) -> &'static str {
-        match self {
-            Stage::BeforeAi => "before_ai",
-            Stage::Ai => "ai",
-            Stage::AfterAi => "after_ai",
-        }
-    }
-
-    pub fn is_mask(self) -> bool {
-        self != Stage::Ai
+impl TargetDraft {
+    /// Some filter asks the AI.
+    pub fn has_ai(&self) -> bool {
+        self.filters.iter().any(|f| f.ai.is_some())
     }
 }
 
-/// Position of the first AI target (the list's length when there is none).
-/// TEMPORARY (until Task 8's GUI rework): the stage-based editor and summary
-/// split the ordered list here into the old three stages.
-pub fn ai_cut(cfg: &gallery_core::config::Config) -> usize {
-    cfg.targets
-        .iter()
-        .position(gallery_core::config::Target::has_ai)
-        .unwrap_or(cfg.targets.len())
+/// A named point of `[places]`.
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
+pub struct PlaceDraft {
+    pub name: String,
+    pub lat: f64,
+    pub lon: f64,
+    /// Radius in kilometres.
+    pub km: f64,
 }
 
-/// The ordered targets of a loaded config with the old stage and the index
-/// within it that the editor (still stage-based until the GUI rework) uses
-/// for them. TEMPORARY: see [`ai_cut`].
-pub fn staged(
-    cfg: &gallery_core::config::Config,
-) -> impl Iterator<Item = (Stage, usize, &gallery_core::config::Target)> {
-    let cut = ai_cut(cfg);
-    let mut counts = [0usize; 3];
-    cfg.targets.iter().enumerate().map(move |(i, t)| {
-        let stage = if t.has_ai() {
-            Stage::Ai
-        } else if i < cut {
-            Stage::BeforeAi
-        } else {
-            Stage::AfterAi
-        };
-        let n = &mut counts[stage as usize];
-        let index = *n;
-        *n += 1;
-        (stage, index, t)
-    })
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TargetsDraft {
-    pub before_ai: Vec<TargetDraft>,
-    pub ai: Vec<TargetDraft>,
-    pub after_ai: Vec<TargetDraft>,
-}
-
-impl TargetsDraft {
-    pub fn stage(&self, s: Stage) -> &Vec<TargetDraft> {
-        match s {
-            Stage::BeforeAi => &self.before_ai,
-            Stage::Ai => &self.ai,
-            Stage::AfterAi => &self.after_ai,
-        }
-    }
-
-    /// Every target with its stage and index, in stage order.
-    pub fn all(&self) -> impl Iterator<Item = (Stage, usize, &TargetDraft)> {
-        Stage::ALL.into_iter().flat_map(move |s| {
-            self.stage(s)
-                .iter()
-                .enumerate()
-                .map(move |(i, t)| (s, i, t))
-        })
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct ConfigDraft {
     pub sources: Vec<SourceDraft>,
-    pub targets: TargetsDraft,
+    /// `[places]`, in file order.
+    #[serde(default)]
+    pub places: Vec<PlaceDraft>,
+    /// Ordered: the first target with a matching filter takes a file.
+    pub targets: Vec<TargetDraft>,
     /// Names of the user's own masks (`[masks]`), for `@` suggestions.
     pub masks: Vec<String>,
     /// The user's own presets and masks, in file order.
@@ -267,8 +206,7 @@ pub struct MaskDraft {
     pub items: Vec<String>,
 }
 
-/// Field path of a target, as used in errors and warnings:
-/// `targets.after_ai[0]`.
-pub fn target_path(stage: Stage, index: usize) -> String {
-    format!("targets.{}[{index}]", stage.key())
+/// Field path of a target, as used in errors and warnings: `targets[0]`.
+pub fn target_path(index: usize) -> String {
+    format!("targets[{index}]")
 }

@@ -10,7 +10,7 @@ const base: EditOutcome = {
   changed: false,
   saved: false,
   error: null,
-  warnings: [{ path: "targets.after_ai[0].outputs[0].content", message: "Double lossy re-encoding: *.jpg" }],
+  warnings: [{ path: "targets[0].outputs[0].content", message: "Double lossy re-encoding: *.jpg" }],
   renames: [],
   draft: {
     sources: [
@@ -26,22 +26,14 @@ const base: EditOutcome = {
         ai_suffix_file: null,
       },
     ],
-    targets: {
-      before_ai: [],
-      ai: [],
-      after_ai: [
-        {
-          name: "Timeline",
-          filters: [{ sources: ["camera"], match: ["@photo"], exclude: [] }],
-          sources: [],
-          description: null,
-          prefilter: null,
-          outputs: [
-            { dir: "~/Timeline", server_dir: null, content: [{ preset: "avif-high", mask: null }], rename: [] },
-          ],
-        },
-      ],
-    },
+    targets: [
+      {
+        name: "Timeline",
+        kind: "folders",
+        filters: [{ sources: ["camera"], match: ["@photo"], exclude: [] }],
+        outputs: [{ dir: "~/Timeline", server_dir: null, content: [{ preset: "avif-high", mask: null }], rename: [] }],
+      },
+    ],
     masks: ["mine"],
   },
 };
@@ -122,12 +114,23 @@ describe("editor screens", () => {
     expect(screen.getByRole("status")).toHaveTextContent("Unsaved: 1 change");
   });
 
-  it("adds a target to a stage", async () => {
+  it("adds a target at the end of the list", async () => {
     const user = userEvent.setup();
     render(<Targets />);
     await screen.findByRole("textbox", { name: "Target name" });
-    await user.click(screen.getByRole("button", { name: "Add target: AI" }));
-    await waitFor(() => expect(lastOps()[0]).toMatchObject({ op: "add_target", stage: "ai", target: { name: "New target" } }));
+    await user.click(screen.getByRole("button", { name: "Add target: Targets" }));
+    await waitFor(() => expect(lastOps()[0]).toMatchObject({ op: "add_target", kind: "folders", target: { name: "New target" } }));
+  });
+
+  it("gives a filter an AI description", async () => {
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    await user.click(screen.getByRole("button", { name: "Description for the AI" }));
+    await waitFor(() => {
+      const op = lastOps()[0];
+      expect(op.op === "update_target" && op.target.filters[0].ai).toBe("");
+    });
   });
 
   it("adds mask chips with @ suggestions", async () => {
