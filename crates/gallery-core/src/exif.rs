@@ -233,7 +233,8 @@ fn read_cached(
     // New entries by shard; merged onto the shard as it is on disk by then.
     let mut fresh_entries: HashMap<String, Vec<(String, Entry)>> = HashMap::new();
     let mut store = |path: &Path, raw: &serde_json::Value| {
-        if raw.get("Error").is_some() {
+        // `-G1` names the key `ExifTool:Error`; older output has it bare.
+        if raw.get("Error").is_some() || raw.get("ExifTool:Error").is_some() {
             return;
         }
         if let Some((k, size, mtime_ns)) = stamps.get(path) {
@@ -969,6 +970,31 @@ mod tests {
         assert!(has_tag_in_record(r, "ExifIFD:exposuretime"));
         assert!(!has_tag_in_record(r, "IFD0:ExposureTime"));
         assert!(!has_tag_in_record(r, "Flash"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_record_with_an_exiftool_error_is_not_cached() {
+        let d = tempfile::tempdir().unwrap();
+        let bad = d.path().join("bad.jpg");
+        let good = d.path().join("good.jpg");
+        std::fs::write(&bad, "b").unwrap();
+        std::fs::write(&good, "g").unwrap();
+        let recs = json!([
+            { "SourceFile": bad.to_string_lossy(), "ExifTool:Error": "File format error" },
+            { "SourceFile": good.to_string_lossy(), "IFD0:Make": "Camera Co" },
+        ]);
+        let t = canned_exiftool(d.path(), &recs);
+        let cache = d.path().join("exif");
+        read_cached(
+            &t,
+            &[bad.clone(), good.clone()],
+            &NoProgress,
+            &Cancel::new(),
+            Some(&cache),
+        )
+        .unwrap();
+        assert_eq!(cached_keys(&cache), [key_of(&good)]);
     }
 
     #[cfg(unix)]
