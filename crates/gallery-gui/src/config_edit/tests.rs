@@ -275,7 +275,7 @@ fn adds_filter_prefilter_outputs_and_masked_steps() {
     let text = read(&fx.path);
     let cfg = Config::load(&fx.path).unwrap();
     cfg.validate().unwrap();
-    let tt = &cfg.targets.before_ai[1];
+    let tt = stage(&cfg, Stage::BeforeAi)[1];
     assert_eq!(tt.filters.len(), 2);
     assert_eq!(tt.outputs.len(), 2);
     assert_eq!(tt.outputs[1].server_dir.as_deref(), Some("/srv/tt"));
@@ -295,15 +295,9 @@ fn adds_filter_prefilter_outputs_and_masked_steps() {
         text.find(r#"match = "@tiktok"   # 32 hex digits"#).unwrap() < f2 && f2 < o1 && o1 < o2,
         "{text}"
     );
-    assert_eq!(cfg.targets.ai[0].description, "Documents and forms.");
-    assert!(
-        !cfg.targets.ai[0]
-            .prefilter
-            .as_ref()
-            .unwrap()
-            .exclude
-            .is_empty()
-    );
+    let docs = &stage(&cfg, Stage::Ai)[0].filters[0];
+    assert_eq!(docs.ai.as_deref(), Some("Documents and forms."));
+    assert!(!docs.exclude.is_empty());
     // And the draft reads back what was written.
     let d = draft(&fx.path, None, &[]).unwrap().draft;
     assert_eq!(d.targets.before_ai[1], t);
@@ -436,9 +430,9 @@ fn move_between_mask_stages_and_back() {
     );
     let after = read(&fx.path);
     let cfg = Config::load(&fx.path).unwrap();
-    assert_eq!(cfg.targets.before_ai.len(), 1);
-    assert_eq!(cfg.targets.after_ai[1].name, "TikTok");
-    assert_eq!(cfg.targets.after_ai[1].filters.len(), 1);
+    assert_eq!(stage(&cfg, Stage::BeforeAi).len(), 1);
+    assert_eq!(stage(&cfg, Stage::AfterAi)[1].name, "TikTok");
+    assert_eq!(stage(&cfg, Stage::AfterAi)[1].filters.len(), 1);
     assert!(
         after.contains(
             "# TikTok junk.\n[[targets.after_ai]]\nname = \"TikTok\"\n[[targets.after_ai.filters]]"
@@ -1390,4 +1384,12 @@ fn swap_warning_counts_each_old_name_once_and_does_not_claim_a_missing_target() 
         .collect();
     assert_eq!(names.len(), 2);
     assert!(names.iter().all(|w| w.message.contains("will belong")));
+}
+
+/// The loaded config's targets of one old stage, in order.
+fn stage(cfg: &Config, s: Stage) -> Vec<&gallery_core::config::Target> {
+    super::model::staged(cfg)
+        .filter(|(st, _, _)| *st == s)
+        .map(|(_, _, t)| t)
+        .collect()
 }

@@ -15,7 +15,7 @@ use crate::Result;
 use crate::ai::AiClassifier;
 use crate::ai::cache::{self, Cache};
 use crate::ai::client::{system_prompt, to_answer};
-use crate::config::{Config, InputFilter, Output, expand_tilde};
+use crate::config::{Config, Filter, Output, expand_tilde};
 use crate::datetime::{capture_date, file_created};
 use crate::mask::{ItemCheck, MaskCheck, MaskExpr};
 use crate::media::{kind_of, split_name};
@@ -24,7 +24,7 @@ use crate::overrides::Overrides;
 use crate::plan::{OutputOp, Plan, Side, build_plan, local_zone, run_content_pipe};
 use crate::progress::{Cancel, NoProgress};
 use crate::route::{
-    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, Via, filter_fit, prefilter_fit,
+    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, Via, filter_fit,
     route_with_overrides,
 };
 use crate::scan::{FileEntry, Rejection, mtime_ns, rejection};
@@ -252,7 +252,7 @@ fn locate(cfg: &Config, path: &Path) -> Vec<(usize, PathBuf, PathBuf)> {
         .collect()
 }
 
-fn filter_check(cfg: &Config, index: usize, f: &InputFilter, e: &FileEntry) -> FilterCheck {
+fn filter_check(cfg: &Config, index: usize, f: &Filter, e: &FileEntry) -> FilterCheck {
     let name = file_name_of(&e.path);
     FilterCheck {
         index,
@@ -264,74 +264,41 @@ fn filter_check(cfg: &Config, index: usize, f: &InputFilter, e: &FileEntry) -> F
     }
 }
 
+/// Every target in list order. The stage is what routing does with it for
+/// now (see `route::ai_cut`): an AI target is in the AI batch, a mask target
+/// before the first AI target decides before it, any other after it.
 fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
-    let name = file_name_of(&e.path);
-    let mask_stage = |kind, targets: &[crate::config::MaskTarget]| {
-        targets
-            .iter()
-            .map(|t| {
-                let filters: Vec<_> = t
-                    .filters
-                    .iter()
-                    .enumerate()
-                    .map(|(i, f)| filter_check(cfg, i, f, e))
-                    .collect();
-                TargetCheck {
-                    stage: kind,
-                    name: t.name.clone(),
-                    candidate: filters.iter().any(|f| f.fit == Fit::Match),
-                    filters,
-                    taken: false,
-                }
-            })
-            .collect::<Vec<_>>()
-    };
-    let mut out = mask_stage(StageKind::BeforeAi, &cfg.targets.before_ai);
-    out.extend(cfg.targets.ai.iter().map(|t| {
-        let source_ok = t.sources.contains(&e.source_id);
-        let fit = if source_ok {
-            prefilter_fit(cfg, &t.prefilter, e)
-        } else {
-            Fit::No
-        };
-        let (m, x) = t
-            .prefilter
-            .as_ref()
-            .map_or((None, None), |p| (p.matches.as_ref(), Some(&p.exclude)));
-        TargetCheck {
-            stage: StageKind::Ai,
-            name: t.name.clone(),
-            filters: vec![FilterCheck {
-                index: 0,
-                sources: t.sources.clone(),
-                source_ok,
-                matches: m.map(|m| m.check(name, cfg, false)),
-                exclude: x
-                    .filter(|x| !x.is_empty())
-                    .map(|x| x.check(name, cfg, true)),
-                fit,
-            }],
-            candidate: fit == Fit::Match,
-            taken: false,
-        }
-    }));
-    out.extend(mask_stage(StageKind::AfterAi, &cfg.targets.after_ai));
-    out
+    let cut = crate::route::ai_cut(cfg);
+    cfg.targets
+        .iter()
+        .enumerate()
+        .map(|(i, t)| {
+            let stage = if t.has_ai() {
+                StageKind::Ai
+            } else if i < cut {
+                StageKind::BeforeAi
+            } else {
+                StageKind::AfterAi
+            };
+            let filters: Vec<_> = t
+                .filters
+                .iter()
+                .enumerate()
+                .map(|(i, f)| filter_check(cfg, i, f, e))
+                .collect();
+            TargetCheck {
+                stage,
+                name: t.name.clone(),
+                candidate: filters.iter().any(|f| f.fit == Fit::Match),
+                filters,
+                taken: false,
+            }
+        })
+        .collect()
 }
 
 fn outputs_cfg<'a>(cfg: &'a Config, target: &str) -> &'a [Output] {
-    let t = &cfg.targets;
-    t.before_ai
-        .iter()
-        .chain(&t.after_ai)
-        .find(|m| m.name == target)
-        .map(|m| m.outputs.as_slice())
-        .or_else(|| {
-            t.ai.iter()
-                .find(|a| a.name == target)
-                .map(|a| a.outputs.as_slice())
-        })
-        .unwrap_or(&[])
+    cfg.target(target).map_or(&[], |t| t.outputs.as_slice())
 }
 
 fn mask_texts(m: &MaskExpr, cfg: &Config) -> (String, String) {

@@ -123,7 +123,7 @@ fn a_changed_config_recounts_without_reading_exif_again() {
     let tools = Tools::discover().unwrap();
     std::fs::write(fx.src().join("a.png"), b"x").unwrap();
     assert_eq!(run(&fx, &tools).to_process, 1);
-    fx.cfg.targets.before_ai.clear();
+    fx.cfg.targets.retain(|t| t.has_ai());
     let after = run(&fx, &tools);
     assert!(!after.fast_path);
     assert_eq!(after.exif_reads, 0);

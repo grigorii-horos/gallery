@@ -1,4 +1,5 @@
-//! Configuration model: sources, three-stage targets, presets, AI settings.
+//! Configuration model: sources, places, ordered targets, presets, AI settings.
+//! Old configs with three target stages are migrated on load.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -22,29 +23,73 @@ pub fn expand_tilde(p: &Path) -> PathBuf {
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[serde(from = "RawConfig")]
 pub struct Config {
-    #[serde(default)]
     pub sources: Vec<Source>,
-    #[serde(default)]
-    pub targets: Targets,
+    /// Named points for geo conditions (`[places]`).
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    pub places: BTreeMap<String, Place>,
+    /// Ordered: the first target with a matching filter takes a file.
+    pub targets: Vec<Target>,
     /// The user's own name presets; the built-ins (`crate::presets`) are not
     /// stored here, look names up with `Config::name_preset`.
-    #[serde(default)]
     pub name_presets: BTreeMap<String, NamePreset>,
     /// The user's own content presets; see `name_presets`.
-    #[serde(default)]
     pub content_presets: BTreeMap<String, ContentPreset>,
     /// The user's own named masks, referred to as `@name`; the built-ins
     /// (`crate::presets::builtin_masks`) are not stored here.
-    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
     pub masks: BTreeMap<String, MaskExpr>,
-    #[serde(default)]
     pub ai: AiSettings,
     /// The user's corrections per source id (see [`crate::learn`]); not part
     /// of the file: filled by `Config::attach_examples`.
     #[serde(skip)]
     pub ai_examples: BTreeMap<String, Vec<crate::learn::Correction>>,
+    /// The file used the old three-stage shape (`targets.before_ai` / `ai` /
+    /// `after_ai`); `targets` holds them migrated, in that order.
+    #[serde(skip)]
+    pub was_staged: bool,
+}
+
+/// The file as written; `Config` is made from it (old target stages
+/// migrated).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawConfig {
+    #[serde(default)]
+    sources: Vec<Source>,
+    #[serde(default)]
+    places: BTreeMap<String, Place>,
+    #[serde(default)]
+    targets: RawTargets,
+    #[serde(default)]
+    name_presets: BTreeMap<String, NamePreset>,
+    #[serde(default)]
+    content_presets: BTreeMap<String, ContentPreset>,
+    #[serde(default)]
+    masks: BTreeMap<String, MaskExpr>,
+    #[serde(default)]
+    ai: AiSettings,
+}
+
+impl From<RawConfig> for Config {
+    fn from(r: RawConfig) -> Self {
+        let (targets, was_staged) = match r.targets {
+            RawTargets::List(l) => (l, false),
+            RawTargets::Staged(s) => (s.into_list(), true),
+        };
+        Config {
+            sources: r.sources,
+            places: r.places,
+            targets,
+            name_presets: r.name_presets,
+            content_presets: r.content_presets,
+            masks: r.masks,
+            ai: r.ai,
+            ai_examples: BTreeMap::new(),
+            was_staged,
+        }
+    }
 }
 
 fn default_skip() -> Vec<String> {
@@ -86,30 +131,69 @@ pub struct Source {
     pub ai_suffix_file: Option<PathBuf>,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Targets {
-    #[serde(default)]
-    pub before_ai: Vec<MaskTarget>,
-    #[serde(default)]
-    pub ai: Vec<AiTarget>,
-    #[serde(default)]
-    pub after_ai: Vec<MaskTarget>,
+/// What a target does with the files it takes.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TargetKind {
+    /// Place the file into the target's outputs.
+    #[default]
+    Folders,
+    /// Move the file to the trash (no outputs).
+    Trash,
+    /// Leave the file in its source, untouched (no outputs).
+    Keep,
 }
 
+impl TargetKind {
+    pub fn is_folders(&self) -> bool {
+        *self == TargetKind::Folders
+    }
+
+    /// The value as written in a config file.
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            TargetKind::Folders => "folders",
+            TargetKind::Trash => "trash",
+            TargetKind::Keep => "keep",
+        }
+    }
+}
+
+/// One entry of the ordered `[[targets]]` list: the first target one of
+/// whose filters matches a file takes it.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct MaskTarget {
+pub struct Target {
     pub name: String,
+    #[serde(default, skip_serializing_if = "TargetKind::is_folders")]
+    pub kind: TargetKind,
+    /// Any one of them takes a file (OR).
     #[serde(default)]
-    pub filters: Vec<InputFilter>,
+    pub filters: Vec<Filter>,
+    /// Only for `kind = "folders"`.
     #[serde(default)]
     pub outputs: Vec<Output>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+impl Target {
+    /// Some filter asks the AI.
+    pub fn has_ai(&self) -> bool {
+        self.filters.iter().any(|f| f.ai.is_some())
+    }
+}
+
+/// Grow a filter's match to whole groups of files.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Expand {
+    /// Every file of the event a matched file belongs to.
+    Event,
+}
+
+/// `sources` plus conditions; every condition set must hold (AND).
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct InputFilter {
+pub struct Filter {
     #[serde(default)]
     pub sources: Vec<String>,
     /// Mask of file names to match; `None` matches any file.
@@ -118,30 +202,162 @@ pub struct InputFilter {
     /// The filter does not match a file whose name matches any of these.
     #[serde(default, skip_serializing_if = "MaskExpr::is_empty")]
     pub exclude: MaskExpr,
+    /// AI category description: the file must be classified into this target.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub expand: Option<Expand>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// A named point for geo conditions (`[places]`).
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct AiTarget {
-    pub name: String,
-    #[serde(default)]
-    pub sources: Vec<String>,
-    #[serde(default)]
-    pub prefilter: Option<Prefilter>,
-    pub description: String,
-    #[serde(default)]
-    pub outputs: Vec<Output>,
+pub struct Place {
+    pub lat: f64,
+    pub lon: f64,
+    /// Radius in kilometres.
+    pub km: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+/// `targets` as written in a file: the `[[targets]]` list, or the old
+/// three stages (`targets.before_ai` / `ai` / `after_ai`).
+enum RawTargets {
+    List(Vec<Target>),
+    Staged(StagedTargets),
+}
+
+impl Default for RawTargets {
+    fn default() -> Self {
+        RawTargets::List(Vec::new())
+    }
+}
+
+// Not `#[serde(untagged)]`: that would replace every error inside the
+// targets (unknown field, bad mask, ...) with "did not match any variant".
+impl<'de> Deserialize<'de> for RawTargets {
+    fn deserialize<D: serde::Deserializer<'de>>(de: D) -> std::result::Result<Self, D::Error> {
+        struct V;
+        impl<'de> serde::de::Visitor<'de> for V {
+            type Value = RawTargets;
+            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+                f.write_str("a list of [[targets]] or the tables targets.before_ai / ai / after_ai")
+            }
+            fn visit_seq<A: serde::de::SeqAccess<'de>>(
+                self,
+                seq: A,
+            ) -> std::result::Result<RawTargets, A::Error> {
+                Vec::<Target>::deserialize(serde::de::value::SeqAccessDeserializer::new(seq))
+                    .map(RawTargets::List)
+            }
+            fn visit_map<A: serde::de::MapAccess<'de>>(
+                self,
+                map: A,
+            ) -> std::result::Result<RawTargets, A::Error> {
+                StagedTargets::deserialize(serde::de::value::MapAccessDeserializer::new(map))
+                    .map(RawTargets::Staged)
+            }
+        }
+        de.deserialize_any(V)
+    }
+}
+
+/// The old shape, read only to be migrated.
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-pub struct Prefilter {
-    /// Mask of file names to match; `None` matches any file.
+struct StagedTargets {
+    #[serde(default)]
+    before_ai: Vec<StagedMaskTarget>,
+    #[serde(default)]
+    ai: Vec<StagedAiTarget>,
+    #[serde(default)]
+    after_ai: Vec<StagedMaskTarget>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedMaskTarget {
+    name: String,
+    #[serde(default)]
+    filters: Vec<StagedFilter>,
+    #[serde(default)]
+    outputs: Vec<Output>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedFilter {
+    #[serde(default)]
+    sources: Vec<String>,
     #[serde(default, rename = "match")]
-    pub matches: Option<MaskExpr>,
-    /// The prefilter does not match a file whose name matches any of these.
-    #[serde(default, skip_serializing_if = "MaskExpr::is_empty")]
-    pub exclude: MaskExpr,
+    matches: Option<MaskExpr>,
+    #[serde(default)]
+    exclude: MaskExpr,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedAiTarget {
+    name: String,
+    #[serde(default)]
+    sources: Vec<String>,
+    #[serde(default)]
+    prefilter: Option<StagedPrefilter>,
+    description: String,
+    #[serde(default)]
+    outputs: Vec<Output>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StagedPrefilter {
+    #[serde(default, rename = "match")]
+    matches: Option<MaskExpr>,
+    #[serde(default)]
+    exclude: MaskExpr,
+}
+
+impl StagedTargets {
+    /// `before_ai`, `ai`, `after_ai`, in that order; an AI target becomes
+    /// one filter `{ sources, match/exclude of the prefilter, ai }`.
+    fn into_list(self) -> Vec<Target> {
+        let mask = |m: StagedMaskTarget| Target {
+            name: m.name,
+            kind: TargetKind::Folders,
+            filters: m
+                .filters
+                .into_iter()
+                .map(|f| Filter {
+                    sources: f.sources,
+                    matches: f.matches,
+                    exclude: f.exclude,
+                    ..Filter::default()
+                })
+                .collect(),
+            outputs: m.outputs,
+        };
+        let ai = |a: StagedAiTarget| {
+            let (matches, exclude) = a
+                .prefilter
+                .map(|p| (p.matches, p.exclude))
+                .unwrap_or_default();
+            Target {
+                name: a.name,
+                kind: TargetKind::Folders,
+                filters: vec![Filter {
+                    sources: a.sources,
+                    matches,
+                    exclude,
+                    ai: Some(a.description),
+                    expand: None,
+                }],
+                outputs: a.outputs,
+            }
+        };
+        let mut out: Vec<Target> = self.before_ai.into_iter().map(mask).collect();
+        out.extend(self.ai.into_iter().map(ai));
+        out.extend(self.after_ai.into_iter().map(mask));
+        out
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -785,6 +1001,15 @@ impl Config {
                 }
                 m.push_str(&crate::t!("config.hint_kinds"));
             }
+            if ["before_ai", "ai", "after_ai"]
+                .iter()
+                .any(|k| m.contains(&format!("unknown field `{k}`")))
+            {
+                if !m.ends_with('\n') {
+                    m.push('\n');
+                }
+                m.push_str(&crate::t!("config.hint_mixed_targets"));
+            }
             if m.contains("unknown field `name`, expected") {
                 let hint = if m.contains("`rename`") {
                     crate::t!("config.hint_name_rename")
@@ -825,6 +1050,16 @@ impl Config {
             .and_then(|()| c.check_name_templates())
             .map_err(|m| Error::Config(format!("{}: {m}", path.display())))?;
         Ok(c)
+    }
+
+    /// A target by name.
+    pub fn target(&self, name: &str) -> Option<&Target> {
+        self.targets.iter().find(|t| t.name == name)
+    }
+
+    /// Some target asks the AI.
+    pub fn has_ai(&self) -> bool {
+        self.targets.iter().any(Target::has_ai)
     }
 
     /// A name preset by name: the user's own, else a built-in.
@@ -1068,10 +1303,9 @@ impl Config {
                 self.check_mask_refs(&crate::t!("config.who_content_preset", name = name), m)?;
             }
         }
-        let t = &self.targets;
-        for m in t.before_ai.iter().chain(&t.after_ai) {
-            for f in &m.filters {
-                let whose = crate::t!("config.who_target", name = m.name);
+        for t in &self.targets {
+            let whose = crate::t!("config.who_target", name = t.name);
+            for f in &t.filters {
                 if !f.exclude.is_empty() {
                     self.check_veto_mask(
                         &crate::t!("config.who_filter", whose = whose),
@@ -1083,35 +1317,13 @@ impl Config {
                     self.check_mask_refs(&whose, n)?;
                 }
             }
-        }
-        for a in &t.ai {
-            let whose = crate::t!("config.who_target", name = a.name);
-            if let Some(p) = &a.prefilter {
-                if !p.exclude.is_empty() {
-                    self.check_veto_mask(
-                        &crate::t!("config.who_prefilter", whose = whose),
-                        "exclude",
-                        &p.exclude,
-                    )?;
-                }
-                if let Some(n) = &p.matches {
-                    self.check_mask_refs(&whose, n)?;
-                }
-            }
-        }
-        for (name, outputs) in t
-            .before_ai
-            .iter()
-            .chain(&t.after_ai)
-            .map(|m| (&m.name, &m.outputs))
-            .chain(t.ai.iter().map(|a| (&a.name, &a.outputs)))
-        {
-            let steps = outputs
+            let steps = t
+                .outputs
                 .iter()
                 .flat_map(|o| o.content.iter().chain(&o.rename));
             for st in steps {
                 if let Some(m) = &st.mask {
-                    self.check_mask_refs(&crate::t!("config.who_target", name = name), m)?;
+                    self.check_mask_refs(&whose, m)?;
                 }
             }
         }
@@ -1145,7 +1357,8 @@ impl Config {
     }
 
     /// Check cross-references: unique target names, known sources and presets,
-    /// non-empty AI descriptions; and safe name templates.
+    /// non-empty AI descriptions, no `expand` with `ai`, no outputs on
+    /// `trash`/`keep` targets; and safe name templates.
     pub fn validate(&self) -> Result<()> {
         self.check_builtin_clash().map_err(Error::Config)?;
         self.check_name_templates().map_err(Error::Config)?;
@@ -1176,35 +1389,37 @@ impl Config {
         };
 
         let mut seen = BTreeSet::new();
-        let t = &self.targets;
-        let mask_targets = t.before_ai.iter().chain(&t.after_ai);
-        for m in mask_targets {
-            if !seen.insert(m.name.as_str()) {
+        for t in &self.targets {
+            let name = t.name.as_str();
+            if !seen.insert(name) {
                 return Err(Error::Config(crate::t!(
                     "config.duplicate_target",
-                    name = m.name
+                    name = name
                 )));
             }
-            for f in &m.filters {
-                check_sources(&m.name, &f.sources)?;
+            for f in &t.filters {
+                check_sources(name, &f.sources)?;
+                if f.ai.as_ref().is_some_and(|d| d.trim().is_empty()) {
+                    return Err(Error::Config(crate::t!(
+                        "config.empty_description",
+                        name = name
+                    )));
+                }
+                if f.ai.is_some() && f.expand.is_some() {
+                    return Err(Error::Config(crate::t!(
+                        "config.expand_with_ai",
+                        name = name
+                    )));
+                }
             }
-            check_outputs(&m.name, &m.outputs)?;
-        }
-        for a in &t.ai {
-            if !seen.insert(a.name.as_str()) {
+            if !t.kind.is_folders() && !t.outputs.is_empty() {
                 return Err(Error::Config(crate::t!(
-                    "config.duplicate_target",
-                    name = a.name
+                    "config.kind_has_outputs",
+                    name = name,
+                    kind = t.kind.as_str()
                 )));
             }
-            check_sources(&a.name, &a.sources)?;
-            if a.description.trim().is_empty() {
-                return Err(Error::Config(crate::t!(
-                    "config.empty_description",
-                    name = a.name
-                )));
-            }
-            check_outputs(&a.name, &a.outputs)?;
+            check_outputs(name, &t.outputs)?;
         }
         Ok(())
     }
@@ -1302,10 +1517,23 @@ rename = [{ mask = "*", preset = "capture-date" }]
     fn example_config_loads() {
         let c = example();
         assert!(c.sources.len() >= 2);
-        assert!(!c.targets.before_ai.is_empty());
-        assert!(!c.targets.ai.is_empty());
-        assert!(!c.targets.after_ai.is_empty());
-        let all = c.targets.after_ai.iter().flat_map(|t| &t.outputs);
+        // Still the old shape: it doubles as a migration fixture.
+        assert!(c.was_staged);
+        let names: Vec<_> = c.targets.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Screenshots",
+                "Screenshots and screen recordings",
+                "TikTok",
+                "Documents",
+                "Receipts",
+                "Timeline"
+            ]
+        );
+        assert!(c.target("Documents").unwrap().has_ai());
+        assert!(!c.target("Timeline").unwrap().has_ai());
+        let all = c.target("Timeline").unwrap().outputs.iter();
         assert!(all.clone().any(|o| o.content.is_empty()));
         let camera = c.sources.iter().find(|s| s.id == "camera").unwrap();
         assert!(camera.ai_prefix.as_deref().unwrap().contains("phone"));
@@ -1379,12 +1607,7 @@ rename = [{ mask = "*", preset = "capture-date" }]
     #[test]
     fn example_screenshots_are_renamed_in_place() {
         let c = example();
-        let t = c
-            .targets
-            .before_ai
-            .iter()
-            .find(|t| t.name == "Screenshots")
-            .unwrap();
+        let t = c.target("Screenshots").unwrap();
         let src = c.sources.iter().find(|s| s.id == "screenshots").unwrap();
         assert_eq!(t.outputs.len(), 1);
         let o = &t.outputs[0];
@@ -1396,12 +1619,7 @@ rename = [{ mask = "*", preset = "capture-date" }]
         // Files already named by date still go into their folders.
         assert!(f.exclude.is_empty());
         // Screenshots among camera photos still get a processed copy and a backup.
-        let other = c
-            .targets
-            .before_ai
-            .iter()
-            .find(|t| t.name == "Screenshots and screen recordings")
-            .unwrap();
+        let other = c.target("Screenshots and screen recordings").unwrap();
         assert_eq!(other.filters.len(), 1);
         let f = &other.filters[0];
         let n = f.matches.as_ref().unwrap();
@@ -1507,7 +1725,7 @@ rename = [{ mask = "*", preset = "capture-date" }]
     #[test]
     fn new_match_and_rename_keys_parse() {
         let c = load_str(&short_form_config("", "[]", r#"["capture-date"]"#)).unwrap();
-        let t = &c.targets.after_ai[0];
+        let t = &c.targets[0];
         assert!(t.filters[0].matches.is_some());
         assert_eq!(t.outputs[0].rename.len(), 1);
     }
@@ -1520,6 +1738,184 @@ rename = [{ mask = "*", preset = "capture-date" }]
             // The error points to what replaced it.
             assert!(m.contains("ai_prefix"), "{m}");
         }
+    }
+
+    const TWO_SOURCES: &str = "[[sources]]\nid = \"cam\"\npath = \"/x\"\n";
+
+    #[test]
+    fn old_stage_shape_migrates_in_order() {
+        // Written in the file out of order: the stages decide the order.
+        let text = format!(
+            r#"{TWO_SOURCES}
+[[targets.after_ai]]
+name = "B"
+[[targets.after_ai.filters]]
+sources = ["cam"]
+
+[[targets.ai]]
+name = "D"
+sources = ["cam"]
+description = "docs"
+[targets.ai.prefilter]
+match = "@photo"
+exclude = "skip*"
+
+[[targets.before_ai]]
+name = "A"
+[[targets.before_ai.filters]]
+sources = ["cam"]
+match = "*.png"
+"#
+        );
+        let c = load_str(&text).unwrap();
+        let names: Vec<_> = c.targets.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["A", "D", "B"]);
+        assert!(c.was_staged);
+        let d = c.target("D").unwrap();
+        assert_eq!(d.kind, TargetKind::Folders);
+        assert_eq!(d.filters.len(), 1);
+        let f = &d.filters[0];
+        assert_eq!(f.sources, ["cam"]);
+        assert_eq!(f.matches, Some(MaskExpr::parse("@photo").unwrap()));
+        assert_eq!(f.exclude, MaskExpr::parse("skip*").unwrap());
+        assert_eq!(f.ai.as_deref(), Some("docs"));
+        assert_eq!(f.expand, None);
+        let a = c.target("A").unwrap();
+        assert_eq!(a.filters[0].ai, None);
+        assert!(c.target("nope").is_none());
+        c.validate().unwrap();
+        // Saved again it is the new shape, same order.
+        let text = toml::to_string(&c).unwrap();
+        assert!(
+            !text.contains("before_ai") && text.contains("[[targets]]"),
+            "{text}"
+        );
+        let again = load_str(&text).unwrap();
+        assert!(!again.was_staged);
+        let names: Vec<_> = again.targets.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(names, ["A", "D", "B"]);
+        assert_eq!(
+            again.target("D").unwrap().filters[0].ai.as_deref(),
+            Some("docs")
+        );
+    }
+
+    #[test]
+    fn ai_target_without_prefilter_matches_every_name() {
+        let c = load_str(&format!(
+            "{TWO_SOURCES}[[targets.ai]]\nname = \"D\"\nsources = [\"cam\"]\ndescription = \"docs\"\n"
+        ))
+        .unwrap();
+        let f = &c.targets[0].filters[0];
+        assert_eq!((&f.matches, f.exclude.is_empty()), (&None, true));
+    }
+
+    #[test]
+    fn new_shape_parses_kinds() {
+        let text = format!(
+            r#"{TWO_SOURCES}
+[places]
+home = {{ lat = 47.0245, lon = 28.8323, km = 2 }}
+
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["cam"]
+
+[[targets]]
+name = "Home"
+kind = "keep"
+[[targets.filters]]
+sources = ["cam"]
+match = "*.png"
+
+[[targets]]
+name = "Docs"
+[[targets.filters]]
+sources = ["cam"]
+ai = "documents"
+[[targets.outputs]]
+dir = "/o"
+"#
+        );
+        let c = load_str(&text).unwrap();
+        assert!(!c.was_staged);
+        let kinds: Vec<_> = c.targets.iter().map(|t| t.kind).collect();
+        assert_eq!(
+            kinds,
+            [TargetKind::Trash, TargetKind::Keep, TargetKind::Folders]
+        );
+        assert_eq!(
+            c.places["home"],
+            Place {
+                lat: 47.0245,
+                lon: 28.8323,
+                km: 2.0
+            }
+        );
+        c.validate().unwrap();
+        assert!(c.target("Docs").unwrap().has_ai());
+
+        let bad = text.replace(
+            "kind = \"trash\"\n",
+            "kind = \"trash\"\n[[targets.outputs]]\ndir = \"/o\"\n",
+        );
+        let m = load_str(&bad).unwrap().validate().unwrap_err().to_string();
+        assert!(m.contains("outputs"), "{m}");
+        assert!(m.contains("Duplicates"), "{m}");
+        let m = parse_err(&text.replace("\"keep\"", "\"bin\""));
+        assert!(m.contains("bin"), "{m}");
+    }
+
+    #[test]
+    fn expand_with_ai_is_an_error() {
+        let base = format!(
+            "{TWO_SOURCES}[[targets]]\nname = \"T\"\n[[targets.filters]]\nsources = [\"cam\"]\nexpand = \"event\"\n"
+        );
+        let c = load_str(&base).unwrap();
+        assert_eq!(c.targets[0].filters[0].expand, Some(Expand::Event));
+        c.validate().unwrap();
+        let m = load_str(&format!("{base}ai = \"docs\"\n"))
+            .unwrap()
+            .validate()
+            .unwrap_err()
+            .to_string();
+        assert!(
+            m.contains("expand") && m.contains("ai") && m.contains("T"),
+            "{m}"
+        );
+    }
+
+    #[test]
+    fn blank_ai_description_is_an_error() {
+        let c = load_str(&format!(
+            "{TWO_SOURCES}[[targets]]\nname = \"T\"\n[[targets.filters]]\nsources = [\"cam\"]\nai = \" \"\n"
+        ))
+        .unwrap();
+        assert!(c.validate().unwrap_err().to_string().contains("T"));
+    }
+
+    #[test]
+    fn mixing_old_and_new_shape_is_an_error() {
+        let new = "[[targets]]\nname = \"A\"\n";
+        let old = "[[targets.before_ai]]\nname = \"B\"\n";
+        // Old after new nests into the last new target; new after old is
+        // not even valid TOML. Both refuse to load.
+        let m = parse_err(&format!("{new}{old}"));
+        assert!(m.contains("before_ai"), "{m}");
+        assert!(m.contains("[[targets]]"), "{m}");
+        let m = parse_err(&format!("{old}{new}"));
+        assert!(m.contains("targets"), "{m}");
+    }
+
+    #[test]
+    fn unknown_filter_field_is_rejected_in_the_new_shape() {
+        let m = parse_err(
+            "[[targets]]\nname = \"t\"\n[[targets.filters]]\nmatch = \"*\"\nkinds = [\"photo\"]\n",
+        );
+        assert!(m.contains("`kinds`"), "{m}");
+        assert!(m.contains("match = \"@photo\""), "{m}");
     }
 
     fn parse_err(text: &str) -> String {
@@ -1640,28 +2036,28 @@ rename = [{ mask = "*", preset = "capture-date" }]
     #[test]
     fn validate_rejects_duplicate_target_name() {
         let mut c = example();
-        let dup = c.targets.before_ai[0].clone();
-        c.targets.after_ai.push(dup.clone());
+        let dup = c.targets[0].clone();
+        c.targets.push(dup.clone());
         assert!(err(&c).contains(&dup.name));
     }
 
     #[test]
     fn validate_rejects_unknown_source() {
         let mut c = example();
-        c.targets.before_ai[0].filters[0].sources = vec!["nope".into()];
+        c.targets[0].filters[0].sources = vec!["nope".into()];
         assert!(err(&c).contains("nope"));
         let mut c = example();
-        c.targets.ai[0].sources = vec!["nope2".into()];
+        c.targets[3].filters[0].sources = vec!["nope2".into()];
         assert!(err(&c).contains("nope2"));
     }
 
     #[test]
     fn validate_rejects_unknown_presets() {
         let mut c = example();
-        c.targets.after_ai[0].outputs[0].content[0].preset = "ghost".into();
+        c.targets[5].outputs[0].content[0].preset = "ghost".into();
         assert!(err(&c).contains("ghost"));
         let mut c = example();
-        c.targets.after_ai[0].outputs[0].rename.push(PipeStep {
+        c.targets[5].outputs[0].rename.push(PipeStep {
             mask: Some(MaskExpr::parse("*").unwrap()),
             preset: "ghost2".into(),
         });
@@ -1671,8 +2067,8 @@ rename = [{ mask = "*", preset = "capture-date" }]
     #[test]
     fn validate_rejects_empty_ai_description() {
         let mut c = example();
-        c.targets.ai[0].description = "  ".into();
-        assert!(err(&c).contains(&c.targets.ai[0].name));
+        c.targets[3].filters[0].ai = Some("  ".into());
+        assert!(err(&c).contains(&c.targets[3].name));
     }
 
     /// The effective mask of a content step, as the plan resolves it.
@@ -1712,7 +2108,7 @@ rename = {name}
         ))
         .unwrap();
         c.validate().unwrap();
-        let o = &c.targets.after_ai[0].outputs[0];
+        let o = &c.targets[0].outputs[0];
         assert!(o.content.iter().all(|s| s.mask.is_none()));
         let photo = content_mask(&c, &o.content[1]);
         assert!(photo.matches("a.HEIC", &c) && photo.matches("b.jpg", &c));
@@ -1730,7 +2126,7 @@ rename = {name}
             "[]",
         ))
         .unwrap();
-        let o = &c.targets.after_ai[0].outputs[0];
+        let o = &c.targets[0].outputs[0];
         let m = content_mask(&c, &o.content[0]);
         assert!(m.matches("a.png", &c) && !m.matches("a.jpg", &c));
         assert!(o.content[1].mask.is_none());
@@ -1745,7 +2141,7 @@ rename = {name}
         ))
         .unwrap();
         c.validate().unwrap();
-        let o = &c.targets.after_ai[0].outputs[0];
+        let o = &c.targets[0].outputs[0];
         let m = content_mask(&c, &o.content[0]);
         assert!(m.matches("x.TIFF", &c) && !m.matches("x.jpg", &c));
         let nm = c.name_preset("nm").unwrap().mask_or_default();
@@ -1785,8 +2181,8 @@ rename = {name}
         assert!(!text.contains("preset = \"meta-full\""), "{text}");
         assert!(text.contains("\"capture-date\""), "{text}");
         let back: Config = toml::from_str(&text).unwrap();
-        let o = &back.targets.after_ai[0].outputs[0];
-        assert_eq!(o.content, c.targets.after_ai[0].outputs[0].content);
+        let o = &back.targets[0].outputs[0];
+        assert_eq!(o.content, c.targets[0].outputs[0].content);
         assert!(o.content[0].mask.is_none() && o.content[1].mask.is_some());
     }
 
@@ -1824,7 +2220,7 @@ content = [{step}]
     fn mask_reference_resolves() {
         let c = load_str(&masks_config("", r#"match = "@photo""#, r#""avif-high""#)).unwrap();
         c.validate().unwrap();
-        let f = &c.targets.after_ai[0].filters[0];
+        let f = &c.targets[0].filters[0];
         let n = f.matches.as_ref().unwrap();
         assert!(n.matches("a.WEBP", &c) && n.matches("b.tiff", &c));
         assert!(!n.matches("c.mp4", &c));
@@ -1840,7 +2236,7 @@ exclude = ["@raw", "*.tmp.*"]"#,
         ))
         .unwrap();
         c.validate().unwrap();
-        let f = &c.targets.after_ai[0].filters[0];
+        let f = &c.targets[0].filters[0];
         let n = f.matches.as_ref().unwrap();
         assert!(n.matches("a.jpg", &c) && n.matches("b.MOV", &c) && n.matches("c.txt", &c));
         assert!(!n.matches("d.png", &c));
@@ -1857,7 +2253,7 @@ exclude = ["@raw", "*.tmp.*"]"#,
         ))
         .unwrap();
         c.validate().unwrap();
-        let n = c.targets.after_ai[0].filters[0].matches.clone().unwrap();
+        let n = c.targets[0].filters[0].matches.clone().unwrap();
         assert!(n.matches("Screenshot_1.PNG", &c) && n.matches("v.mkv", &c));
         assert!(!n.matches("IMG_1.jpg", &c));
         // A built-in one is nested too: media = photo + video + png.
@@ -1935,7 +2331,7 @@ exclude = ["@raw", "*.tmp.*"]"#,
         .unwrap();
         let m = err(&c);
         assert!(
-            m.contains("prefilter") && m.contains("exclude") && m.contains("'!@raw'"),
+            m.contains("filter") && m.contains("exclude") && m.contains("'!@raw'"),
             "{m}"
         );
         let mut c = Config::default();
@@ -2007,16 +2403,13 @@ exclude = ["@raw", "*.tmp.*"]"#,
         let text = toml::to_string(&c).unwrap();
         let back: Config = toml::from_str(&text).unwrap();
         assert_eq!(back.masks, c.masks);
-        let (f, g) = (
-            &back.targets.after_ai[0].filters[0],
-            &c.targets.after_ai[0].filters[0],
-        );
+        let (f, g) = (&back.targets[0].filters[0], &c.targets[0].filters[0]);
         assert_eq!(f.matches, g.matches);
         assert_eq!(f.exclude, g.exclude);
         assert_eq!(f.exclude.source(), "@raw");
         assert_eq!(
-            back.targets.after_ai[0].outputs[0].content,
-            c.targets.after_ai[0].outputs[0].content
+            back.targets[0].outputs[0].content,
+            c.targets[0].outputs[0].content
         );
         assert!(text.contains("\"@shots\""), "{text}");
     }

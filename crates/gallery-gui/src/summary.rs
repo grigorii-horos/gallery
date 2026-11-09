@@ -1,9 +1,7 @@
 //! `load_config`: a read-only JSON summary of a config for the UI.
 
 use crate::presets::{MaskInfo, PresetInfo, content_infos, mask_infos, name_infos};
-use gallery_core::config::{
-    AiTarget, Config, InputFilter, MaskTarget, Output, PipeStep, Prefilter, Source,
-};
+use gallery_core::config::{Config, Filter, Output, PipeStep, Source, Target};
 use gallery_core::mask::MaskExpr;
 use serde::Serialize;
 use std::path::Path;
@@ -109,21 +107,7 @@ pub fn summarize(cfg: &Config, path: &Path) -> ConfigSummary {
         error,
         warnings: cfg.warnings(),
         sources: cfg.sources.iter().map(source).collect(),
-        targets: TargetsSummary {
-            before_ai: cfg
-                .targets
-                .before_ai
-                .iter()
-                .map(|t| mask_target(t, "before_ai"))
-                .collect(),
-            ai: cfg.targets.ai.iter().map(ai_target).collect(),
-            after_ai: cfg
-                .targets
-                .after_ai
-                .iter()
-                .map(|t| mask_target(t, "after_ai"))
-                .collect(),
-        },
+        targets: targets(cfg),
         presets: UserPresets {
             name: name_infos(&cfg.name_presets, cfg),
             content: content_infos(&cfg.content_presets, cfg),
@@ -153,7 +137,29 @@ fn mask_str(m: &MaskExpr) -> Option<String> {
     (!m.is_empty()).then(|| m.source())
 }
 
-fn filter(f: &InputFilter) -> FilterSummary {
+/// The ordered list in the old three-stage JSON shape the UI still reads
+/// (TEMPORARY, until the GUI rework): AI targets, mask targets before the
+/// first of them, and mask targets after it.
+fn targets(cfg: &Config) -> TargetsSummary {
+    let cut = gallery_core::route::ai_cut(cfg);
+    let mut out = TargetsSummary {
+        before_ai: Vec::new(),
+        ai: Vec::new(),
+        after_ai: Vec::new(),
+    };
+    for (i, t) in cfg.targets.iter().enumerate() {
+        if t.has_ai() {
+            out.ai.push(ai_target(t));
+        } else if i < cut {
+            out.before_ai.push(mask_target(t, "before_ai"));
+        } else {
+            out.after_ai.push(mask_target(t, "after_ai"));
+        }
+    }
+    out
+}
+
+fn filter(f: &Filter) -> FilterSummary {
     FilterSummary {
         sources: f.sources.clone(),
         matches: f.matches.as_ref().map(MaskExpr::source),
@@ -161,12 +167,13 @@ fn filter(f: &InputFilter) -> FilterSummary {
     }
 }
 
-fn prefilter(p: &Prefilter) -> FilterSummary {
-    FilterSummary {
+/// The masks of an AI filter as the old prefilter; none when it has none.
+fn prefilter(f: &Filter) -> Option<FilterSummary> {
+    (f.matches.is_some() || !f.exclude.is_empty()).then(|| FilterSummary {
         sources: Vec::new(),
-        matches: p.matches.as_ref().map(MaskExpr::source),
-        exclude: mask_str(&p.exclude),
-    }
+        matches: f.matches.as_ref().map(MaskExpr::source),
+        exclude: mask_str(&f.exclude),
+    })
 }
 
 fn steps(s: &[PipeStep]) -> Vec<StepSummary> {
@@ -187,7 +194,7 @@ fn output(o: &Output) -> OutputSummary {
     }
 }
 
-fn mask_target(t: &MaskTarget, stage: &'static str) -> TargetSummary {
+fn mask_target(t: &Target, stage: &'static str) -> TargetSummary {
     TargetSummary {
         name: t.name.clone(),
         stage,
@@ -199,14 +206,17 @@ fn mask_target(t: &MaskTarget, stage: &'static str) -> TargetSummary {
     }
 }
 
-fn ai_target(t: &AiTarget) -> TargetSummary {
+/// An AI target as the old shape had it: its first AI filter is the
+/// sources, description and prefilter (a migrated target has just that one).
+fn ai_target(t: &Target) -> TargetSummary {
+    let f = t.filters.iter().find(|f| f.ai.is_some());
     TargetSummary {
         name: t.name.clone(),
         stage: "ai",
         filters: Vec::new(),
-        sources: t.sources.clone(),
-        description: Some(t.description.clone()),
-        prefilter: t.prefilter.as_ref().map(prefilter),
+        sources: f.map(|f| f.sources.clone()).unwrap_or_default(),
+        description: f.and_then(|f| f.ai.clone()),
+        prefilter: f.and_then(prefilter),
         outputs: t.outputs.iter().map(output).collect(),
     }
 }

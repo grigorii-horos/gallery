@@ -71,7 +71,7 @@ pub fn scan_plan(
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<ScanOutcome> {
-    let ai = if opts.no_ai || cfg.targets.ai.is_empty() {
+    let ai = if opts.no_ai || !cfg.has_ai() {
         None
     } else {
         Some(AiClassifier::from_settings(&cfg.ai, tools.clone())?)
@@ -120,7 +120,7 @@ pub fn ai_dry_run(
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<AiDry> {
-    if cfg.targets.ai.is_empty() {
+    if !cfg.has_ai() {
         return Ok(AiDry::default());
     }
     cancel.check()?;
@@ -444,7 +444,7 @@ dir = "{out}/rest"
     #[test]
     fn ai_dry_run_without_ai_targets_scans_nothing() {
         let mut f = fixture();
-        f.cfg.targets.ai.clear();
+        f.cfg.targets.retain(|t| !t.has_ai());
         let rec = Recorder::default();
         let d = ai_dry_run(
             &f.cfg,

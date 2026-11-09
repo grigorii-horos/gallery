@@ -107,6 +107,29 @@ impl Stage {
     }
 }
 
+/// The ordered targets of a loaded config with the old stage and the index
+/// within it that the editor (still stage-based until the GUI rework) uses
+/// for them. TEMPORARY: see `gallery_core::route::ai_cut`.
+pub fn staged(
+    cfg: &gallery_core::config::Config,
+) -> impl Iterator<Item = (Stage, usize, &gallery_core::config::Target)> {
+    let cut = gallery_core::route::ai_cut(cfg);
+    let mut counts = [0usize; 3];
+    cfg.targets.iter().enumerate().map(move |(i, t)| {
+        let stage = if t.has_ai() {
+            Stage::Ai
+        } else if i < cut {
+            Stage::BeforeAi
+        } else {
+            Stage::AfterAi
+        };
+        let n = &mut counts[stage as usize];
+        let index = *n;
+        *n += 1;
+        (stage, index, t)
+    })
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TargetsDraft {
     pub before_ai: Vec<TargetDraft>,

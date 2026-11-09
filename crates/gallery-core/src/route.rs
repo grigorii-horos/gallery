@@ -1,8 +1,9 @@
-//! Three-stage routing: `before_ai` masks, one AI batch, `after_ai` masks.
+//! Routing over the ordered target list: mask targets decide at once, AI
+//! targets share one batch.
 
 use serde::{Deserialize, Serialize};
 
-use crate::config::{Config, InputFilter, MaskTarget, Prefilter};
+use crate::config::{Config, Filter, Target};
 use crate::mask::MaskExpr;
 use crate::overrides::{Action, Overrides};
 use crate::progress::{Cancel, NoProgress, Progress, ProgressEvent, Stage};
@@ -145,53 +146,69 @@ pub(crate) fn name_fit(
     }
 }
 
-pub(crate) fn filter_fit(cfg: &Config, f: &InputFilter, entry: &FileEntry) -> Fit {
+/// How a file fares against a filter's sources and masks only (its other
+/// conditions, e.g. `ai`, are not looked at).
+pub(crate) fn filter_fit(cfg: &Config, f: &Filter, entry: &FileEntry) -> Fit {
     if !f.sources.contains(&entry.source_id) {
         return Fit::No;
     }
     name_fit(cfg, &f.matches, &f.exclude, entry)
 }
 
-fn filter_matches(cfg: &Config, f: &InputFilter, entry: &FileEntry) -> bool {
+fn filter_matches(cfg: &Config, f: &Filter, entry: &FileEntry) -> bool {
     filter_fit(cfg, f, entry) == Fit::Match
 }
 
-pub(crate) fn prefilter_fit(cfg: &Config, p: &Option<Prefilter>, entry: &FileEntry) -> Fit {
-    match p {
-        None => Fit::Match,
-        Some(p) => name_fit(cfg, &p.matches, &p.exclude, entry),
-    }
-}
-
-fn prefilter_matches(cfg: &Config, p: &Option<Prefilter>, entry: &FileEntry) -> bool {
-    prefilter_fit(cfg, p, entry) == Fit::Match
-}
-
-/// Some mask filter or AI prefilter would take `entry` but for an exclude mask.
+/// Some filter would take `entry` but for an exclude mask.
 fn excluded_somewhere(cfg: &Config, entry: &FileEntry) -> bool {
-    let masks = cfg
-        .targets
-        .before_ai
+    cfg.targets
         .iter()
-        .chain(&cfg.targets.after_ai)
         .flat_map(|t| &t.filters)
-        .any(|f| filter_fit(cfg, f, entry) == Fit::Excluded);
-    masks
-        || cfg.targets.ai.iter().any(|t| {
-            t.sources.contains(&entry.source_id)
-                && prefilter_fit(cfg, &t.prefilter, entry) == Fit::Excluded
-        })
+        .any(|f| filter_fit(cfg, f, entry) == Fit::Excluded)
 }
 
+/// The first of `targets` with a non-AI filter that matches `entry`.
 fn first_mask_target<'a>(
     cfg: &Config,
-    targets: &'a [MaskTarget],
+    targets: &'a [Target],
     entry: &FileEntry,
 ) -> Option<&'a str> {
     targets
         .iter()
-        .find(|t| t.filters.iter().any(|f| filter_matches(cfg, f, entry)))
+        .find(|t| {
+            t.filters
+                .iter()
+                .any(|f| f.ai.is_none() && filter_matches(cfg, f, entry))
+        })
         .map(|t| t.name.as_str())
+}
+
+/// AI categories `entry` can reach: (target name, description) of every AI
+/// target with an AI filter whose sources and masks match; descriptions of
+/// several such filters of one target are joined with "; ".
+fn ai_categories(cfg: &Config, entry: &FileEntry) -> Vec<(String, String)> {
+    cfg.targets
+        .iter()
+        .filter_map(|t| {
+            let descs: Vec<&str> = t
+                .filters
+                .iter()
+                .filter(|f| filter_matches(cfg, f, entry))
+                .filter_map(|f| f.ai.as_deref())
+                .collect();
+            (!descs.is_empty()).then(|| (t.name.clone(), descs.join("; ")))
+        })
+        .collect()
+}
+
+/// Position of the first AI target (the list's length when there is none).
+/// TEMPORARY, until Task 5: routing decides the targets before it at once
+/// and the mask filters from it on after the one AI batch.
+pub fn ai_cut(cfg: &Config) -> usize {
+    cfg.targets
+        .iter()
+        .position(Target::has_ai)
+        .unwrap_or(cfg.targets.len())
 }
 
 fn mask_decision(name: &str) -> Decision {
@@ -201,9 +218,10 @@ fn mask_decision(name: &str) -> Decision {
     }
 }
 
-/// Route every file to a target: `before_ai`, then one AI batch for files
-/// with at least one candidate, then `after_ai`; otherwise `Excluded` when
-/// an exclude mask turned the file away, else `Unmatched`.
+/// Route every file to a target: mask targets before the first AI target,
+/// then one AI batch for files with at least one candidate, then the mask
+/// filters of the targets after it; otherwise `Excluded` when an exclude
+/// mask turned the file away, else `Unmatched`.
 pub fn route(
     cfg: &Config,
     files: &[FileEntry],
@@ -228,12 +246,7 @@ pub fn route_with(
 }
 
 pub(crate) fn target_known(cfg: &Config, name: &str) -> bool {
-    let t = &cfg.targets;
-    t.before_ai
-        .iter()
-        .chain(&t.after_ai)
-        .any(|m| m.name == name)
-        || t.ai.iter().any(|a| a.name == name)
+    cfg.target(name).is_some()
 }
 
 /// [`route_with`] where manual decisions come first: a fresh entry of
@@ -276,11 +289,18 @@ pub fn route_with_overrides(
         }
     }
 
+    // TEMPORARY (until Task 5's AI pause/resume): the list is cut at its
+    // first AI target. Targets before it decide at once, AI targets share
+    // one batch, and the non-AI filters of the targets from the cut on come
+    // last. For a config migrated from the three stages this is exactly
+    // `before_ai`, `ai`, `after_ai`.
+    let (before, rest) = cfg.targets.split_at(ai_cut(cfg));
+
     for (i, entry) in files.iter().enumerate() {
         if decisions[i].is_some() {
             continue;
         }
-        if let Some(name) = first_mask_target(cfg, &cfg.targets.before_ai, entry) {
+        if let Some(name) = first_mask_target(cfg, before, entry) {
             decisions[i] = Some(mask_decision(name));
         }
     }
@@ -292,15 +312,7 @@ pub fn route_with_overrides(
         if decisions[i].is_some() {
             continue;
         }
-        let categories: Vec<(String, String)> = cfg
-            .targets
-            .ai
-            .iter()
-            .filter(|t| {
-                t.sources.contains(&entry.source_id) && prefilter_matches(cfg, &t.prefilter, entry)
-            })
-            .map(|t| (t.name.clone(), t.description.clone()))
-            .collect();
+        let categories = ai_categories(cfg, entry);
         if !categories.is_empty() {
             idx.push(i);
             let source = cfg.sources.iter().find(|s| s.id == entry.source_id);
@@ -375,7 +387,7 @@ pub fn route_with_overrides(
         .zip(asked)
         .map(|((entry, d), asked)| {
             let d = d
-                .or_else(|| first_mask_target(cfg, &cfg.targets.after_ai, entry).map(mask_decision))
+                .or_else(|| first_mask_target(cfg, rest, entry).map(mask_decision))
                 .unwrap_or_else(|| {
                     if !asked && excluded_somewhere(cfg, entry) {
                         Decision::Excluded
@@ -396,7 +408,6 @@ pub fn route_with_overrides(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::config::AiTarget;
     use crate::mask::MaskItem;
     use crate::overrides::Action;
     use std::cell::RefCell;
@@ -412,27 +423,29 @@ mod tests {
         }
     }
 
-    fn mask_target(name: &str, src: &str, mask: &str) -> MaskTarget {
-        MaskTarget {
+    fn mask_target(name: &str, src: &str, mask: &str) -> Target {
+        Target {
             name: name.into(),
-            filters: vec![InputFilter {
+            kind: Default::default(),
+            filters: vec![Filter {
                 sources: vec![src.into()],
                 matches: Some(MaskExpr::parse(mask).unwrap()),
-                exclude: MaskExpr::default(),
+                ..Filter::default()
             }],
             outputs: vec![],
         }
     }
 
-    fn ai_target(name: &str, mask: Option<&str>) -> AiTarget {
-        AiTarget {
+    fn ai_target(name: &str, mask: Option<&str>) -> Target {
+        Target {
             name: name.into(),
-            sources: vec!["a".into()],
-            prefilter: Some(Prefilter {
+            kind: Default::default(),
+            filters: vec![Filter {
+                sources: vec!["a".into()],
                 matches: mask.map(|m| MaskExpr::parse(m).unwrap()),
-                exclude: MaskExpr::default(),
-            }),
-            description: format!("{name} desc"),
+                ai: Some(format!("{name} desc")),
+                ..Filter::default()
+            }],
             outputs: vec![],
         }
     }
@@ -473,12 +486,12 @@ mod tests {
         }
     }
 
-    fn cfg(before: Vec<MaskTarget>, ai: Vec<AiTarget>, after: Vec<MaskTarget>) -> Config {
-        let mut c = Config::default();
-        c.targets.before_ai = before;
-        c.targets.ai = ai;
-        c.targets.after_ai = after;
-        c
+    /// The three old stages, concatenated as a migrated config has them.
+    fn cfg(before: Vec<Target>, ai: Vec<Target>, after: Vec<Target>) -> Config {
+        Config {
+            targets: before.into_iter().chain(ai).chain(after).collect(),
+            ..Config::default()
+        }
     }
 
     fn target(name: &str, via: Via) -> Decision {
@@ -493,7 +506,7 @@ mod tests {
         let mut shots = mask_target("shots", "a", "*.png");
         shots.filters[0].exclude = MaskExpr::parse("2026*").unwrap();
         let mut ai = ai_target("cats", None);
-        ai.prefilter.as_mut().unwrap().exclude = MaskExpr::parse("skip*").unwrap();
+        ai.filters[0].exclude = MaskExpr::parse("skip*").unwrap();
         let c = cfg(
             vec![shots],
             vec![ai],
@@ -582,10 +595,51 @@ mod tests {
     }
 
     #[test]
+    fn ordered_list_cuts_at_the_first_ai_target() {
+        // A target with two AI filters, and a mask filter next to one of
+        // them: until Task 5 the mask filter only decides after the batch.
+        let mut docs = ai_target("docs", Some("*.jpg"));
+        let mut second = docs.filters[0].clone();
+        second.matches = Some(MaskExpr::parse("p*").unwrap());
+        second.ai = Some("papers".into());
+        docs.filters.push(second);
+        docs.filters.push(Filter {
+            sources: vec!["a".into()],
+            matches: Some(MaskExpr::parse("*.gif").unwrap()),
+            ..Filter::default()
+        });
+        let c = cfg(
+            vec![mask_target("pngs", "a", "*.png")],
+            vec![docs],
+            vec![mask_target("rest", "a", "*")],
+        );
+        let files = [
+            file("a", "p.png"),
+            file("a", "p.jpg"),
+            file("a", "q.jpg"),
+            file("a", "x.gif"),
+        ];
+        let fake = Fake::new(vec![ans(None, Confidence::Ok), ans(None, Confidence::Ok)]);
+        let r = route(&c, &files, &fake, false).unwrap();
+        let seen = fake.seen.borrow();
+        let cats: Vec<_> = seen.iter().map(|q| q.categories.clone()).collect();
+        assert_eq!(
+            cats,
+            [
+                vec![("docs".to_string(), "docs desc; papers".to_string())],
+                vec![("docs".to_string(), "docs desc".to_string())],
+            ]
+        );
+        assert_eq!(r[0].1, target("pngs", Via::Mask));
+        assert_eq!(r[1].1, target("rest", Via::Mask));
+        assert_eq!(r[3].1, target("docs", Via::Mask));
+    }
+
+    #[test]
     fn ai_request_carries_its_source_prompt() {
         use crate::config::Source;
         let mut c = cfg(vec![], vec![ai_target("cats", None)], vec![]);
-        c.targets.ai[0].sources = vec!["a".into(), "b".into()];
+        c.targets[0].filters[0].sources = vec!["a".into(), "b".into()];
         for (id, prefix, suffix) in [("a", Some("before"), Some("after")), ("b", None, None)] {
             c.sources.push(Source {
                 id: id.into(),
@@ -727,7 +781,7 @@ mod tests {
     #[test]
     fn unresolved_exclude_ref_fails_safe_to_excluded() {
         let mut t = ai_target("cats", None);
-        t.prefilter.as_mut().unwrap().exclude = MaskExpr::parse("@nope").unwrap();
+        t.filters[0].exclude = MaskExpr::parse("@nope").unwrap();
         let c = cfg(vec![], vec![t], vec![]);
         let fake = Fake::new(vec![]);
         let r = route(&c, &[file("a", "a.gif")], &fake, false).unwrap();
@@ -738,7 +792,7 @@ mod tests {
     #[test]
     fn exclude_mask_drops_file_from_ai_prefilter() {
         let mut t = ai_target("cats", None);
-        t.prefilter.as_mut().unwrap().exclude = MaskExpr::parse("*.gif").unwrap();
+        t.filters[0].exclude = MaskExpr::parse("*.gif").unwrap();
         let c = cfg(vec![], vec![t], vec![]);
         let fake = Fake::new(vec![ans(Some("cats"), Confidence::Ok)]);
         let r = route(&c, &[file("a", "a.gif"), file("a", "b.jpg")], &fake, false).unwrap();
