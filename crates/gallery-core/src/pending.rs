@@ -143,6 +143,8 @@ fn state_key(
         .ok()
         .and_then(|m| scan::mtime_ns(&m).ok().map(|t| (m.len(), t)));
     h.update(format!("{cache_meta:?}\n").as_bytes());
+    // Files apply found no smaller are planned as unchanged.
+    h.update(format!("{:?}\n", crate::incompressible::stamp()).as_bytes());
     for f in files {
         h.update(
             format!(

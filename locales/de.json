@@ -134,6 +134,7 @@
   "apply.exif_not_read": "EXIF nicht gelesen: %{error}; Quelle unangetastet",
   "apply.earlier_failed": "übersprungen: Eine frühere Ausgabe ist fehlgeschlagen",
   "apply.kept_in_place": "an Ort und Stelle belassen: Die Quelle hat bereits diesen Namen",
+  "apply.already_smallest": "schon so klein wie möglich — unverändert gelassen",
   "apply.ai_meta_unwritable": "exiftool schreibt %{container} nicht: KI-Schlagwörter nicht geschrieben",
   "apply.ai_meta_failed": "KI-Schlagwörter nicht geschrieben: %{error}",
   "apply.discrepancy_allowed": "Abweichung zugelassen: %{message}",

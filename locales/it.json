@@ -136,6 +136,7 @@
   "apply.exif_not_read": "EXIF non letto: %{error}; origine intatta",
   "apply.earlier_failed": "saltato: un’uscita precedente è fallita",
   "apply.kept_in_place": "lasciato al suo posto: l’origine ha già questo nome",
+  "apply.already_smallest": "già il più piccolo possibile — lasciato com’è",
   "apply.ai_meta_unwritable": "exiftool non scrive %{container}: parole chiave dell’IA non scritte",
   "apply.ai_meta_failed": "parole chiave dell’IA non scritte: %{error}",
   "apply.discrepancy_allowed": "discrepanza consentita: %{message}",

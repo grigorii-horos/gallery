@@ -136,6 +136,7 @@
   "apply.exif_not_read": "EXIF necitit: %{error}; sursa a rămas neatinsă",
   "apply.earlier_failed": "omis: o ieșire anterioară a eșuat",
   "apply.kept_in_place": "lăsat pe loc: sursa are deja acest nume",
+  "apply.already_smallest": "deja cât se poate de mic — lăsat așa cum este",
   "apply.ai_meta_unwritable": "exiftool nu scrie %{container}: cuvintele cheie ale IA nu au fost scrise",
   "apply.ai_meta_failed": "cuvintele cheie ale IA nu au fost scrise: %{error}",
   "apply.discrepancy_allowed": "diferență permisă: %{message}",

@@ -136,6 +136,7 @@
   "apply.exif_not_read": "EXIF no leído: %{error}; origen sin tocar",
   "apply.earlier_failed": "omitido: falló una salida anterior",
   "apply.kept_in_place": "dejado en su sitio: el origen ya tiene este nombre",
+  "apply.already_smallest": "ya es lo más pequeño posible — se deja como está",
   "apply.ai_meta_unwritable": "exiftool no escribe %{container}: palabras clave de la IA no escritas",
   "apply.ai_meta_failed": "palabras clave de la IA no escritas: %{error}",
   "apply.discrepancy_allowed": "discrepancia permitida: %{message}",

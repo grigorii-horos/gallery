@@ -13,6 +13,7 @@ pub mod exif;
 pub mod explain;
 pub mod filter;
 pub mod i18n;
+pub mod incompressible;
 pub mod learn;
 pub mod lock;
 pub mod mask;
