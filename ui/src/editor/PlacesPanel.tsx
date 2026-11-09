@@ -27,9 +27,9 @@ function PlaceFields({
   const [problem, setProblem] = useState<string | null>(null);
   const fromPhoto = async () => {
     setProblem(null);
-    const file = await pickMediaFile(t("place_from_photo_title"));
-    if (!file) return;
     try {
+      const file = await pickMediaFile(t("place_from_photo_title"));
+      if (!file) return;
       const { lat, lon } = await gpsOf(file);
       onChange({ ...place, lat: String(lat), lon: String(lon) });
     } catch (e) {
@@ -63,6 +63,8 @@ const toText = (p: PlaceDraft) => ({ name: p.name, lat: String(p.lat), lon: Stri
 function PlaceRow({ place, editor }: { place: PlaceDraft; editor: ConfigEditor }) {
   const { t } = useTranslation();
   const [form, setForm] = useState(toText(place));
+  // A coordinate or radius that is not a number is not saved: say so.
+  const invalid = num(form.lat) === null || num(form.lon) === null || num(form.km) === null;
   return (
     <li className="place-row">
       <PlaceFields
@@ -76,6 +78,11 @@ function PlaceRow({ place, editor }: { place: PlaceDraft; editor: ConfigEditor }
           if (lat !== null && lon !== null && km !== null) editor.edit({ op: "set_place", name: place.name, place: { lat, lon, km } });
         }}
       />
+      {invalid && (
+        <p role="alert" className="bad-text small">
+          {t("place_invalid")}
+        </p>
+      )}
       <button type="button" className="link small danger" aria-label={t("place_remove", { name: place.name })} onClick={() => void editor.editNow({ op: "remove_place", name: place.name })}>
         {t("place_remove_short")}
       </button>

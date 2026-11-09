@@ -1,6 +1,6 @@
 import { useTranslation } from "react-i18next";
 import { Field } from "../fields";
-import { NotToggle, ValueToggles, asObj, strList, withKey, type CondFormProps } from "./shared";
+import { NotToggle, ValueToggles, asObj, strList, type CondFormProps } from "./shared";
 
 const SCOPES = ["sources", "outputs"];
 
@@ -19,7 +19,8 @@ export function DuplicateCondition({ value, onChange }: CondFormProps) {
             ["outputs", t("dup_outputs")],
           ]}
           value={of}
-          onChange={(l) => onChange(withKey(o, "of", SCOPES.filter((s) => l.includes(s))))}
+          // Kept even when empty: dropping the key would bring the default back.
+          onChange={(l) => onChange({ ...o, of: SCOPES.filter((s) => l.includes(s)) })}
         />
       </Field>
       <NotToggle o={o} onChange={onChange} />

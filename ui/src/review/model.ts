@@ -159,6 +159,24 @@ export function groupEvents(items: ReviewItem[], gap = EVENT_GAP_S): EventGroup[
   return out;
 }
 
+/**
+ * What an event block shows: the series cards and ordinary series with a
+ * file in the event (a card is shown in every event its members belong to,
+ * whole), and the number of distinct files that are then on screen.
+ */
+export function eventContents(
+  ev: EventGroup,
+  cards: SeriesReviewGroup[],
+  series: Series[],
+): { cards: SeriesReviewGroup[]; series: Series[]; files: number } {
+  const inEvent = new Set(ev.items.map((i) => i.source));
+  const hit = (items: ReviewItem[]) => items.some((i) => inEvent.has(i.source));
+  const shownCards = cards.filter((g) => hit(g.items));
+  const shownSeries = series.filter((s) => hit(s.items));
+  const files = new Set([...inEvent, ...shownCards.flatMap((g) => g.items.map((i) => i.source)), ...shownSeries.flatMap((s) => s.items.map((i) => i.source))]);
+  return { cards: shownCards, series: shownSeries, files: files.size };
+}
+
 /** First capture time and the seconds the series spans; null when undated. */
 export function seriesSpan(s: Series): { start: string; seconds: number } | null {
   const first = s.items[0]?.captured;

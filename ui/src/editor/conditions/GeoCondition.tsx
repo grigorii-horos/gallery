@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Field } from "../fields";
 import { NotToggle, OptNumber, ValueToggles, asObj, oneOrList, strList, type CondFormProps, type Raw } from "./shared";
@@ -10,18 +11,26 @@ function placeNames(v: unknown): { names: string[]; negated: boolean } {
   return { names: items.map((s) => s.replace(/^!?@/, "")), negated: items.length > 0 && items.every((s) => s.startsWith("!")) };
 }
 
-const modeOf = (v: unknown): Mode => {
+/** The mode a value shows; `null` for a table with no circle or GPS key (a circle just cleared). */
+const modeOf = (v: unknown): Mode | null => {
   const o = asObj(v);
   if (typeof v === "string" || Array.isArray(v)) return "places";
-  return "lat" in o || "lon" in o || "km" in o ? "circle" : "gps";
+  if ("lat" in o || "lon" in o || "km" in o) return "circle";
+  return "has_gps" in o ? "gps" : null;
 };
 
 export function GeoCondition({ value, onChange, ctx }: CondFormProps) {
   const { t } = useTranslation();
-  const mode = modeOf(value);
+  // A circle with every number cleared has no keys left to tell it from the
+  // GPS form: it stays in the mode it was in.
+  const [kept, setKept] = useState<Mode>(modeOf(value) ?? "gps");
+  const shown = modeOf(value);
+  if (shown && shown !== kept) setKept(shown);
+  const mode = shown ?? kept;
   const o = asObj(value);
   const choose = (m: Mode) => {
     if (m === mode) return;
+    setKept(m);
     if (m === "places") onChange(ctx.places.length > 0 ? `@${ctx.places[0]}` : []);
     else if (m === "circle") onChange({ lat: 0, lon: 0, km: 1 });
     else onChange({ has_gps: true });
@@ -64,8 +73,8 @@ function Circle({ o, onChange }: { o: Raw; onChange: (o: Raw) => void }) {
   const { t } = useTranslation();
   return (
     <>
-      <OptNumber o={o} k="lat" label={t("place_lat")} onChange={onChange} />
-      <OptNumber o={o} k="lon" label={t("place_lon")} onChange={onChange} />
+      <OptNumber o={o} k="lat" label={t("place_lat")} min={null} onChange={onChange} />
+      <OptNumber o={o} k="lon" label={t("place_lon")} min={null} onChange={onChange} />
       <OptNumber o={o} k="km" label={t("place_km")} onChange={onChange} />
       <NotToggle o={o} onChange={onChange} />
     </>

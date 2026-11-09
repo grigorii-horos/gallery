@@ -12,6 +12,7 @@ import type { TargetChoice } from "../plan/TracePanel";
 import type { PlanState } from "../plan/usePlan";
 import {
   decisionState,
+  eventContents,
   failureText,
   groupEvents,
   groupSeries,
@@ -175,8 +176,12 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
     }
   };
 
-  /** The files an event-wide `choice` covers: a target never takes a file whose name cannot be built. */
-  const eventMembers = (ev: EventGroup, choice: string) => ev.items.filter((i) => choice === KEEP || !i.name_error);
+  /**
+   * The files an event-wide `choice` covers: a target never takes a file
+   * whose name cannot be built, nor a member of a held series (that keeps
+   * the confirm-the-best-shot flow); "keep in source" covers every file.
+   */
+  const eventMembers = (ev: EventGroup, choice: string) => ev.items.filter((i) => choice === KEEP || (!i.name_error && !i.series));
 
   const decideEvent = async (ev: EventGroup) => {
     const choice = eventChoice[ev.id];
@@ -271,7 +276,7 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
     <>
       <div className="review-head">
         <p>
-          {t("decide_head", { files: t("files", { count: total }), series: t("decide_series", { count: series.length }) })}
+          {t("decide_head", { files: t("files", { count: total }), series: t("decide_series", { count: series.length + cards.length }) })}
           {done > 0 && <span className="muted">, {t("decide_done", { n: done })}</span>}
         </p>
         <label className="check group-events">
@@ -298,21 +303,27 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
       <div className="review-list" ref={listRef} onKeyDown={onKey}>
         {byEvent
           ? events.map((ev) => {
-              const inEvent = new Set(ev.items.map((i) => i.source));
+              const shown = eventContents(ev, cards, series);
+              const choice = eventChoice[ev.id] ?? "";
+              const covered = eventMembers(ev, choice || KEEP);
+              const target = choice !== "" && choice !== KEEP;
               return (
                 <EventBlock
                   key={ev.id}
                   event={ev}
                   targets={targets}
-                  choice={eventChoice[ev.id] ?? ""}
-                  covered={eventMembers(ev, eventChoice[ev.id] ?? KEEP).length}
+                  choice={choice}
+                  files={shown.files}
+                  covered={covered.length}
+                  leftName={target ? ev.items.filter((i) => i.name_error && !i.series).length : 0}
+                  leftSeries={target ? ev.items.filter((i) => i.series).length : 0}
                   busy={busy === ev.id}
                   failed={failed[ev.id] || null}
                   onChoice={(v) => setEventChoice((c) => ({ ...c, [ev.id]: v }))}
                   onApply={() => decideEvent(ev)}
                 >
-                  {cards.filter((g) => inEvent.has(g.items[0].source)).map(cardNode)}
-                  {series.filter((s) => inEvent.has(s.items[0].source)).map(seriesNode)}
+                  {shown.cards.map(cardNode)}
+                  {shown.series.map(seriesNode)}
                 </EventBlock>
               );
             })
@@ -526,7 +537,10 @@ function EventBlock({
   event,
   targets,
   choice,
+  files,
   covered,
+  leftName,
+  leftSeries,
   busy,
   failed,
   onChoice,
@@ -536,8 +550,13 @@ function EventBlock({
   event: EventGroup;
   targets: TargetChoice[];
   choice: string;
+  /** The files shown in the block (a series card shows all its members). */
+  files: number;
   /** How many of the event's files the chosen action covers. */
   covered: number;
+  /** Of the event's files, those a target cannot take: a name that cannot be built; a held series. */
+  leftName: number;
+  leftSeries: number;
   busy: boolean;
   failed: string | null;
   onChoice: (v: string) => void;
@@ -546,12 +565,11 @@ function EventBlock({
 }) {
   useTranslation();
   const start = event.start ? `${formatDate(event.start)} ${event.start.slice(11, 16)}` : t("decide_event_undated");
-  const left = event.items.length - covered;
   return (
     <section className="event" aria-label={t("decide_event_aria", { start })}>
       <header className="event-head">
         <strong>{start}</strong>
-        <span className="muted">{t("files", { count: event.items.length })}</span>
+        <span className="muted">{t("files", { count: files })}</span>
         <select className="picker" aria-label={t("decide_event_target")} value={choice} onChange={(e) => onChoice(e.target.value)}>
           <option value="" disabled>
             {t("decide_choose")}
@@ -566,7 +584,8 @@ function EventBlock({
         <button type="button" className="btn primary" disabled={!choice || covered === 0 || busy} onClick={onApply}>
           {busy ? t("saving") : t("decide_event_apply", { n: covered })}
         </button>
-        {choice && choice !== KEEP && left > 0 && <span className="muted small">{t("decide_event_left_out", { n: left })}</span>}
+        {leftName > 0 && <span className="muted small">{t("decide_event_left_out", { n: leftName })}</span>}
+        {leftSeries > 0 && <span className="muted small">{t("decide_event_series_left_out", { n: leftSeries })}</span>}
         {failed && <p className="bad-text small series-failed">{failed}</p>}
       </header>
       {children}
@@ -613,7 +632,22 @@ function SeriesReviewCard({
           {allDone && <span className="series-done">{t("decide_decided")}</span>}
         </header>
         <p className="muted small">{t("decide_series_hint")}</p>
-        <ul className="series-strip" role="radiogroup" aria-label={t("decide_series_files")}>
+        <ul
+          className="series-strip"
+          role="radiogroup"
+          aria-label={t("decide_series_files")}
+          onKeyDown={(e) => {
+            // Radio group keys: the arrows move the pick (and focus) round the shots.
+            const step = e.key === "ArrowRight" || e.key === "ArrowDown" ? 1 : e.key === "ArrowLeft" || e.key === "ArrowUp" ? -1 : 0;
+            if (!step || e.altKey || e.ctrlKey || e.metaKey) return;
+            e.preventDefault();
+            e.stopPropagation();
+            const at = group.items.findIndex((i) => i.source === best);
+            const next = group.items[(at + step + group.items.length) % group.items.length];
+            onPick(next.source);
+            e.currentTarget.querySelectorAll<HTMLElement>('[role="radio"]')[group.items.indexOf(next)]?.focus();
+          }}
+        >
           {group.items.map((it) => {
             const mine = decided.get(it.source);
             const err = error.get(it.source);
@@ -623,6 +657,7 @@ function SeriesReviewCard({
                   type="button"
                   role="radio"
                   aria-checked={it.source === best}
+                  tabIndex={it.source === best ? 0 : -1}
                   className={`rcell${mine ? " decided" : ""}${err ? " failed" : ""}`}
                   title={err ? `${it.source}\n${err}` : `${it.source}\n${it.reason}`}
                   onClick={() => onPick(it.source)}
