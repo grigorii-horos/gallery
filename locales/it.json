@@ -728,6 +728,7 @@
   "cli.check.config": "Carica e convalida anche questo file di configurazione (TOML)",
   "overrides.changed": "%{path}: il file è cambiato dopo la creazione del piano; ricrea il piano",
   "overrides.best_not_member": "%{path}: non è uno dei file della serie",
+  "overrides.plan_changed": "Il piano è cambiato da quando è stata mostrata questa revisione — esegui di nuovo la scansione",
   "undo.no_plan": "nessun piano accanto al rapporto per conoscere le destinazioni",
   "undo.no_such_target": "nessun file della destinazione «%{target}» nel rapporto",
   "undo.no_such_file": "non è un file di questa esecuzione: %{path}",
