@@ -208,3 +208,67 @@ describe("condition menu and forms", () => {
     expect(screen.getByRole("menuitem", { name: "Устройство" })).toBeInTheDocument();
   });
 });
+
+describe("kind switch and filter removal", () => {
+  const withDraft = (targets: TargetDraft[]) => {
+    invoke.mockReset();
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "config_draft") return { ...base, draft: { ...base.draft, targets }, changed: args.ops.length > 0 };
+      throw new Error(cmd);
+    });
+  };
+
+  it("asks before switching a folders target with outputs to trash, then drops the outputs", async () => {
+    withDraft([target("Docs", "folders", [filter()])]);
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    expect(screen.getByText("Outputs")).toBeInTheDocument();
+    await user.selectOptions(screen.getByRole("combobox", { name: "Kind" }), "trash");
+    expect(screen.getByText("This kind has no outputs: switching removes this target's outputs.")).toBeInTheDocument();
+    expect(invoke.mock.calls.filter(([c]) => c === "config_draft").every(([, a]) => a.ops.length === 0)).toBe(true);
+    await user.click(screen.getByRole("button", { name: "Remove outputs and switch" }));
+    await waitFor(() => expect(updated()).toMatchObject({ kind: "trash", outputs: [] }));
+  });
+
+  it("keeps the folders kind and outputs when the switch is cancelled", async () => {
+    withDraft([target("Docs", "folders", [filter()])]);
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Kind" }), "keep");
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("This kind has no outputs: switching removes this target's outputs.")).toBeNull();
+    expect(screen.getByRole("combobox", { name: "Kind" })).toHaveValue("folders");
+    expect(screen.getByText("Outputs")).toBeInTheDocument();
+    expect(invoke.mock.calls.filter(([c]) => c === "config_draft").every(([, a]) => a.ops.length === 0)).toBe(true);
+  });
+
+  it("switches a folders target without outputs at once", async () => {
+    withDraft([{ ...target("Empty", "folders", [filter()]), outputs: [] }]);
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    await user.selectOptions(screen.getByRole("combobox", { name: "Kind" }), "keep");
+    await waitFor(() => expect(updated()).toMatchObject({ kind: "keep", outputs: [] }));
+  });
+
+  it("shows and saves the second filter's own codec list after the first is removed", async () => {
+    withDraft([
+      target("Videos", "folders", [
+        filter({ conditions: { props: { video_codec: ["hevc"] } } }),
+        filter({ conditions: { props: { video_codec: ["h264", "av1"] } } }),
+      ]),
+    ]);
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    const codecs = () => screen.getAllByRole("textbox", { name: "Video codec" });
+    expect(codecs().map((c) => (c as HTMLInputElement).value)).toEqual(["hevc", "h264, av1"]);
+    await user.click(screen.getAllByRole("button", { name: "Remove filter" })[0]);
+    await waitFor(() => expect(updated().filters).toHaveLength(1));
+    expect(codecs().map((c) => (c as HTMLInputElement).value)).toEqual(["h264, av1"]);
+    await user.type(codecs()[0], ", vp9");
+    await waitFor(() => expect(updated().filters[0].conditions.props).toEqual({ video_codec: ["h264", "av1", "vp9"] }));
+  });
+});

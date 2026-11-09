@@ -91,7 +91,15 @@ export function OptNumber({ o, k, label, onChange, placeholder }: { o: Raw; k: s
 
 /** A labelled optional comma-separated list; the text is kept as typed, the list goes up. */
 export function OptList({ o, k, label, onChange, placeholder }: { o: Raw; k: string; label: string; onChange: (o: Raw) => void; placeholder?: string }) {
-  const [text, setText] = useState(strList(o[k]).join(", "));
+  const outer = strList(o[k]).join(", ");
+  const [text, setText] = useState(outer);
+  // The list last sent up (or received): when the value changes from
+  // outside, the field shows the new list instead of stale text.
+  const [seen, setSeen] = useState(outer);
+  if (outer !== seen) {
+    setSeen(outer);
+    setText(outer);
+  }
   return (
     <Field label={label}>
       <TextInput
@@ -100,17 +108,13 @@ export function OptList({ o, k, label, onChange, placeholder }: { o: Raw; k: str
         value={text}
         placeholder={placeholder}
         onChange={(s) => {
+          const list = s
+            .split(",")
+            .map((x) => x.trim())
+            .filter(Boolean);
           setText(s);
-          onChange(
-            withKey(
-              o,
-              k,
-              s
-                .split(",")
-                .map((x) => x.trim())
-                .filter(Boolean),
-            ),
-          );
+          setSeen(list.join(", "));
+          onChange(withKey(o, k, list));
         }}
       />
     </Field>

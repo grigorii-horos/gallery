@@ -905,6 +905,8 @@
   "kind_keep": "Păstrează",
   "kind_trash_hint": "Fișierele merg la coș după ce tot restul este plasat; niciodată ultima copie.",
   "kind_keep_hint": "Fișierele rămân unde sunt și se consideră tratate.",
+  "kind_drop_outputs": "Acest tip nu are ieșiri: la schimbare, ieșirile acestei ținte sunt eliminate.",
+  "kind_drop_outputs_ok": "Elimină ieșirile și schimbă",
   "cond_add": "+ condiție",
   "cond_remove": "Elimină {{name}}",
   "cond_not": "Nu (inversează)",

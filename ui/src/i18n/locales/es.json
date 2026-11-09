@@ -905,6 +905,8 @@
   "kind_keep": "Conservar",
   "kind_trash_hint": "Los archivos van a la papelera cuando todo lo demás está colocado; nunca la última copia.",
   "kind_keep_hint": "Los archivos se quedan donde están y cuentan como tratados.",
+  "kind_drop_outputs": "Este tipo no tiene salidas: al cambiar se quitan las salidas de este destino.",
+  "kind_drop_outputs_ok": "Quitar salidas y cambiar",
   "cond_add": "+ condición",
   "cond_remove": "Quitar {{name}}",
   "cond_not": "No (invertir)",
