@@ -280,8 +280,6 @@
   "search_aria": "Знайти файл",
   "search_hits_aria": "Відповідні файли",
   "search_explain_path": "Пояснити шлях",
-  "explain_stage_before_ai": "До ШІ",
-  "explain_stage_after_ai": "Після ШІ",
   "explain_op_write": "Запис нового файлу",
   "explain_op_rename": "Перейменування на місці",
   "explain_op_keep": "Без змін",

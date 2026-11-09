@@ -404,7 +404,10 @@ pub fn build_plan_with(
             |c: Option<NaiveDateTime>| c.map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
         let (target, via) = match decision {
             Decision::Target { name, via } => (name, via),
-            Decision::Review { suggested, reason } => {
+            // TODO(T6): carry `series` into the review item (ruling R3).
+            Decision::Review {
+                suggested, reason, ..
+            } => {
                 review.push(ReviewItem {
                     source,
                     size: e.size,
@@ -428,6 +431,12 @@ pub fn build_plan_with(
                 continue;
             }
         };
+        // TODO(T6): `trash` and `keep` targets become plan decisions of their
+        // own; until then nothing at all is planned for their files.
+        if cfg.target(&target).is_some_and(|t| !t.kind.is_folders()) {
+            unchanged.push(source);
+            continue;
+        }
         let outputs_cfg = target_outputs(cfg, &target)
             .ok_or_else(|| plan_err(crate::t!("plan.unknown_target", target = target)))?;
 
@@ -1812,6 +1821,7 @@ mod tests {
         let review = |why: &str| Decision::Review {
             suggested: "t".into(),
             reason: why.into(),
+            series: None,
         };
         let p = local(
             &c,
@@ -1898,6 +1908,7 @@ mod tests {
                     Decision::Review {
                         suggested: "t".into(),
                         reason: "why".into(),
+                        series: None,
                     },
                 ),
             ],
@@ -2004,6 +2015,7 @@ mod tests {
                     Decision::Review {
                         suggested: "t".into(),
                         reason: "why".into(),
+                        series: None,
                     },
                 ),
                 (entry(tmp.path(), "cam", "u.txt"), Decision::Unmatched),

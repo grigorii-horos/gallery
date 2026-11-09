@@ -262,8 +262,6 @@
   "search_aria": "Trouver un fichier",
   "search_hits_aria": "Fichiers correspondants",
   "search_explain_path": "Expliquer le chemin",
-  "explain_stage_before_ai": "Avant l’IA",
-  "explain_stage_after_ai": "Après l’IA",
   "explain_op_write": "Écriture d’un nouveau fichier",
   "explain_op_rename": "Renommage sur place",
   "explain_op_keep": "Inchangé",

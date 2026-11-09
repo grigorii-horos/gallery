@@ -19,7 +19,7 @@ use crate::effect::CachedOnly;
 use crate::overrides::Overrides;
 use crate::plan::{Plan, Side, build_plan_with};
 use crate::progress::{Cancel, NoProgress};
-use crate::route::route_with_overrides;
+use crate::route::{RouteCtx, route_with_overrides};
 use crate::tools::Tools;
 use crate::{Result, exif, scan};
 
@@ -298,7 +298,9 @@ fn build_in(
         model: &cfg.ai.model,
         pending: RefCell::new(HashSet::new()),
     };
-    let routed = route_with_overrides(cfg, files, &ai, false, overrides, &NoProgress, cancel)?;
+    let ctx = RouteCtx::build(cfg, files, &exif_map, env.tools, &NoProgress, cancel)?;
+    let routed =
+        route_with_overrides(cfg, files, &ctx, &ai, false, overrides, &NoProgress, cancel)?;
     let mut plan = build_plan_with(
         cfg,
         routed.decisions,

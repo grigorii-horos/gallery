@@ -280,8 +280,6 @@
   "search_aria": "Znajdź plik",
   "search_hits_aria": "Pasujące pliki",
   "search_explain_path": "Wyjaśnij ścieżkę",
-  "explain_stage_before_ai": "Przed AI",
-  "explain_stage_after_ai": "Po AI",
   "explain_op_write": "Zapis nowego pliku",
   "explain_op_rename": "Zmiana nazwy na miejscu",
   "explain_op_keep": "Bez zmian",

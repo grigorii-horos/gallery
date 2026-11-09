@@ -15,7 +15,7 @@ use crate::Result;
 use crate::ai::AiClassifier;
 use crate::ai::cache::{self, Cache};
 use crate::ai::client::{system_prompt, to_answer};
-use crate::config::{Config, Filter, Output, expand_tilde};
+use crate::config::{Config, Filter, Output, TargetKind, expand_tilde};
 use crate::datetime::{capture_date, file_created};
 use crate::mask::{ItemCheck, MaskCheck, MaskExpr};
 use crate::media::{kind_of, split_name};
@@ -24,7 +24,7 @@ use crate::overrides::Overrides;
 use crate::plan::{OutputOp, Plan, Side, build_plan, local_zone, run_content_pipe};
 use crate::progress::{Cancel, NoProgress};
 use crate::route::{
-    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, Via, filter_fit,
+    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, RouteCtx, Via, filter_fit,
     route_with_overrides,
 };
 use crate::scan::{FileEntry, Rejection, mtime_ns, rejection};
@@ -77,19 +77,16 @@ pub struct FilterCheck {
     pub matches: Option<MaskCheck>,
     pub exclude: Option<MaskCheck>,
     pub fit: Fit,
+    /// The filter asks the AI (its masks are the AI's prefilter).
+    pub ai: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "snake_case")]
-pub enum StageKind {
-    BeforeAi,
-    Ai,
-    AfterAi,
-}
-
+/// One target of the ordered list, in list order.
 #[derive(Debug, Clone, Serialize)]
 pub struct TargetCheck {
-    pub stage: StageKind,
+    pub kind: TargetKind,
+    /// Some filter of the target asks the AI.
+    pub ai: bool,
     pub name: String,
     /// Mask filters; for an AI target the sources and prefilter as one.
     pub filters: Vec<FilterCheck>,
@@ -261,25 +258,15 @@ fn filter_check(cfg: &Config, index: usize, f: &Filter, e: &FileEntry) -> Filter
         matches: f.matches.as_ref().map(|m| m.check(name, cfg, false)),
         exclude: (!f.exclude.is_empty()).then(|| f.exclude.check(name, cfg, true)),
         fit: filter_fit(cfg, f, e),
+        ai: f.ai.is_some(),
     }
 }
 
-/// Every target in list order. The stage is what routing does with it for
-/// now (see `route::ai_cut`): an AI target is in the AI batch, a mask target
-/// before the first AI target decides before it, any other after it.
+/// Every target in list order, the order routing walks them.
 fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
-    let cut = crate::route::ai_cut(cfg);
     cfg.targets
         .iter()
-        .enumerate()
-        .map(|(i, t)| {
-            let stage = if t.has_ai() {
-                StageKind::Ai
-            } else if i < cut {
-                StageKind::BeforeAi
-            } else {
-                StageKind::AfterAi
-            };
+        .map(|t| {
             let filters: Vec<_> = t
                 .filters
                 .iter()
@@ -287,7 +274,8 @@ fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
                 .map(|(i, f)| filter_check(cfg, i, f, e))
                 .collect();
             TargetCheck {
-                stage,
+                kind: t.kind,
+                ai: t.has_ai(),
                 name: t.name.clone(),
                 candidate: filters.iter().any(|f| f.fit == Fit::Match),
                 filters,
@@ -539,9 +527,17 @@ pub fn explain(
         cache: cache_path.map_or_else(|| Cache::load(Path::new("")), |p| Cache::load(&p)),
         seen: RefCell::new(Vec::new()),
     };
+    // TODO(T7): groups (events, neighbours, duplicates, series) are not
+    // computed for one file, so their conditions do not hold here.
+    let exif: HashMap<PathBuf, Value> = match opts.tools {
+        Some(t) => crate::exif::read(t, std::slice::from_ref(&entry.path)).unwrap_or_default(),
+        None => HashMap::new(),
+    };
+    let route_ctx = RouteCtx::without_groups(std::slice::from_ref(&entry), &exif);
     let routed = route_with_overrides(
         cfg,
         std::slice::from_ref(&entry),
+        &route_ctx,
         &ai,
         false,
         overrides,
@@ -554,7 +550,7 @@ pub fn explain(
     let mut stages = stages(cfg, &entry);
     let candidates: Vec<String> = stages
         .iter()
-        .filter(|t| t.stage == StageKind::Ai && t.candidate)
+        .filter(|t| t.filters.iter().any(|f| f.ai && f.fit == Fit::Match))
         .map(|t| t.name.clone())
         .collect();
     let seen = ai.seen.borrow();
@@ -579,7 +575,9 @@ pub fn explain(
             via: Some(via.clone()),
             detail: None,
         },
-        Decision::Review { suggested, reason } => DecisionInfo {
+        Decision::Review {
+            suggested, reason, ..
+        } => DecisionInfo {
             kind: DecisionKind::Review,
             target: Some(suggested.clone()),
             via: None,
@@ -592,7 +590,7 @@ pub fn explain(
     if let Some(t) = &info.target
         && info.kind == DecisionKind::Target
     {
-        // The first target of that name in stage order is the one routing took.
+        // The first target of that name in list order is the one routing took.
         if let Some(c) = stages.iter_mut().find(|c| &c.name == t) {
             c.taken = true;
         }
@@ -616,10 +614,6 @@ pub fn explain(
 
     // Plan this one file as a scan would.
     let file_name = file_name_of(&entry.path).to_string();
-    let exif: HashMap<PathBuf, Value> = match opts.tools {
-        Some(t) => crate::exif::read(t, std::slice::from_ref(&entry.path)).unwrap_or_default(),
-        None => HashMap::new(),
-    };
     let plan: Plan = build_plan(
         cfg,
         vec![(entry.clone(), decision.clone())],
@@ -967,7 +961,7 @@ fn verdict(
             let mut why: Vec<(bool, String)> = ex
                 .stages
                 .iter()
-                .filter(|t| t.stage != StageKind::Ai)
+                .filter(|t| !t.ai)
                 .filter_map(|t| why_filter_misses(t, name))
                 .collect();
             if why.is_empty() {
@@ -1044,17 +1038,10 @@ impl Explanation {
             "├─ {}",
             crate::t!("explain.tree.source", scope = scope_text(&self.scope))
         );
-        let mut last_stage = None;
+        if !self.stages.is_empty() {
+            let _ = writeln!(o, "├─ {}", crate::t!("explain.tree.targets"));
+        }
         for t in &self.stages {
-            if last_stage != Some(t.stage) {
-                let title = match t.stage {
-                    StageKind::BeforeAi => crate::t!("explain.stage_before_ai"),
-                    StageKind::Ai => crate::t!("explain.stage_ai"),
-                    StageKind::AfterAi => crate::t!("explain.stage_after_ai"),
-                };
-                let _ = writeln!(o, "├─ {}", crate::t!("explain.tree.stage", title = title));
-                last_stage = Some(t.stage);
-            }
             let mark = if t.taken {
                 crate::t!("explain.mark_took")
             } else if t.candidate {
@@ -1062,9 +1049,14 @@ impl Explanation {
             } else {
                 crate::t!("explain.mark_no")
             };
-            let _ = writeln!(o, "│  ├─ {} — {mark}", t.name);
+            let name = if t.ai {
+                format!("{} [{}]", t.name, crate::t!("explain.stage_ai"))
+            } else {
+                t.name.clone()
+            };
+            let _ = writeln!(o, "│  ├─ {name} — {mark}");
             for f in &t.filters {
-                let _ = writeln!(o, "│  │  ├─ {}", filter_text(t.stage, f));
+                let _ = writeln!(o, "│  │  ├─ {}", filter_text(f));
                 for m in [&f.matches, &f.exclude].into_iter().flatten() {
                     for it in &m.items {
                         item_lines(it, 0, &mut o);
@@ -1238,8 +1230,8 @@ fn scope_text(s: &Scope) -> String {
     }
 }
 
-fn filter_text(stage: StageKind, f: &FilterCheck) -> String {
-    let what = if stage == StageKind::Ai {
+fn filter_text(f: &FilterCheck) -> String {
+    let what = if f.ai {
         crate::t!("explain.prefilter")
     } else {
         crate::t!("explain.filter_n", n = f.index + 1)

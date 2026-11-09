@@ -262,8 +262,6 @@
   "search_aria": "Caută fișier",
   "search_hits_aria": "Fișiere potrivite",
   "search_explain_path": "Explică calea",
-  "explain_stage_before_ai": "Înainte de IA",
-  "explain_stage_after_ai": "După IA",
   "explain_op_write": "Se scrie un fișier nou",
   "explain_op_rename": "Redenumire pe loc",
   "explain_op_keep": "Neschimbat",

@@ -107,13 +107,23 @@ impl Stage {
     }
 }
 
+/// Position of the first AI target (the list's length when there is none).
+/// TEMPORARY (until Task 8's GUI rework): the stage-based editor and summary
+/// split the ordered list here into the old three stages.
+pub fn ai_cut(cfg: &gallery_core::config::Config) -> usize {
+    cfg.targets
+        .iter()
+        .position(gallery_core::config::Target::has_ai)
+        .unwrap_or(cfg.targets.len())
+}
+
 /// The ordered targets of a loaded config with the old stage and the index
 /// within it that the editor (still stage-based until the GUI rework) uses
-/// for them. TEMPORARY: see `gallery_core::route::ai_cut`.
+/// for them. TEMPORARY: see [`ai_cut`].
 pub fn staged(
     cfg: &gallery_core::config::Config,
 ) -> impl Iterator<Item = (Stage, usize, &gallery_core::config::Target)> {
-    let cut = gallery_core::route::ai_cut(cfg);
+    let cut = ai_cut(cfg);
     let mut counts = [0usize; 3];
     cfg.targets.iter().enumerate().map(move |(i, t)| {
         let stage = if t.has_ai() {

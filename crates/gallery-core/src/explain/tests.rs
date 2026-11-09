@@ -315,6 +315,7 @@ fn agrees_with_build_plan() {
     let routed = route_with_overrides(
         &fx.cfg,
         &files,
+        &RouteCtx::empty(&files),
         &NoAi,
         false,
         &o,

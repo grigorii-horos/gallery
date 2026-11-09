@@ -3,15 +3,9 @@ import { useTranslation } from "react-i18next";
 import { t, type MessageKey } from "../i18n";
 import { num } from "../i18n/format";
 import { errorText, planApi, type Explanation,
-  type ItemCheck, type FilterCheck, type OutputCheck, type StepCheck, type TargetCheck } from "../api";
+  type ItemCheck, type FilterCheck, type OutputCheck, type StepCheck } from "../api";
 import { Code } from "../components/ConfigGate";
 import { baseName, dirName } from "./model";
-
-const STAGE: Record<TargetCheck["stage"], MessageKey> = {
-  before_ai: "explain_stage_before_ai",
-  ai: "stage_ai",
-  after_ai: "explain_stage_after_ai",
-};
 
 const OP: Record<OutputCheck["op"], MessageKey> = {
   write: "explain_op_write",
@@ -112,8 +106,8 @@ function maskText(m: { items: { item: string }[] }): string {
   return `[${m.items.map((i) => i.item).join(", ")}]`;
 }
 
-function filterText(stage: TargetCheck["stage"], f: FilterCheck): string {
-  const what = stage === "ai" ? t("explain_prefilter") : t("explain_filter_n", { n: f.index + 1 });
+function filterText(f: FilterCheck): string {
+  const what = f.ai ? t("explain_prefilter") : t("explain_filter_n", { n: f.index + 1 });
   if (!f.source_ok) return t("explain_filter_source", { what, sources: f.sources.join(", ") });
   const m = f.matches
     ? t(f.matches.matched ? "explain_match_took" : "explain_match_not_took", { items: maskText(f.matches) })
@@ -150,13 +144,13 @@ export function ExplainView({ ex }: { ex: Explanation }) {
             {ex.stages.map((tg, i) => (
               <li key={i} className={tg.taken ? "taken" : tg.candidate ? "cand" : "no"}>
                 <p>
-                  <span className="muted small">{t(STAGE[tg.stage])}</span> <strong>{tg.name}</strong>{" "}
+                  <strong>{tg.name}</strong> {tg.ai && <span className="muted small">{t("stage_ai")}</span>}{" "}
                   <span className="small">{tg.taken ? t("explain_took") : tg.candidate ? t("explain_fits") : t("explain_no_fit")}</span>
                 </p>
                 <ul className="explain-filters">
                   {tg.filters.map((f) => (
                     <li key={f.index} className={f.fit}>
-                      {filterText(tg.stage, f)}
+                      {filterText(f)}
                       {[f.matches, f.exclude].map(
                         (m, k) => m && <ItemList key={k} items={m.items} />,
                       )}

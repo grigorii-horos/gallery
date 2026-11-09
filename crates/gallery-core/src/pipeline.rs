@@ -15,7 +15,7 @@ use crate::config::Config;
 use crate::overrides::Overrides;
 use crate::plan::{Plan, Side, build_plan_with};
 use crate::progress::{Cancel, Progress};
-use crate::route::{AiAnswer, AiRequest, Classifier, Confidence, route_with_overrides};
+use crate::route::{AiAnswer, AiRequest, Classifier, Confidence, RouteCtx, route_with_overrides};
 use crate::tools::Tools;
 use crate::{Result, exif, scan};
 
@@ -26,7 +26,7 @@ pub struct ScanOptions {
     pub server: bool,
     /// Accept low-confidence AI answers instead of sending them to review.
     pub accept_low: bool,
-    /// Skip the AI stage: AI candidates fall through to `after_ai`.
+    /// Skip the AI: AI filters take nothing, files walk on to later targets.
     pub no_ai: bool,
 }
 
@@ -98,21 +98,22 @@ pub struct AiDry {
     pub to_send: usize,
 }
 
-/// Records the batch it is given and answers "none" to all of it.
+/// Records the batches it is given and answers "none" to all of them.
 struct Counting(RefCell<Vec<AiRequest>>);
 
 impl Classifier for Counting {
     fn classify(&self, batch: Vec<AiRequest>) -> Result<Vec<AiAnswer>> {
         let answers = NoAi.classify(batch.clone())?;
-        *self.0.borrow_mut() = batch;
+        self.0.borrow_mut().extend(batch);
         Ok(answers)
     }
 }
 
-/// Scan and route like a scan with AI would (manual decisions and
-/// `before_ai` masks first), then count the AI candidates and how many the
-/// cache at `cache_path` already answers. Reads only: no EXIF, no thumbnails,
-/// no API call, nothing written.
+/// Scan and route like a scan with AI would (manual decisions and the
+/// targets before the AI ones first), then count the AI candidates and how
+/// many the cache at `cache_path` already answers. Reads only: no EXIF, no
+/// thumbnails, no API call, nothing written; so conditions on metadata or
+/// groups of files do not hold here and the count is an estimate for them.
 pub fn ai_dry_run(
     cfg: &Config,
     overrides: &Overrides,
@@ -126,7 +127,10 @@ pub fn ai_dry_run(
     cancel.check()?;
     let files = scan::scan_sources_with(&cfg.sources, progress, cancel)?;
     let counting = Counting(RefCell::new(Vec::new()));
-    route_with_overrides(cfg, &files, &counting, false, overrides, progress, cancel)?;
+    let ctx = RouteCtx::empty(&files);
+    route_with_overrides(
+        cfg, &files, &ctx, &counting, false, overrides, progress, cancel,
+    )?;
     let batch = counting.0.into_inner();
     let cache = Cache::load(cache_path);
     let cached = batch
@@ -156,6 +160,7 @@ pub fn scan_plan_using(
     let files = scan::scan_sources_with(&cfg.sources, progress, cancel)?;
     let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
     let exif = exif::read_with(tools, &paths, progress, cancel)?;
+    let ctx = RouteCtx::build(cfg, &files, &exif, Some(tools), progress, cancel)?;
     let classifier: &dyn Classifier = match classifier {
         Some(c) if !opts.no_ai => c,
         _ => &NoAi,
@@ -163,6 +168,7 @@ pub fn scan_plan_using(
     let routed = route_with_overrides(
         cfg,
         &files,
+        &ctx,
         classifier,
         opts.accept_low,
         overrides,
@@ -475,5 +481,77 @@ dir = "{out}/rest"
         );
         assert!(matches!(r, Err(Error::Cancelled)));
         assert!(rec.0.lock().unwrap().is_empty());
+    }
+
+    #[test]
+    fn conditions_and_event_expansion_see_the_whole_scan() {
+        // Capture times come from the file names (the files have no EXIF).
+        let dir = tempfile::tempdir().unwrap();
+        let (cam, partner, out) = (
+            dir.path().join("cam"),
+            dir.path().join("partner"),
+            dir.path().join("out"),
+        );
+        for (d, n) in [
+            (&cam, "IMG_20260801_100000.jpg"),
+            (&cam, "IMG_20260801_103000.jpg"),
+            (&cam, "IMG_20260805_100000.jpg"),
+            (&partner, "IMG_20260801_100500.jpg"),
+        ] {
+            std::fs::create_dir_all(d).unwrap();
+            std::fs::write(d.join(n), n.as_bytes()).unwrap();
+        }
+        let p = |d: &Path| d.to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            r#"
+[[sources]]
+id = "cam"
+path = "{cam}"
+
+[[sources]]
+id = "partner"
+path = "{partner}"
+
+[[targets]]
+name = "together"
+[[targets.filters]]
+sources = ["cam"]
+near = {{ sources = ["partner"], time = "20m" }}
+expand = "event"
+[[targets.outputs]]
+dir = "{out}/together"
+
+[[targets]]
+name = "rest"
+[[targets.filters]]
+sources = ["cam", "partner"]
+[[targets.outputs]]
+dir = "{out}/rest"
+"#,
+            cam = p(&cam),
+            partner = p(&partner),
+            out = p(&out)
+        );
+        let path = dir.path().join("gallery.toml");
+        std::fs::write(&path, toml).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        cfg.validate().unwrap();
+        let out = scan_plan_using(
+            &cfg,
+            &tools(),
+            ScanOptions::default(),
+            &Overrides::default(),
+            Some(&Panics),
+            &crate::progress::NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        let at = |d: &Path, n: &str| target_of(&out.plan, &d.join(n));
+        // Near the partner's shot (5 min).
+        assert_eq!(at(&cam, "IMG_20260801_100000.jpg"), Some("together"));
+        // 25 min from it, but the same outing.
+        assert_eq!(at(&cam, "IMG_20260801_103000.jpg"), Some("together"));
+        assert_eq!(at(&cam, "IMG_20260805_100000.jpg"), Some("rest"));
+        assert_eq!(at(&partner, "IMG_20260801_100500.jpg"), Some("rest"));
     }
 }

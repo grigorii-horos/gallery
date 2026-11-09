@@ -600,7 +600,7 @@ fn examples_text(all: &[gallery_core::learn::Correction], source: Option<&str>) 
         for c in mine.iter().rev() {
             let right = match &c.user_choice {
                 Action::Target { name } => name.clone(),
-                Action::Keep => gallery_core::t!("cli.leave_in_place"),
+                Action::Keep | Action::SeriesBest => gallery_core::t!("cli.leave_in_place"),
             };
             let _ = writeln!(
                 out,
@@ -809,7 +809,7 @@ fn explain_cmd(config: &Path, overrides: Option<&Path>, paths: &[PathBuf]) -> Re
 fn unmatched_cmd(config: &Path, plan: Option<&Path>, overrides: Option<&Path>) -> Result<()> {
     use gallery_core::plan::{Side, build_plan};
     use gallery_core::progress::{Cancel, NoProgress};
-    use gallery_core::route::route_with_overrides;
+    use gallery_core::route::{RouteCtx, route_with_overrides};
     use gallery_core::triage::{group_unmatched, size_text, table_line};
     use std::collections::HashMap;
     let cfg = load_config(config)?;
@@ -819,9 +819,12 @@ fn unmatched_cmd(config: &Path, plan: Option<&Path>, overrides: Option<&Path>) -
         None => {
             let o = overrides_for_scan(overrides, Overrides::default_path())?;
             let files = gallery_core::scan::scan_sources(&cfg.sources)?;
+            // TODO(T7): no metadata is read here, so conditions on it do
+            // not hold; a scan's plan (`--plan`) has the real decisions.
             let routed = route_with_overrides(
                 &cfg,
                 &files,
+                &RouteCtx::empty(&files),
                 &pipeline::NoAi,
                 false,
                 &o,

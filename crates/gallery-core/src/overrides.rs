@@ -26,6 +26,10 @@ pub enum Action {
     Target { name: String },
     /// Leave the file where it is, untouched.
     Keep,
+    /// The file is the confirmed best shot of its series: `series`
+    /// conditions never hold for it, and it is otherwise routed as usual
+    /// (this marks the file, it does not decide it).
+    SeriesBest,
 }
 
 /// One decision with the file state it was made for.
@@ -342,6 +346,13 @@ mod tests {
         assert_eq!(
             v["entries"][0]["action"],
             serde_json::json!({"kind": "target", "name": "cats"})
+        );
+        // The series choice is a plain marker.
+        let best = serde_json::to_value(Action::SeriesBest).unwrap();
+        assert_eq!(best, serde_json::json!({"kind": "series_best"}));
+        assert_eq!(
+            serde_json::from_value::<Action>(best).unwrap(),
+            Action::SeriesBest
         );
     }
 

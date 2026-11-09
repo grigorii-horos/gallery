@@ -306,10 +306,15 @@ export interface FilterCheck {
   matches: MaskCheck | null;
   exclude: MaskCheck | null;
   fit: "match" | "excluded" | "no";
+  /** The filter asks the AI (its masks are the AI's prefilter). */
+  ai: boolean;
 }
 
+/** One target of the ordered list, in list order. */
 export interface TargetCheck {
-  stage: "before_ai" | "ai" | "after_ai";
+  kind: "folders" | "trash" | "keep";
+  /** Some filter of the target asks the AI. */
+  ai: boolean;
   name: string;
   filters: FilterCheck[];
   candidate: boolean;

@@ -141,7 +141,7 @@ fn mask_str(m: &MaskExpr) -> Option<String> {
 /// (TEMPORARY, until the GUI rework): AI targets, mask targets before the
 /// first of them, and mask targets after it.
 fn targets(cfg: &Config) -> TargetsSummary {
-    let cut = gallery_core::route::ai_cut(cfg);
+    let cut = crate::config_edit::model::ai_cut(cfg);
     let mut out = TargetsSummary {
         before_ai: Vec::new(),
         ai: Vec::new(),

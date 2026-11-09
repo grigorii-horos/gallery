@@ -24,7 +24,8 @@ describe("explain view", () => {
           ...base,
           stages: [
             {
-              stage: "before_ai",
+              kind: "folders",
+              ai: false,
               name: "pics",
               candidate: false,
               taken: false,
@@ -54,6 +55,7 @@ describe("explain view", () => {
                   },
                   exclude: null,
                   fit: "no",
+                  ai: false,
                 },
               ],
             },
