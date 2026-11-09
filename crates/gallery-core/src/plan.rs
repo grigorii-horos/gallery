@@ -1508,6 +1508,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        any(target_os = "macos", windows),
+        ignore = "case-insensitive file system: the case-only target is the file itself"
+    )]
     fn plan_case_only_rename_keeps_the_name() {
         let tmp = tempfile::tempdir().unwrap();
         let dir = phone_with(tmp.path(), &["IMG.JPG"]);
@@ -1855,6 +1859,10 @@ mod tests {
     }
 
     #[test]
+    #[cfg_attr(
+        any(target_os = "macos", windows),
+        ignore = "case-insensitive file system: the case-only target is the file itself"
+    )]
     fn plan_dest_that_is_the_source_under_another_name_is_keep() {
         // A case-insensitive file system: `IMG.jpg` opens `IMG.JPG`. Two
         // names of one file stand in for it here.

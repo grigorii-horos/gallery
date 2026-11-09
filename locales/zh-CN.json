@@ -532,6 +532,7 @@
   "gui.internal_scan": "内部扫描错误：%{error}",
   "gui.internal_check": "内部检查错误：%{error}",
   "gui.no_config_dir": "没有用户设置目录",
+  "desktop.linux_only": "应用菜单项和登录时启动仅支持 Linux；请在本系统中使用操作系统自带的设置",
   "current.no_files": "计划中没有可运行的文件。",
   "triage.add_to_match": "把 %{item} 加入目标“%{target}”的匹配",
   "triage.add_filter": "为来源 %{source} 向目标“%{target}”添加新过滤器：%{item}",

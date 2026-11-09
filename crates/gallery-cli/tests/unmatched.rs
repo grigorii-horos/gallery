@@ -21,7 +21,7 @@ fn setup(tmp: &Path) -> std::path::PathBuf {
             "[[sources]]\nid = \"shots\"\npath = \"{r}/shots\"\nrecursive = true\n\
              [[targets.after_ai]]\nname = \"pics\"\n[[targets.after_ai.filters]]\n\
              sources = [\"shots\"]\nmatch = \"*.jpg\"\n[[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = tmp.display()
+            r = tmp.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -36,6 +36,7 @@ fn prints_groups_with_reasons_without_a_plan() {
         .unwrap()
         .env("LC_ALL", "C")
         .env("XDG_DATA_HOME", d.path().join("data"))
+        .env("GALLERY_DATA_DIR", d.path().join("data/gallery"))
         .env("HOME", d.path())
         .args(["unmatched", "-c"])
         .arg(&cfg)

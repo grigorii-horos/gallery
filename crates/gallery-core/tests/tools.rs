@@ -22,7 +22,8 @@ fn capabilities_detects_svtav1() {
     let caps = Tools::discover().unwrap().capabilities();
     assert!(caps.svtav1);
     assert!(caps.opus);
-    assert!(caps.vidstab);
+    // Homebrew's ffmpeg is built without libvidstab.
+    assert!(caps.vidstab || cfg!(target_os = "macos"));
     assert!(caps.versions.contains_key("ffmpeg"));
 }
 

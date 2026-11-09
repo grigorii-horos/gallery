@@ -7,6 +7,7 @@ fn gallery(tmp: &Path) -> Command {
     let mut c = Command::cargo_bin("gallery").unwrap();
     c.env("HOME", tmp)
         .env("XDG_DATA_HOME", tmp.join("data"))
+        .env("GALLERY_DATA_DIR", tmp.join("data/gallery"))
         .env("XDG_CACHE_HOME", tmp.join("cache"))
         .env("XDG_CONFIG_HOME", tmp.join("config"))
         // No locale from the test machine's environment.

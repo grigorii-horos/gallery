@@ -138,6 +138,7 @@ fn folders_match_roots_and_outputs_not_others() {
     assert_eq!(ids, ["cam", "lib"]);
 }
 
+#[cfg(unix)]
 #[test]
 fn folder_path_with_tilde_and_symlink_matches() {
     let tmp = tempfile::tempdir().unwrap();

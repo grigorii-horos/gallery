@@ -153,8 +153,8 @@ rename = [{{ mask = "*", preset = "Date" }}]
 [[targets.after_ai.outputs]]
 dir = "{out}/backup"
 "#,
-        src = src.display(),
-        out = out.display()
+        src = src.to_string_lossy().replace('\\', "/"),
+        out = out.to_string_lossy().replace('\\', "/")
     );
     let cfg_path = root.join("gallery.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
@@ -285,7 +285,7 @@ match = "*"
 dir = "{shots}"
 rename = [{{ mask = "*", preset = "capture-date" }}]
 "#,
-        shots = shots.display()
+        shots = shots.to_string_lossy().replace('\\', "/")
     );
     let cfg_path = root.join("gallery.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
@@ -379,8 +379,8 @@ rename = [{{ mask = "*", preset = "capture-date" }}]
 dir = "{backup}"
 rename = [{{ mask = "*", preset = "capture-date" }}]
 "#,
-        shots = shots.display(),
-        backup = backup.display()
+        shots = shots.to_string_lossy().replace('\\', "/"),
+        backup = backup.to_string_lossy().replace('\\', "/")
     );
     let cfg_path = root.join("gallery.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
@@ -460,7 +460,7 @@ match = "*"
 dir = "{shots}"
 rename = [{{ mask = "*", preset = "capture-date-dirs" }}]
 "#,
-        shots = shots.display()
+        shots = shots.to_string_lossy().replace('\\', "/")
     );
     let cfg_path = root.join("gallery.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
@@ -562,8 +562,8 @@ match = "*"
 dir = "{out}/timeline"
 content = [{{ mask = "*", preset = "meta-full" }}]
 "#,
-        src = src.display(),
-        out = out.display()
+        src = src.to_string_lossy().replace('\\', "/"),
+        out = out.to_string_lossy().replace('\\', "/")
     );
     let cfg_path = root.join("gallery.toml");
     std::fs::write(&cfg_path, cfg).unwrap();
@@ -628,7 +628,7 @@ fn explain_prints_a_tree_with_a_verdict() {
              [[targets.before_ai]]\nname = \"pics\"\n\
              [[targets.before_ai.filters]]\nsources = [\"s\"]\nmatch = \"@photo-original\"\n\
              [[targets.before_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = root.display()
+            r = root.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -675,7 +675,7 @@ fn scan_estimate_counts_ai_files_without_any_call_or_plan() {
              [[targets.ai]]\nname = \"cats\"\nsources = [\"s\"]\ndescription = \"cats\"\n\
              prefilter = {{ match = \"*.jpg\" }}\n\
              [[targets.ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = root.display()
+            r = root.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -725,7 +725,7 @@ fn apply_dry_run_prints_the_estimate() {
              [[targets.after_ai]]\nname = \"docs\"\n\
              [[targets.after_ai.filters]]\nsources = [\"s\"]\nmatch = \"*\"\n\
              [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = root.display()
+            r = root.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -780,7 +780,7 @@ fn apply_pilot_dry_run_writes_no_pilot_or_rest_plans() {
              [[targets.after_ai]]\nname = \"docs\"\n\
              [[targets.after_ai.filters]]\nsources = [\"s\"]\nmatch = \"*\"\n\
              [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-            r = root.display()
+            r = root.to_string_lossy().replace('\\', "/")
         ),
     )
     .unwrap();
@@ -828,7 +828,10 @@ fn apply_and_undo_are_refused_while_another_run_holds_the_global_lock() {
             .failure();
         let err = String::from_utf8_lossy(&out.get_output().stderr).into_owned();
         assert!(err.contains("Another Gallery run"), "{err}");
-        assert!(err.contains(&std::process::id().to_string()), "{err}");
+        // Windows locks are mandatory: the holder's pid is unreadable there.
+        if cfg!(unix) {
+            assert!(err.contains(&std::process::id().to_string()), "{err}");
+        }
         assert!(lock.exists(), "a live holder's lock stays");
     }
     drop(held);

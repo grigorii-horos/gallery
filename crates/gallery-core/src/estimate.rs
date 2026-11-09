@@ -154,7 +154,7 @@ impl History {
 
     /// Where the GUI keeps its plans and reports.
     pub fn gui_dir() -> Option<PathBuf> {
-        dirs::data_dir().map(|d| d.join("gallery").join("plans"))
+        crate::paths::data_dir().map(|d| d.join("plans"))
     }
 
     /// [`History::load_dir`] of several folders, merged.

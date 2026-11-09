@@ -16,7 +16,8 @@ fn gallery(tmp: &Path, cfg: &Path) -> Command {
     c.env("LC_ALL", "C")
         .env("GALLERY_TRASH", "folder")
         .env("GALLERY_SYNCTHING_CONFIG", cfg)
-        .env("XDG_DATA_HOME", tmp.join("data"));
+        .env("XDG_DATA_HOME", tmp.join("data"))
+        .env("GALLERY_DATA_DIR", tmp.join("data/gallery"));
     c
 }
 

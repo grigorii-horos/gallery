@@ -233,8 +233,8 @@ match = "*"
 [[targets.after_ai.outputs]]
 dir = "{out}/rest"
 "#,
-            src = src.display(),
-            out = out.display()
+            src = src.to_string_lossy().replace('\\', "/"),
+            out = out.to_string_lossy().replace('\\', "/")
         );
         let path = dir.path().join("gallery.toml");
         std::fs::write(&path, toml).unwrap();

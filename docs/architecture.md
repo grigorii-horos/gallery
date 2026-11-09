@@ -98,7 +98,9 @@ These are enforced by the core (`apply`, `verify`, `undo`, `lock`), not by the U
 
 ## Files on disk
 
-Paths are for a normal (release) build on Linux; `XDG_*` variables are honoured. In **debug builds
+Paths are for a normal (release) build on Linux; `XDG_*` variables are honoured. On Windows and
+macOS the same names live under `dirs`' per-OS folders (`%APPDATA%\gallery`, `%LOCALAPPDATA%\gallery`;
+`~/Library/Application Support/gallery`, `~/Library/Caches/gallery`). In **debug builds
 only**, `GALLERY_DATA_DIR` redirects the data and cache directories (used for screenshots and tests;
 release builds ignore it).
 
@@ -145,3 +147,15 @@ pnpm -C ui typecheck && pnpm -C ui lint && pnpm -C ui test
 
 Set `XDG_CONFIG_HOME`, `XDG_DATA_HOME` and `XDG_CACHE_HOME` to a temporary directory when running
 the tests, so they cannot touch your real state.
+
+## Cross-platform notes
+
+- **Time zones.** Nothing is left to the OS's `TZ` (Windows' exiftool cannot read IANA names).
+  `Tools::tz` holds the plan's zone; QuickTime UTC values, file-time offsets and the read-back of
+  QuickTime dates are converted in Rust with chrono-tz (`content::metadata::date_args`,
+  `exif::quicktime_to_local`). On unix `TZ` is still exported to the children.
+- **Placing files never overwrites.** Hard link + unlink first (all unix, NTFS); where links are
+  unavailable, `renameat2(RENAME_NOREPLACE)` on Linux and `MoveFileExW` without
+  `MOVEFILE_REPLACE_EXISTING` on Windows; elsewhere an existence check plus rename.
+- **Tools.** Windows children run at idle priority, in their own process group, without a console
+  window; unix ones under `nice`/`ionice` in their own process group.

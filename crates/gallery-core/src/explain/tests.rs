@@ -52,7 +52,7 @@ fn fixture() -> Fx {
     for i in 0..23 {
         noise.push_str(&format!(
             "\n[[targets.before_ai]]\nname = \"flat{i}\"\n[[targets.before_ai.filters]]\nsources = [\"flat\"]\nmatch = \"*.jpg\"\n[[targets.before_ai.outputs]]\ndir = \"{r}/out/f{i}\"\n",
-            r = root.display()
+            r = root.to_string_lossy().replace('\\', "/")
         ));
     }
     let toml = format!(
@@ -96,7 +96,7 @@ prefilter = {{ match = "*.webp" }}
 [[targets.ai.outputs]]
 dir = "{r}/out/cats"
 {noise}"#,
-        r = root.display()
+        r = root.to_string_lossy().replace('\\', "/")
     );
     let path = root.join("gallery.toml");
     std::fs::write(&path, toml).unwrap();
@@ -408,7 +408,7 @@ fn av1_file_is_excluded_by_the_video_mask_with_the_reason() {
          [[targets.before_ai]]\nname = \"video\"\n[[targets.before_ai.filters]]\n\
          sources = [\"s\"]\nmatch = [\"@photo-original\", \"@png\", \"@video-original\"]\n\
          [[targets.before_ai.outputs]]\ndir = \"{r}/out\"\n",
-        r = r.display()
+        r = r.to_string_lossy().replace('\\', "/")
     );
     std::fs::write(r.join("g.toml"), toml).unwrap();
     let cfg = Config::load(&r.join("g.toml")).unwrap();
@@ -481,7 +481,7 @@ match = "*"
 dir = "{r}/out"
 content = ["compress-all"]
 "#,
-        r = root.display()
+        r = root.to_string_lossy().replace('\\', "/")
     );
     let path = root.join("gallery.toml");
     std::fs::write(&path, toml).unwrap();

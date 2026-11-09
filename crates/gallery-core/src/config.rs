@@ -8,9 +8,13 @@ use serde::{Deserialize, Serialize};
 use crate::mask::{MAX_REF_DEPTH, MaskExpr, MaskItem, MaskScope};
 use crate::{Error, Result};
 
-/// Expand a leading `~` / `~/` to the home directory (`$HOME`).
+/// Expand a leading `~` / `~/` to the home directory: `$HOME` when set (also
+/// what tests use), else the platform's (Windows has no `$HOME`).
 pub fn expand_tilde(p: &Path) -> PathBuf {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let home = std::env::var_os("HOME")
+        .filter(|h| !h.is_empty())
+        .map(PathBuf::from)
+        .or_else(dirs::home_dir);
     match (home, p.strip_prefix("~")) {
         (Some(home), Ok(rest)) => home.join(rest),
         _ => p.to_path_buf(),

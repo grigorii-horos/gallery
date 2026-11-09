@@ -172,11 +172,15 @@ fn video_keeps_gps() {
     let out = recs.remove(&r.path).unwrap();
     let orig = recs.remove(&src).unwrap();
     assert!(orig["UserData:GPSCoordinates"].is_string());
+    if orig["Keys:AndroidMake"].is_null() {
+        eprintln!("skip: this exiftool cannot write Keys:AndroidMake (needs a newer one)");
+        return;
+    }
     assert_eq!(
         out["UserData:GPSCoordinates"],
         orig["UserData:GPSCoordinates"]
     );
-    assert_eq!(out["Keys:Make"], "Xiaomi");
+    assert_eq!(out["Keys:Make"], "Xiaomi", "{out:#}");
     assert_eq!(out["Keys:Model"], "23078PND5G");
 }
 

@@ -1077,6 +1077,9 @@ fn set_tray_settings(
     autostart: bool,
 ) -> Result<TrayView, String> {
     if autostart != autostart_enabled() {
+        if !gallery_core::desktop::SUPPORTED {
+            return Err(gallery_core::desktop::linux_only().to_string());
+        }
         let dir = dirs::config_dir().ok_or_else(|| gallery_core::t!("gui.no_config_dir"))?;
         let exe = std::env::current_exe().map_err(|e| e.to_string())?;
         gallery_core::desktop::set_autostart(&dir, &exe, autostart).map_err(|e| e.to_string())?;

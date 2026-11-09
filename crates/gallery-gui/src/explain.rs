@@ -47,7 +47,7 @@ mod tests {
                 "[[sources]]\nid = \"s\"\npath = \"{r}\"\n\n[[targets.before_ai]]\nname = \"pics\"\n\
                  [[targets.before_ai.filters]]\nsources = [\"s\"]\nmatch = \"*.jpg\"\n\
                  [[targets.before_ai.outputs]]\ndir = \"{r}/out\"\n",
-                r = src.display()
+                r = src.to_string_lossy().replace('\\', "/")
             ),
         )
         .unwrap();

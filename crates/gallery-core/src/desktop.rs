@@ -14,6 +14,16 @@ pub const ICON_NAME: &str = "gallery";
 /// Argument of the autostart entry: start in the tray, window hidden.
 pub const HIDDEN_ARG: &str = "--hidden";
 
+/// Whether the app-menu and autostart entries exist on this OS: they are XDG
+/// desktop files, Linux only. (macOS LaunchAgents and the Windows Run key are
+/// left to the operating system's own settings.)
+pub const SUPPORTED: bool = cfg!(target_os = "linux");
+
+/// The error for asking for either entry where they are not supported.
+pub fn linux_only() -> crate::Error {
+    crate::Error::Config(crate::t!("desktop.linux_only"))
+}
+
 /// The `Exec` value for `exe`: quoted as the desktop entry spec asks
 /// (spaces, quotes, `$`, backticks, backslashes, and `%` doubled).
 fn exec_quote(exe: &Path) -> String {

@@ -536,6 +536,7 @@
   "gui.internal_scan": "internal scan error: %{error}",
   "gui.internal_check": "internal check error: %{error}",
   "gui.no_config_dir": "no user settings directory",
+  "desktop.linux_only": "the app-menu entry and start at login are set up on Linux only; on this system use the operating system's own settings",
   "current.no_files": "The plan has no files to run.",
   "triage.add_to_match": "Add %{item} to the match of target “%{target}”",
   "triage.add_filter": "Add a new filter to target “%{target}” for source %{source}: %{item}",

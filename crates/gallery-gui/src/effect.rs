@@ -188,7 +188,7 @@ mod tests {
                 "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
                  [[targets.after_ai]]\nname = \"pngs\"\n[[targets.after_ai.filters]]\n\
                  sources = [\"s\"]\nmatch = \"*.png\"\n[[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n",
-                r = r.display()
+                r = r.to_string_lossy().replace('\\', "/")
             ),
         )
         .unwrap();
@@ -227,7 +227,7 @@ mod tests {
         let st = EffectState::default();
         go(&f, &st, &[]);
         // New sources = another folder: the file list must be scanned again.
-        let r = f.dir.path().display();
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
         let text = std::fs::read_to_string(&f.cfg)
             .unwrap()
             .replace(&format!("{r}/src\""), &format!("{r}/src2\""));
@@ -291,6 +291,13 @@ mod tests {
         eprintln!("scan {} ms, diff {} ms", first.scan_ms, second.diff_ms);
         assert!(!second.rescanned);
         // Debug build; release is about three times faster.
-        assert!(second.scan_ms + second.diff_ms < 1000, "{second:?}");
+        // Shared CI runners are several times slower (1.5 s seen on macOS,
+        // 6.1 s on Windows, where every file stat is much slower).
+        let limit = if std::env::var_os("CI").is_some() {
+            if cfg!(windows) { 15000 } else { 5000 }
+        } else {
+            1000
+        };
+        assert!(second.scan_ms + second.diff_ms < limit, "{second:?}");
     }
 }

@@ -10,6 +10,7 @@ fn gallery(tmp: &Path) -> Command {
     c.env("LC_ALL", "C")
         .env("HOME", tmp)
         .env("XDG_DATA_HOME", tmp.join("data"))
+        .env("GALLERY_DATA_DIR", tmp.join("data/gallery"))
         .env("XDG_CACHE_HOME", tmp.join("cache"))
         .env("XDG_CONFIG_HOME", tmp.join("config"));
     c

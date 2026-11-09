@@ -76,10 +76,14 @@ pub fn acquire_apply_at(path: &Path) -> Result<FileLock> {
         std::fs::create_dir_all(dir)?;
     }
     FileLock::acquire(path, |pid, p| {
+        // Windows locks are mandatory: the holder's pid may be unreadable.
+        let pid = match pid.trim() {
+            "" => "unknown",
+            t => t,
+        };
         format!(
-            "Another Gallery run (GUI or CLI) is already applying or undoing a plan (pid {}). \
+            "Another Gallery run (GUI or CLI) is already applying or undoing a plan (pid {pid}). \
              Wait for it to finish. If there is no such process, delete {}",
-            pid.trim(),
             p.display()
         )
     })
@@ -101,7 +105,11 @@ mod tests {
         let p = d.path().join("x/apply.lock");
         let a = acquire_apply_at(&p).unwrap();
         let e = acquire_apply_at(&p).unwrap_err().to_string();
-        assert!(e.contains(&std::process::id().to_string()), "{e}");
+        // Windows locks are mandatory: the holder's pid is unreadable there.
+        assert!(
+            !cfg!(unix) || e.contains(&std::process::id().to_string()),
+            "{e}"
+        );
         assert!(e.contains("Another Gallery run"), "{e}");
         drop(a);
         acquire_apply_at(&p).unwrap();
@@ -127,10 +135,14 @@ mod tests {
         let p = d.path().join("apply.lock");
         std::fs::write(&p, "4194999").unwrap();
         let l = acquire_apply_at(&p).unwrap();
+        // Windows locks are mandatory: the file cannot be read while held.
+        #[cfg(unix)]
         assert_eq!(
             std::fs::read_to_string(l.path()).unwrap(),
             std::process::id().to_string()
         );
+        #[cfg(not(unix))]
+        let _ = l;
     }
 
     #[test]
@@ -139,13 +151,18 @@ mod tests {
         let p = d.path().join("apply.lock");
         std::fs::write(&p, "not a pid, longer than ours").unwrap();
         let l = acquire_apply_at(&p).unwrap();
+        // Windows locks are mandatory: the file cannot be read while held.
+        #[cfg(unix)]
         assert_eq!(
             std::fs::read_to_string(l.path()).unwrap(),
             std::process::id().to_string()
         );
+        #[cfg(not(unix))]
+        let _ = l;
     }
 
-    #[cfg(unix)]
+    // Needs flock(1), which macOS lacks.
+    #[cfg(target_os = "linux")]
     #[test]
     fn lock_is_released_when_the_holder_process_is_killed() {
         let d = tempfile::tempdir().unwrap();
