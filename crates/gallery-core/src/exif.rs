@@ -54,7 +54,7 @@ pub fn read_with(
 /// look at a tag not listed here must add its name below. The list is part
 /// of the cache identity, so adding a name discards the old shards. A user
 /// `has_tag`/`missing_tag` name cannot be listed: those are answered from
-/// [`PRESENT`], the names of every other non-null tag of the file.
+/// [`PRESENT`], the names of every other non-null tag of the file by group.
 const KEPT_TAGS: &[&str] = &[
     // filter/facts.rs: device, GPS, size, orientation, media codecs.
     "GPSLatitude",
@@ -88,8 +88,9 @@ const KEPT_TAGS: &[&str] = &[
     "ModifyDate",
 ];
 
-/// Key of the cached record that lists the other non-null tags (as
-/// `Group:Tag`), so `props.has_tag` / `missing_tag` of any name still hold.
+/// Key of the cached record that lists the other non-null tags as
+/// `{"Group": ["Tag", ...]}` (a group written once), so `props.has_tag` /
+/// `missing_tag` of any name, with or without a group, still hold.
 pub(crate) const PRESENT: &str = "_Present";
 
 /// `rec` cut down to `SourceFile`, the [`KEPT_TAGS`] and [`PRESENT`].
@@ -98,17 +99,19 @@ fn minimized(rec: &serde_json::Value) -> serde_json::Value {
         return rec.clone();
     };
     let mut out = serde_json::Map::new();
-    let mut present = Vec::new();
+    let mut present: std::collections::BTreeMap<&str, Vec<&str>> = Default::default();
     for (k, v) in obj {
         let name = k.rsplit_once(':').map_or(k.as_str(), |(_, n)| n);
         if k == "SourceFile" || KEPT_TAGS.contains(&name) {
             out.insert(k.clone(), v.clone());
-        } else if !v.is_null() && k.contains(':') {
-            present.push(serde_json::Value::String(k.clone()));
+        } else if !v.is_null()
+            && let Some((g, n)) = k.rsplit_once(':')
+        {
+            present.entry(g).or_default().push(n);
         }
     }
     if !present.is_empty() {
-        out.insert(PRESENT.into(), serde_json::Value::Array(present));
+        out.insert(PRESENT.into(), serde_json::json!(present));
     }
     serde_json::Value::Object(out)
 }
@@ -136,7 +139,7 @@ fn tool_identity(tools: &Tools) -> String {
         .map(|(s, m)| format!("{s}:{m}"))
         .unwrap_or_default();
     format!(
-        "2|{}|{stamp}|{}|{}",
+        "3|{}|{stamp}|{}|{}",
         tools.exiftool.display(),
         READ_ARGS.join(" "),
         KEPT_TAGS.join(",")
@@ -980,7 +983,7 @@ mod tests {
         let (size, mtime_ns) = stat(&a).unwrap();
         let k = key_of(&a);
         let old = json!({
-            "tool": tool_identity(&t).replacen("2|", "1|", 1),
+            "tool": tool_identity(&t).replacen("3|", "1|", 1),
             "entries": { k.clone(): { "size": size, "mtime_ns": mtime_ns,
                 "rec": { "SourceFile": "x", "MakerNotes:Blob": "stale" } } },
         });

@@ -863,10 +863,19 @@ fn has_tag(exif: &Value, wanted: &str) -> bool {
     };
     exif.as_object().is_some_and(|o| {
         o.iter().any(|(k, v)| !v.is_null() && named(k))
-            // A cached record keeps the other tags' names only.
+            // A cached record keeps the other tags' names only, by group.
             || o.get(crate::exif::PRESENT)
-                .and_then(Value::as_array)
-                .is_some_and(|l| l.iter().filter_map(Value::as_str).any(named))
+                .and_then(Value::as_object)
+                .is_some_and(|groups| {
+                    groups.iter().any(|(g, names)| {
+                        (group.is_empty() || g.eq_ignore_ascii_case(group))
+                            && names.as_array().is_some_and(|l| {
+                                l.iter()
+                                    .filter_map(Value::as_str)
+                                    .any(|n| n.eq_ignore_ascii_case(name))
+                            })
+                    })
+                })
     })
 }
 
