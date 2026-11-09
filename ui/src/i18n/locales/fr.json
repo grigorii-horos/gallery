@@ -635,6 +635,8 @@
   "effect_title": "Effet",
   "effect_calculating": "calcul en cours…",
   "effect_working": "Calcul de ce qui va changer…",
+  "effect_counting": "comptage des doublons et de la netteté… {{done, number}} sur {{total, number}}",
+  "effect_counting_aria": "Comptage des doublons et de la netteté",
   "effect_none_one": "Les modifications ne touchent aucun des {{count, number}} fichier.",
   "effect_none_many": "Les modifications ne touchent aucun des {{count, number}} fichiers.",
   "effect_none_other": "Les modifications ne touchent aucun des {{count, number}} fichiers.",

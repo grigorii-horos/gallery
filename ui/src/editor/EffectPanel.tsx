@@ -10,13 +10,19 @@ const base = (p: string) => p.split("/").filter(Boolean).pop() ?? p;
 /// "Effect" under the save bar: what the unsaved edits do to the files.
 export function EffectPanel({ state }: { state: EffectState }) {
   useTranslation();
-  const { diff, loading, error } = state;
+  const { diff, loading, error, counting } = state;
   return (
     <section className="effect" aria-label={t("effect_title")} aria-busy={loading}>
       <header className="effect-head">
         <h3>{t("effect_title")}</h3>
-        {loading && <span className="muted">{t("effect_calculating")}</span>}
+        {loading && !counting && <span className="muted">{t("effect_calculating")}</span>}
       </header>
+      {loading && counting && (
+        <p className="effect-counting muted" role="status">
+          <span>{t("effect_counting", { done: counting.done, total: counting.total })}</span>
+          <progress value={counting.done} max={counting.total} aria-label={t("effect_counting_aria")} />
+        </p>
+      )}
       {error && <p className="effect-error">{error}</p>}
       {diff ? <EffectView diff={diff} /> : !error && <p className="muted">{t("effect_working")}</p>}
     </section>
