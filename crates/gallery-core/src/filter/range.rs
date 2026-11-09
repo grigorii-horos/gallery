@@ -141,10 +141,12 @@ impl TimeOfDay {
         let bad = || Error::Config(crate::t!("filter.bad_time", value = s));
         let (a, b) = s.split_once("..").ok_or_else(bad)?;
         let t = |x: &str| NaiveTime::parse_from_str(x.trim(), "%H:%M").map_err(|_| bad());
-        Ok(TimeOfDay {
-            from: t(a)?,
-            to: t(b)?,
-        })
+        let (from, to) = (t(a)?, t(b)?);
+        // Equal ends hold no time at all: a typo, never a wish.
+        if from == to {
+            return Err(Error::Config(crate::t!("filter.empty_time", value = s)));
+        }
+        Ok(TimeOfDay { from, to })
     }
 
     pub fn contains(&self, t: NaiveTime) -> bool {
@@ -290,6 +292,16 @@ mod tests {
             let e = TimeOfDay::parse(s).unwrap_err().to_string();
             assert!(e.contains(s), "{e}");
         }
+    }
+
+    #[test]
+    fn time_of_day_with_equal_ends_is_a_config_error() {
+        let e = TimeOfDay::parse("09:00..09:00").unwrap_err();
+        assert!(matches!(e, Error::Config(_)), "{e}");
+        assert_eq!(
+            e.to_string(),
+            Error::Config(crate::t!("filter.empty_time", value = "09:00..09:00")).to_string()
+        );
     }
 
     #[test]
