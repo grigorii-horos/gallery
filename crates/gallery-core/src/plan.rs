@@ -608,11 +608,10 @@ pub fn build_plan_with(
             (Side::Local, None) => pending.iter().position(|(dir, _, steps, .., wanted)| {
                 !steps.is_empty()
                     && fallback_is_source(&dir.join(wanted), &source)
-                    && crate::incompressible::fingerprint(steps, |n| cfg.content_preset(n))
-                        .is_some_and(|fp| {
-                            incompressible
-                                .get_or_insert_with(crate::incompressible::Known::load)
-                                .contains(&e.path, e.size, e.mtime_ns, &fp)
+                    && incompressible
+                        .get_or_insert_with(crate::incompressible::Known::load)
+                        .keeps(&e.path, e.size, e.mtime_ns, steps, |n| {
+                            cfg.content_preset(n)
                         })
             }),
             _ => None,
@@ -1519,10 +1518,16 @@ mod tests {
                 (OutputOp::Write, backup.join("a.jpg")),
             ]
         );
-        let pipe =
-            crate::incompressible::fingerprint(&["AVIF".to_string()], |n| c.content_preset(n))
-                .unwrap();
-        crate::incompressible::remember(&src, &pipe);
+        let steps = ["AVIF".to_string()];
+        let pipe = |v| crate::incompressible::fingerprint(&steps, |n| c.content_preset(n), v);
+        // Recorded with older encoders: tried again.
+        let old = BTreeMap::from([("avifenc".to_string(), "avifenc 0.9.0".to_string())]);
+        crate::incompressible::remember(&src, &pipe(&old).unwrap());
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
+        // With this machine's encoders: kept.
+        let now = crate::incompressible::current_versions();
+        crate::incompressible::remember(&src, &pipe(&now).unwrap());
 
         // Kept in place; only the backup is left to write.
         let p = local(&c, vec![(real(&src), to("t"))]);
