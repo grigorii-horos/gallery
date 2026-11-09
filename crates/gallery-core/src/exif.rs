@@ -292,8 +292,9 @@ fn argfile_line(p: &Path) -> Option<&str> {
 }
 
 /// Requested paths of one batch by how exiftool may echo them in
-/// `SourceFile`: spelled the same, or equal up to the path separator
-/// (exiftool on Windows may echo `C:/a/b.jpg` for `C:\a\b.jpg`).
+/// `SourceFile`: spelled the same, or (where `\` is a separator too, on
+/// Windows) equal up to the path separator: exiftool there may echo
+/// `C:/a/b.jpg` for `C:\a\b.jpg`. Elsewhere `a\b` and `a/b` are two files.
 struct Requested<'a> {
     exact: HashMap<&'a std::ffi::OsStr, &'a PathBuf>,
     unified: HashMap<String, &'a PathBuf>,
@@ -301,12 +302,22 @@ struct Requested<'a> {
 
 impl<'a> Requested<'a> {
     fn new(chunk: &'a [PathBuf]) -> Self {
-        Requested {
-            exact: chunk.iter().map(|p| (p.as_os_str(), p)).collect(),
-            unified: chunk
+        Self::with_separators(chunk, cfg!(windows))
+    }
+
+    /// `unify`: match up to the path separator.
+    fn with_separators(chunk: &'a [PathBuf], unify: bool) -> Self {
+        let unified = if unify {
+            chunk
                 .iter()
                 .filter_map(|p| Some((unify_separators(p.to_str()?), p)))
-                .collect(),
+                .collect()
+        } else {
+            HashMap::new()
+        };
+        Requested {
+            exact: chunk.iter().map(|p| (p.as_os_str(), p)).collect(),
+            unified,
         }
     }
 
@@ -520,11 +531,15 @@ mod tests {
     #[test]
     fn source_file_with_forward_slashes_finds_the_backslash_request() {
         let chunk = [PathBuf::from(r"C:\Photos\a.jpg"), PathBuf::from("b.jpg")];
-        let r = Requested::new(&chunk);
+        let r = Requested::with_separators(&chunk, true);
         assert_eq!(r.get("C:/Photos/a.jpg"), Some(&chunk[0]));
         assert_eq!(r.get(r"C:\Photos\a.jpg"), Some(&chunk[0]));
         assert_eq!(r.get("b.jpg"), Some(&chunk[1]));
         assert_eq!(r.get("C:/Photos/c.jpg"), None);
+        // Where `\` is part of a name, only the exact spelling matches.
+        let r = Requested::with_separators(&chunk, false);
+        assert_eq!(r.get("C:/Photos/a.jpg"), None);
+        assert_eq!(r.get(r"C:\Photos\a.jpg"), Some(&chunk[0]));
     }
 
     /// A fake exiftool that saves its argument file as `argfile` and its
