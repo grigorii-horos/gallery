@@ -814,21 +814,48 @@ fn duplicates(
             .is_some_and(|s| s.starts_with(&roots[root]) || roots[root].starts_with(s))
     };
 
+    // Equal hashes are confirmed byte for byte: a cached hash is keyed by
+    // path, size and mtime, so a file rewritten with the same size and
+    // mtime keeps a stale one. A file that differs is no duplicate.
     let mut groups: HashMap<(u64, &str), Vec<usize>> = HashMap::new();
-    let mut in_outputs = HashSet::new();
+    let mut out_candidates = Vec::new();
     for (i, h) in hashed.iter().flatten() {
         let size = files[*i].size;
         if let Some(found) = copies.get(&(size, h.clone())) {
             let real = canon(&files[*i].path);
-            if found
+            let others: Vec<&OutFile> = found
                 .iter()
-                .any(|o| o.real != real && !overlaps(*i, o.root))
-            {
-                in_outputs.insert(*i);
+                .filter(|o| o.real != real && !overlaps(*i, o.root))
+                .copied()
+                .collect();
+            if !others.is_empty() {
+                out_candidates.push((*i, others));
             }
         }
         groups.entry((size, h.as_str())).or_default().push(*i);
     }
+    let in_outputs: HashSet<usize> = out_candidates
+        .par_iter()
+        .map(|(i, others)| {
+            work.cancel.check()?;
+            let p = &files[*i].path;
+            Ok(others.iter().any(|o| same_bytes(p, &o.path)).then_some(*i))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
+    let candidates: Vec<Vec<usize>> = groups.into_values().filter(|m| m.len() > 1).collect();
+    let verified: Vec<Vec<usize>> = candidates
+        .par_iter()
+        .map(|m| {
+            work.cancel.check()?;
+            Ok(split_by_bytes(m, files))
+        })
+        .collect::<Result<Vec<_>>>()?
+        .into_iter()
+        .flatten()
+        .collect();
 
     let rank = |i: usize| {
         let src = cfg
@@ -845,11 +872,9 @@ fn duplicates(
     };
     // Kept for the last-copy guard whatever the scope: with `outputs` only,
     // a file and its copy in an output folder may both be scanned files.
-    let mut same_content: Vec<(Vec<usize>, usize)> = groups
-        .values()
-        .filter(|m| m.len() > 1)
-        .map(|m| {
-            let mut m = m.clone();
+    let mut same_content: Vec<(Vec<usize>, usize)> = verified
+        .into_iter()
+        .map(|mut m| {
             m.sort_unstable();
             let keep = *m.iter().min_by_key(|&&i| rank(i)).unwrap();
             (m, keep)
@@ -865,6 +890,57 @@ fn duplicates(
         }
     }
     Ok((original_of, in_outputs, same_content))
+}
+
+/// `a` and `b` have the same bytes; unreadable counts as different.
+fn same_bytes(a: &Path, b: &Path) -> bool {
+    use std::io::Read;
+    let (Ok(mut fa), Ok(mut fb)) = (std::fs::File::open(a), std::fs::File::open(b)) else {
+        return false;
+    };
+    let (mut ba, mut bb) = (vec![0u8; 64 * 1024], vec![0u8; 64 * 1024]);
+    loop {
+        let Ok(n) = read_full(&mut fa, &mut ba) else {
+            return false;
+        };
+        let Ok(m) = read_full(&mut fb, &mut bb) else {
+            return false;
+        };
+        if n != m || ba[..n] != bb[..m] {
+            return false;
+        }
+        if n == 0 {
+            return true;
+        }
+    }
+
+    fn read_full(f: &mut std::fs::File, buf: &mut [u8]) -> std::io::Result<usize> {
+        let mut got = 0;
+        while got < buf.len() {
+            match f.read(&mut buf[got..])? {
+                0 => break,
+                k => got += k,
+            }
+        }
+        Ok(got)
+    }
+}
+
+/// Files with one hash, split into groups of byte-equal files; only
+/// groups of two or more are kept.
+fn split_by_bytes(members: &[usize], files: &[FileEntry]) -> Vec<Vec<usize>> {
+    let mut groups: Vec<Vec<usize>> = Vec::new();
+    for &i in members {
+        match groups
+            .iter_mut()
+            .find(|g| same_bytes(&files[g[0]].path, &files[i].path))
+        {
+            Some(g) => g.push(i),
+            None => groups.push(vec![i]),
+        }
+    }
+    groups.retain(|g| g.len() > 1);
+    groups
 }
 
 fn series(
@@ -1544,6 +1620,90 @@ dir = "{out}/{{YYYY}}"
             .map(|e| e.path())
             .collect();
         assert_eq!(before, after);
+    }
+
+    #[test]
+    fn stale_cached_hash_is_not_a_duplicate() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let write = |rel: &str, body: &[u8]| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, body).unwrap();
+            p
+        };
+        // Same size, different bytes; the cache claims they are equal.
+        let cam = write("camera/a.jpg", b"picture one");
+        let olga = write("olga/a.jpg", b"picture two");
+        let out = write("out/2026/a.jpg", b"picture 3!!");
+        let outdir = root.join("out").display().to_string().replace('\\', "/");
+        let text = format!(
+            r#"
+[[sources]]
+id = "camera"
+path = "{r}/camera"
+
+[[sources]]
+id = "olga"
+path = "{r}/olga"
+
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera", "olga"]
+duplicate = {{ of = ["sources", "outputs"] }}
+
+[[targets]]
+name = "Album"
+[[targets.outputs]]
+dir = "{outdir}/{{YYYY}}"
+"#,
+            r = root.display().to_string().replace('\\', "/"),
+        );
+        let cfg: Config = toml::from_str(&text).unwrap();
+        let files = vec![entry("camera", &cam), entry("olga", &olga)];
+        let facts = vec![fact(None, None); 2];
+        let cache = tempfile::tempdir().unwrap();
+        let forge = |paths: &[&PathBuf]| {
+            let forged = MetricsCache::load(cache.path());
+            for p in paths {
+                let m = std::fs::metadata(p).unwrap();
+                let key = thumbs::cache_name(p, m.len(), crate::scan::mtime_ns(&m).unwrap());
+                forged.update(&key, |m| m.blake3 = Some("stale".into()));
+            }
+            forged.save().unwrap();
+        };
+        let groups = |files: &[FileEntry]| {
+            compute_with(
+                &cfg,
+                files,
+                &facts,
+                &needs(&cfg),
+                &no_thumbs,
+                Some(cache.path()),
+                &NoProgress,
+                &Cancel::new(),
+            )
+            .unwrap()
+        };
+        forge(&[&cam, &olga, &out]);
+        let g = groups(&files);
+        assert!(g.dup_original.is_empty());
+        assert!(g.dup_in_outputs.is_empty());
+        assert!(g.same_content.is_empty());
+        let m = holds(&cfg, 1, &facts, &g).unwrap_err();
+        assert_eq!(m.condition, "duplicate");
+
+        // Real copies under the same forged hash still count.
+        std::fs::write(&olga, b"picture one").unwrap();
+        std::fs::write(&out, b"picture one").unwrap();
+        forge(&[&olga, &out]);
+        let files = vec![entry("camera", &cam), entry("olga", &olga)];
+        let g = groups(&files);
+        assert_eq!(g.dup_original.get(&1), Some(&0));
+        assert!(g.dup_in_outputs.contains(&0));
+        assert!(holds(&cfg, 1, &facts, &g).is_ok());
     }
 
     #[test]
