@@ -5,7 +5,7 @@
   "identifier": "io.github.grigorii-horos.gallery",
   "build": {
     "beforeDevCommand": "pnpm -C ui dev",
-    "devUrl": "http://localhost:5173",
+    "devUrl": "http://localhost:1420",
     "beforeBuildCommand": "pnpm -C ui build",
     "frontendDist": "../../ui/dist"
   },
