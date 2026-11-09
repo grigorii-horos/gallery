@@ -79,7 +79,7 @@ const outcome: EditOutcome = {
       {
         name: "Screenshots",
         kind: "folders",
-        filters: [{ sources: ["camera"], match: ["Screenshot_*"], exclude: [] }],
+        filters: [{ sources: ["camera"], match: ["Screenshot_*"], exclude: [], ai: null, expand: null, conditions: {} }],
         outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
       },
     ],

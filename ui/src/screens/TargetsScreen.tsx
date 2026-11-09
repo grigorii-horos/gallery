@@ -16,6 +16,9 @@ import {
   type OutputDraft,
   type TargetDraft,
 } from "../editor/model";
+import { ConditionForms, ConditionMenu, setCondition } from "../editor/conditions/ConditionMenu";
+import type { CondContext } from "../editor/conditions/shared";
+import type { TargetKind } from "../api";
 import type { ConfigEditor } from "../editor/useConfigEditor";
 import { EffectPanel } from "../editor/EffectPanel";
 import { useEffectPreview } from "../editor/useEffectPreview";
@@ -113,7 +116,8 @@ export function TargetsScreen({ data, editor }: { data: AppData; editor: ConfigE
                     <span className="target-text">
                       <span className="target-name">
                         {tg.name || <span className="muted">{t("targets_no_name")}</span>}
-                        {tg.filters.some((f) => f.ai != null) && <span className="muted small"> {t("stage_ai")}</span>}
+                        {tg.kind !== "folders" && <span className={`badge kind-${tg.kind}`}> {t(`kind_${tg.kind}`)}</span>}
+                        {tg.filters.some((f) => f.ai != null) && <span className="badge ai"> {t("stage_ai")}</span>}
                         {bad ? <span className="flag bad" aria-label={t("flag_error")} /> : warn && <span className="flag warn" aria-label={t("flag_warnings")} />}
                       </span>
                       <span className="target-meta">{targetMeta(tg)}</span>
@@ -200,6 +204,15 @@ function TargetForm({
         <TextInput label={t("triage_target_name")} value={form.name} invalid={!!errAt(".name")} onChange={(name) => update({ ...form, name })} />
       </div>
       <Issues items={[]} error={errAt(".name") ?? ownErr} />
+      <Field label={t("targets_kind")} hint={form.kind === "trash" ? t("kind_trash_hint") : form.kind === "keep" ? t("kind_keep_hint") : undefined}>
+        <select className="select" aria-label={t("targets_kind")} value={form.kind} onChange={(e) => update({ ...form, kind: e.target.value as TargetKind })}>
+          {(["folders", "trash", "keep"] as const).map((k) => (
+            <option key={k} value={k}>
+              {t(`kind_${k}`)}
+            </option>
+          ))}
+        </select>
+      </Field>
       <div className="form-tools">
         <button type="button" className="btn quiet" disabled={index === 0} onClick={() => structural({ op: "move_target", from: index, to: index - 1 }, index - 1)}>
           {t("targets_up")}
@@ -225,6 +238,7 @@ function TargetForm({
               errorAt={(p) => (v.error?.path === p ? v.error.message : null)}
               warnings={issuesUnder(v.warnings, `${path}.filters[${i}]`)}
               suggestions={maskSuggestions}
+              ctx={{ sources: sourceIds, places: (v.draft.places ?? []).map((p) => p.name), suggestions: maskSuggestions }}
               editor={editor}
               configPath={data.configPath}
               onChange={(nf) => update({ ...form, filters: form.filters.map((x, j) => (j === i ? nf : x)) })}
@@ -237,25 +251,29 @@ function TargetForm({
         {t("targets_add_filter")}
       </button>
 
-      <h3>{t("trace_outputs")}</h3>
-      <Issues items={warnAt(".outputs")} />
-      {form.outputs.map((o, i) => (
-        <OutputEditor
-          key={i}
-          value={o}
-          n={i}
-          path={`${path}.outputs[${i}]`}
-          error={v.error && issuesUnder([v.error], `${path}.outputs[${i}]`)[0]?.message}
-          warnings={issuesUnder(v.warnings, `${path}.outputs[${i}]`)}
-          data={data}
-          suggestions={maskSuggestions}
-          onChange={(no) => update({ ...form, outputs: form.outputs.map((x, j) => (j === i ? no : x)) })}
-          onRemove={() => update({ ...form, outputs: form.outputs.filter((_, j) => j !== i) })}
-        />
-      ))}
-      <button type="button" className="link small" onClick={() => update({ ...form, outputs: [...form.outputs, { dir: "", server_dir: null, content: [], rename: [] }] })}>
-        {t("targets_add_output")}
-      </button>
+      {form.kind === "folders" && (
+        <>
+          <h3>{t("trace_outputs")}</h3>
+          <Issues items={warnAt(".outputs")} />
+          {form.outputs.map((o, i) => (
+            <OutputEditor
+              key={i}
+              value={o}
+              n={i}
+              path={`${path}.outputs[${i}]`}
+              error={v.error && issuesUnder([v.error], `${path}.outputs[${i}]`)[0]?.message}
+              warnings={issuesUnder(v.warnings, `${path}.outputs[${i}]`)}
+              data={data}
+              suggestions={maskSuggestions}
+              onChange={(no) => update({ ...form, outputs: form.outputs.map((x, j) => (j === i ? no : x)) })}
+              onRemove={() => update({ ...form, outputs: form.outputs.filter((_, j) => j !== i) })}
+            />
+  ))}
+          <button type="button" className="link small" onClick={() => update({ ...form, outputs: [...form.outputs, { dir: "", server_dir: null, content: [], rename: [] }] })}>
+            {t("targets_add_output")}
+          </button>
+        </>
+      )}
     </div>
   );
 }
@@ -267,11 +285,13 @@ function FilterEditor({
   errorAt,
   warnings,
   suggestions,
+  ctx,
   editor,
   configPath,
   onChange,
   onRemove,
 }: {
+  ctx: CondContext;
   value: FilterDraft;
   sourceIds: string[];
   path: string;
@@ -298,23 +318,20 @@ function FilterEditor({
         suggestions={suggestions}
         onChange={(match, exclude) => onChange({ ...f, match, exclude })}
       />
-      {f.ai != null ? (
-        <Field label={t("targets_description")}>
-          <textarea
-            className="input"
-            aria-label={t("targets_description")}
-            aria-invalid={!!errorAt(`${path}.ai`) || undefined}
-            rows={4}
-            value={f.ai}
-            onChange={(e) => onChange({ ...f, ai: e.target.value })}
-          />
-          <Issues items={[]} error={errorAt(`${path}.ai`)} />
-        </Field>
-      ) : (
-        <button type="button" className="link small" onClick={() => onChange({ ...f, ai: "" })}>
-          {t("targets_description")}
-        </button>
-      )}
+      <ConditionForms filter={f} ctx={ctx} aiError={errorAt(`${path}.ai`)} onChange={onChange} />
+      <div className="filter-foot">
+        <ConditionMenu filter={f} ctx={ctx} onAdd={(key, value) => onChange(setCondition(f, key, value))} />
+        <label className="cond-not" title={f.ai != null ? t("filter_expand_ai") : t("filter_expand_hint")}>
+          <input
+            type="checkbox"
+            checked={f.expand === "event"}
+            disabled={f.ai != null}
+            onChange={(e) => onChange({ ...f, expand: e.target.checked ? "event" : null })}
+          />{" "}
+          {t("filter_expand")}
+        </label>
+      </div>
+      {f.ai != null && <p className="field-hint">{t("filter_expand_ai")}</p>}
       <div className="filter-foot">
         <MaskTester editor={editor} configPath={configPath} match={f.match} exclude={f.exclude} />
         <button type="button" className="link small danger" onClick={onRemove}>
