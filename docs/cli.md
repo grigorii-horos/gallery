@@ -303,6 +303,10 @@ GALLERY_TRASH=folder gallery apply plan.json
 gallery undo plan.report.json
 ```
 
+A plan that trashes or keeps files (a `trash` or `keep` target) is plan version 2. A server running
+an older `gallery` refuses it with `unsupported plan version 2` and touches nothing: update
+`gallery` on the server. Plans without `trash`/`keep` targets stay version 1.
+
 A nightly "is there something new?" check:
 
 ```sh
