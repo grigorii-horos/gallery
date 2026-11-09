@@ -27,6 +27,10 @@ const LEGACY_NONE_CATEGORY: &str = "НИКАКАЯ";
 const MAX_TOKENS: u32 = 4000;
 /// At most this many keywords of an answer are kept.
 const MAX_TAGS: usize = 10;
+/// A keyword is cut to this many bytes (the IPTC Keywords limit).
+const MAX_TAG_BYTES: usize = 64;
+/// A description is cut to this many characters.
+const MAX_DESCRIPTION_CHARS: usize = 300;
 const MAX_RETRIES: u32 = 6;
 const TIMEOUT: Duration = Duration::from_secs(120);
 pub const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
@@ -305,17 +309,31 @@ fn one_line(s: &str) -> String {
     s.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
-/// The answer's keywords (one line each, lowercase, no blanks or repeats, at
-/// most [`MAX_TAGS`]) and description; `None` when neither is left.
+/// The answer's keywords (one line each, lowercase, no control characters,
+/// at most [`MAX_TAG_BYTES`] each, no blanks or repeats, at most
+/// [`MAX_TAGS`]) and description (one line, at most [`MAX_DESCRIPTION_CHARS`]);
+/// `None` when neither is left.
 fn to_meta(stored: &Stored) -> Option<AiMeta> {
+    let clean = |s: &str| -> String { one_line(s).chars().filter(|c| !c.is_control()).collect() };
     let mut tags: Vec<String> = Vec::new();
     for t in &stored.tags {
-        let t = one_line(t).to_lowercase();
+        let mut t = clean(t).to_lowercase();
+        // IPTC Keywords hold at most 64 bytes; cut at a character boundary.
+        let mut end = t.len().min(MAX_TAG_BYTES);
+        while !t.is_char_boundary(end) {
+            end -= 1;
+        }
+        t.truncate(end);
+        let t = t.trim().to_string();
         if !t.is_empty() && !tags.contains(&t) && tags.len() < MAX_TAGS {
             tags.push(t);
         }
     }
-    let description = one_line(&stored.description);
+    let description: String = clean(&stored.description)
+        .chars()
+        .take(MAX_DESCRIPTION_CHARS)
+        .collect();
+    let description = description.trim().to_string();
     (!tags.is_empty() || !description.is_empty()).then_some(AiMeta { tags, description })
 }
 
@@ -695,5 +713,56 @@ mod tests {
             .is_err()
         );
         assert!(!dir.exists());
+    }
+}
+
+#[cfg(test)]
+mod meta_tests {
+    use super::*;
+
+    fn stored(tags: &[&str], description: &str) -> Stored {
+        Stored {
+            category: NONE_CATEGORY.into(),
+            reason: String::new(),
+            confidence: "OK".into(),
+            tags: tags.iter().map(|t| t.to_string()).collect(),
+            description: description.into(),
+        }
+    }
+
+    #[test]
+    fn control_characters_are_dropped_and_spaces_kept() {
+        let m = to_meta(&stored(
+            &["red\u{7}\u{0}cat", "a\tb", "\u{1b}"],
+            "A\u{200b}x\u{0} cat\r\nhere.",
+        ))
+        .unwrap();
+        assert_eq!(m.tags, ["redcat", "a b"]);
+        // U+200B is a format character, not a control one: kept.
+        assert_eq!(m.description, "A\u{200b}x cat here.");
+    }
+
+    #[test]
+    fn tags_are_cut_to_64_bytes_at_a_character_boundary() {
+        let ascii = "x".repeat(70);
+        // 33 two-byte letters: 66 bytes, cut to 32 letters (64 bytes).
+        let cyr = "ж".repeat(33);
+        // A three-byte character straddling byte 64 is dropped whole.
+        let cjk = format!("{}猫猫", "y".repeat(62));
+        let m = to_meta(&stored(&[&ascii, &cyr, &cjk], "")).unwrap();
+        assert_eq!(m.tags[0], "x".repeat(64));
+        assert_eq!(m.tags[1], "ж".repeat(32));
+        assert_eq!(m.tags[2], "y".repeat(62));
+        assert!(m.tags.iter().all(|t| t.len() <= 64));
+        // Tags that become equal once cut are not repeated.
+        let m = to_meta(&stored(&[&"z".repeat(65), &"z".repeat(66)], "")).unwrap();
+        assert_eq!(m.tags.len(), 1);
+    }
+
+    #[test]
+    fn description_is_cut_to_300_characters() {
+        let m = to_meta(&stored(&[], &"ё".repeat(400))).unwrap();
+        assert_eq!(m.description.chars().count(), 300);
+        assert!(to_meta(&stored(&["\u{0}"], " \u{7} ")).is_none());
     }
 }

@@ -315,13 +315,29 @@ pub(crate) fn quicktime_to_local(tools: &Tools, rec: &mut serde_json::Value) {
 }
 
 /// Write tags to `path` in place (no `_original` backup, minor errors ignored).
+/// The arguments and the path go through a UTF-8 argument file (`-@`): on
+/// Windows exiftool reads its command line in the ANSI code page, which
+/// would turn Cyrillic or CJK values into `?`.
 pub fn write(tools: &Tools, path: &Path, args: &[String]) -> Result<()> {
-    let out = tools
-        .command(&tools.exiftool)
-        .args(["-overwrite_original", "-m", "-charset", "filename=utf8"])
-        .args(args)
-        .arg(path)
-        .output()?;
+    let mut argfile = tempfile::NamedTempFile::new()?;
+    // A path the file cannot hold as one line (not UTF-8, a line break, a
+    // leading `#` or edge spaces) stays on the command line, as raw bytes.
+    let utf8_path = path
+        .to_str()
+        .filter(|p| !p.contains(['\r', '\n']) && !p.starts_with('#') && p.trim() == *p);
+    // One argument per line: a line break inside one would split it.
+    for a in args.iter().map(String::as_str).chain(utf8_path) {
+        writeln!(argfile, "{}", a.replace(['\r', '\n'], " "))?;
+    }
+    argfile.flush()?;
+    let mut cmd = tools.command(&tools.exiftool);
+    cmd.args(["-overwrite_original", "-m", "-charset", "filename=utf8"])
+        .arg("-@")
+        .arg(argfile.path());
+    if utf8_path.is_none() {
+        cmd.arg(path);
+    }
+    let out = cmd.output()?;
     let stdout = String::from_utf8_lossy(&out.stdout);
     // exiftool reports an unwritable file on stderr/stdout and may still exit 0.
     // "0 image files updated, 1 image files unchanged" means nothing to change.
