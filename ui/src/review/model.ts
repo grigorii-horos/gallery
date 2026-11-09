@@ -94,6 +94,71 @@ export function groupSeries(items: ReviewItem[], gap = SERIES_GAP_S): Series[] {
   return out;
 }
 
+/** Neighbouring captures at most this far apart belong to one event (the core's default gap, "4h"). */
+export const EVENT_GAP_S = 4 * 3600;
+
+/** A series held back by a `series` condition: all its members in review, side by side. */
+export interface SeriesReviewGroup {
+  /** Stable within a plan: the suggested best shot's path. */
+  id: string;
+  /** The suggested best shot. */
+  best: string;
+  /** Target the other members go to once the user confirms. */
+  target: string;
+  /** Members in the plan's order; only files held in this review. */
+  items: ReviewItem[];
+}
+
+/** Review items that carry a `series`, grouped by their series (members listed in each). */
+export function seriesReviews(items: ReviewItem[]): SeriesReviewGroup[] {
+  const byBest = new Map<string, SeriesReviewGroup>();
+  for (const it of items) {
+    if (!it.series) continue;
+    const key = it.series.best;
+    let g = byBest.get(key);
+    if (!g) byBest.set(key, (g = { id: `series:${key}`, best: key, target: it.suggested, items: [] }));
+    g.items.push(it);
+  }
+  for (const g of byBest.values()) {
+    const order = g.items[0].series!.members;
+    g.items.sort((a, b) => order.indexOf(a.source) - order.indexOf(b.source));
+  }
+  return [...byBest.values()];
+}
+
+/** The review items of one event; the undated ones form the last event with `start` null. */
+export interface EventGroup {
+  id: string;
+  start: string | null;
+  items: ReviewItem[];
+}
+
+/**
+ * Review items clustered into events by capture time across all sources: a
+ * new event starts where the gap to the previous capture exceeds `gap`
+ * seconds. Files without a capture time share one last event.
+ */
+export function groupEvents(items: ReviewItem[], gap = EVENT_GAP_S): EventGroup[] {
+  const timed = items
+    .map((it) => ({ it, t: it.captured ? seconds(it.captured) : null }))
+    .filter((x): x is { it: ReviewItem; t: number } => x.t !== null)
+    .sort((x, y) => x.t - y.t || x.it.source.localeCompare(y.it.source));
+  const out: EventGroup[] = [];
+  let cur: EventGroup | null = null;
+  let last = 0;
+  for (const { it, t } of timed) {
+    if (!cur || t - last > gap) {
+      cur = { id: `event:${it.source}`, start: it.captured ?? null, items: [] };
+      out.push(cur);
+    }
+    cur.items.push(it);
+    last = t;
+  }
+  const undated = items.filter((it) => !it.captured || seconds(it.captured) === null);
+  if (undated.length > 0) out.push({ id: "event:undated", start: null, items: undated });
+  return out;
+}
+
 /** First capture time and the seconds the series spans; null when undated. */
 export function seriesSpan(s: Series): { start: string; seconds: number } | null {
   const first = s.items[0]?.captured;

@@ -1000,5 +1000,16 @@
   "place_km": "Raio, km",
   "place_remove": "Remover o local {{name}}",
   "place_remove_short": "Remover",
-  "explain_miss": "Não pego: {{condition}}: {{detail}}"
+  "explain_miss": "Não pego: {{condition}}: {{detail}}",
+  "decide_group_events": "Agrupar por evento",
+  "decide_event_aria": "Evento {{start}}",
+  "decide_event_undated": "sem hora de captura",
+  "decide_event_target": "Destino para o evento inteiro",
+  "decide_event_apply": "Aplicar ao evento inteiro ({{n, number}})",
+  "decide_event_left_out": "Arquivos cujo nome não pode ser montado ({{n, number}}) não vão para nenhum destino; só «manter na origem» os cobre.",
+  "decide_series_card_aria": "Melhor foto da série {{name}}",
+  "decide_series_hint": "Clique numa foto para escolher outra como melhor. A melhor foto fica fora das regras de série; as demais vão para o destino sugerido.",
+  "decide_series_suggested": "sugerida",
+  "decide_series_best": "melhor",
+  "decide_series_confirm": "Confirmar a melhor, enviar as demais para «{{target}}»"
 }

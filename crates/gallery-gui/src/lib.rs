@@ -808,6 +808,34 @@ async fn set_overrides(
     blocking(move || set_with_learning(path, items)).await
 }
 
+/// Confirm a series review: `best` is marked as the series' best shot and
+/// the other `members` go to `target`; one result per member. A member whose
+/// file changed since the plan is refused (the best one refuses the lot).
+#[tauri::command]
+async fn confirm_series(
+    path: Option<String>,
+    members: Vec<overrides::Member>,
+    best: String,
+    target: String,
+) -> Result<Vec<overrides::OverrideResult>, String> {
+    blocking(move || {
+        overrides::confirm_series_in(members, &best, &target, |r| set_with_learning(path, r))
+    })
+    .await
+}
+
+/// One decision for every listed file of an event; a changed file is
+/// refused, the rest go in. One result per member.
+#[tauri::command]
+async fn decide_event(
+    path: Option<String>,
+    members: Vec<overrides::Member>,
+    action: Action,
+) -> Result<Vec<overrides::OverrideResult>, String> {
+    blocking(move || overrides::decide_event_in(members, action, |r| set_with_learning(path, r)))
+        .await
+}
+
 /// The AI examples (the user's corrections) per source.
 #[tauri::command]
 async fn list_ai_examples() -> Result<Vec<learn::SourceExamples>, String> {
@@ -1226,6 +1254,8 @@ pub fn run() {
             set_override,
             explain_file,
             set_overrides,
+            confirm_series,
+            decide_event,
             remove_override,
             config_draft,
             effect_preview,

@@ -705,5 +705,7 @@
   "explain.last_copy_held": "留待审核：目标 %{target} 会把它移入回收站，但其他所有副本也都会进入回收站，因此保留这最后一份",
   "config.old_shape": "%{path}：使用旧的三阶段目标（before_ai / ai / after_ai）；它们被当作一个有序的 [[targets]] 列表读取，GUI 会以新格式保存文件",
   "cli.check_config_ok": "配置 %{path}：正常（%{sources} 个来源，%{targets} 个目标）",
-  "cli.check.config": "同时加载并校验此配置文件（TOML）"
+  "cli.check.config": "同时加载并校验此配置文件（TOML）",
+  "overrides.changed": "%{path}：文件在生成计划后已更改；请重新生成计划",
+  "overrides.best_not_member": "%{path}：不是该系列中的文件"
 }

@@ -712,5 +712,7 @@
   "explain.last_copy_held": "Held for review: target %{target} would trash it, but every other copy goes to the trash too, so this last one is kept",
   "config.old_shape": "%{path}: uses the old three-stage targets (before_ai / ai / after_ai); they are read as one ordered [[targets]] list, and the GUI saves the file in the new shape",
   "cli.check_config_ok": "config %{path}: ok (%{sources} sources, %{targets} targets)",
-  "cli.check.config": "Also load and validate this config file (TOML)"
+  "cli.check.config": "Also load and validate this config file (TOML)",
+  "overrides.changed": "%{path}: the file changed since the plan was built; build the plan again",
+  "overrides.best_not_member": "%{path}: not one of the series' files"
 }

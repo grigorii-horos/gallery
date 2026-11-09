@@ -719,5 +719,7 @@
   "explain.last_copy_held": "Păstrat pentru verificare: ținta %{target} l-ar trimite la coș, dar toate celelalte copii ajung și ele la coș, așa că această ultimă copie este păstrată",
   "config.old_shape": "%{path}: folosește vechile trei etape de ținte (before_ai / ai / after_ai); sunt citite ca o singură listă ordonată [[targets]], iar GUI salvează fișierul în forma nouă",
   "cli.check_config_ok": "configurația %{path}: în regulă (%{sources} surse, %{targets} ținte)",
-  "cli.check.config": "Încarcă și validează și acest fișier de configurare (TOML)"
+  "cli.check.config": "Încarcă și validează și acest fișier de configurare (TOML)",
+  "overrides.changed": "%{path}: fișierul s-a schimbat de la construirea planului; construiți planul din nou",
+  "overrides.best_not_member": "%{path}: nu este unul dintre fișierele seriei"
 }

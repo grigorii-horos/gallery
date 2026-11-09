@@ -719,5 +719,7 @@
   "explain.last_copy_held": "Gardé pour vérification : la cible %{target} l’enverrait à la corbeille, mais toutes les autres copies partent aussi à la corbeille ; cette dernière est donc conservée",
   "config.old_shape": "%{path} : utilise les anciennes trois étapes de cibles (before_ai / ai / after_ai) ; elles sont lues comme une seule liste ordonnée [[targets]], et l’interface enregistre le fichier dans la nouvelle forme",
   "cli.check_config_ok": "configuration %{path} : correcte (%{sources} sources, %{targets} cibles)",
-  "cli.check.config": "Charger et valider aussi ce fichier de configuration (TOML)"
+  "cli.check.config": "Charger et valider aussi ce fichier de configuration (TOML)",
+  "overrides.changed": "%{path} : le fichier a changé depuis la création du plan ; recréez le plan",
+  "overrides.best_not_member": "%{path} : ne fait pas partie des fichiers de la série"
 }

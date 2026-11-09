@@ -1000,5 +1000,16 @@
   "place_km": "Rayon, km",
   "place_remove": "Supprimer le lieu {{name}}",
   "place_remove_short": "Supprimer",
-  "explain_miss": "Non pris : {{condition}} : {{detail}}"
+  "explain_miss": "Non pris : {{condition}} : {{detail}}",
+  "decide_group_events": "Grouper par événement",
+  "decide_event_aria": "Événement {{start}}",
+  "decide_event_undated": "pas d’heure de prise de vue",
+  "decide_event_target": "Cible pour tout l’événement",
+  "decide_event_apply": "Appliquer à tout l’événement ({{n, number}})",
+  "decide_event_left_out": "Les fichiers dont le nom ne peut pas être construit ({{n, number}}) ne vont dans aucune cible ; seul « laisser dans la source » s’applique à eux.",
+  "decide_series_card_aria": "Meilleure prise de la série {{name}}",
+  "decide_series_hint": "Cliquez sur une prise pour en choisir une autre comme meilleure. La meilleure prise échappe aux règles de série ; les autres vont dans la cible suggérée.",
+  "decide_series_suggested": "suggérée",
+  "decide_series_best": "meilleure",
+  "decide_series_confirm": "Confirmer la meilleure, envoyer les autres vers « {{target}} »"
 }

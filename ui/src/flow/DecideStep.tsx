@@ -1,8 +1,8 @@
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { t } from "../i18n";
 import { date as formatDate } from "../i18n/format";
-import { errorText, type OverrideAction, type ReviewItem } from "../api";
+import { errorText, type OverrideAction, type OverrideResult, type ReviewItem, type ReviewMember } from "../api";
 import type { AppData } from "../store";
 import { baseName } from "../plan/model";
 import { thumbQueue as queue } from "../plan/queue";
@@ -13,7 +13,9 @@ import type { PlanState } from "../plan/usePlan";
 import {
   decisionState,
   failureText,
+  groupEvents,
   groupSeries,
+  seriesReviews,
   groupState,
   initialSelection,
   nextFocus,
@@ -22,8 +24,10 @@ import {
   shortcutTargets,
   toggle,
   toggleGroup,
+  type EventGroup,
   type FocusKey,
   type Series,
+  type SeriesReviewGroup,
 } from "../review/model";
 
 const RECENT_KEY = "gallery.recentTargets";
@@ -43,8 +47,10 @@ const toAction = (choice: string): OverrideAction =>
   choice === KEEP ? { kind: "keep" } : { kind: "target", name: choice };
 
 function actionText(a: OverrideAction): string {
-  return a.kind === "keep" ? t("decide_in_source") : a.name;
+  return a.kind === "keep" ? t("decide_in_source") : a.kind === "series_best" ? t("decide_series_best") : a.name;
 }
+
+const memberOf = (i: ReviewItem): ReviewMember => ({ source_path: i.source, size: i.size, mtime_ns: i.mtime_ns });
 
 /// Decide: the files the scan was not sure about (low-confidence AI
 /// answers, names that did not fit), in series, with a target or "keep"
@@ -58,7 +64,14 @@ export function DecideStep({ data, plan }: { data: AppData; plan: PlanState }) {
 function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[] }) {
   useTranslation();
   const view = plan.view!;
-  const series = useMemo(() => groupSeries(view.plan.review), [view.plan.review]);
+  // Series held by a `series` condition get their own side-by-side card.
+  const series = useMemo(() => groupSeries(view.plan.review.filter((r) => !r.series)), [view.plan.review]);
+  const cards = useMemo(() => seriesReviews(view.plan.review), [view.plan.review]);
+  const events = useMemo(() => groupEvents(view.plan.review), [view.plan.review]);
+  const [byEvent, setByEvent] = useState(false);
+  // The best shot the user picked per series review; otherwise the suggested one.
+  const [picked, setPicked] = useState<Record<string, string>>({});
+  const [eventChoice, setEventChoice] = useState<Record<string, string>>({});
   const overrides = useMemo(() => new Map(view.overrides.map((o) => [o.path, o])), [view.overrides]);
   // Resolved: a decision for this very version of the file. One for another
   // version is ignored by the core, so the file is not settled.
@@ -137,6 +150,98 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
     }
   };
 
+  const note = (id: string, results: OverrideResult[]) => {
+    setFailed((f) => ({ ...f, [id]: failureText(results) ?? "" }));
+    setErrors((prev) => {
+      const next = new Map(prev);
+      results.forEach((r) => (r.error ? next.set(r.source_path, r.error) : next.delete(r.source_path)));
+      return next;
+    });
+  };
+
+  const bestOf = (g: SeriesReviewGroup) =>
+    g.items.some((i) => i.source === picked[g.id]) ? picked[g.id] : g.items.some((i) => i.source === g.best) ? g.best : g.items[0].source;
+
+  const confirm = async (g: SeriesReviewGroup) => {
+    if (busy || !names.includes(g.target)) return;
+    setBusy(g.id);
+    setFailed((f) => ({ ...f, [g.id]: "" }));
+    try {
+      note(g.id, await plan.confirmSeries(g.items.map(memberOf), bestOf(g), g.target));
+    } catch (e) {
+      setFailed((f) => ({ ...f, [g.id]: errorText(e) }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  /** The files an event-wide `choice` covers: a target never takes a file whose name cannot be built. */
+  const eventMembers = (ev: EventGroup, choice: string) => ev.items.filter((i) => choice === KEEP || !i.name_error);
+
+  const decideEvent = async (ev: EventGroup) => {
+    const choice = eventChoice[ev.id];
+    const members = choice ? eventMembers(ev, choice) : [];
+    if (!choice || members.length === 0 || busy) return;
+    setBusy(ev.id);
+    setFailed((f) => ({ ...f, [ev.id]: "" }));
+    try {
+      const results = await plan.decideEvent(members.map(memberOf), toAction(choice));
+      note(ev.id, results);
+      const ok = results.filter((r) => r.key).map((r) => r.source_path);
+      setSelected((sel) => {
+        const next = new Set(sel);
+        ok.forEach((p) => next.delete(p));
+        return next;
+      });
+      if (choice !== KEEP && ok.length > 0) {
+        const r = pushRecent(recent, choice);
+        setRecent(r);
+        localStorage.setItem(RECENT_KEY, JSON.stringify(r));
+      }
+    } catch (e) {
+      setFailed((f) => ({ ...f, [ev.id]: errorText(e) }));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const seriesNode = (s: Series) => (
+    <SeriesBlock
+      key={s.id}
+      series={s}
+      first={series[0]?.id === s.id}
+      targets={targets}
+      selected={selected}
+      decided={decided}
+      stale={stale}
+      errors={errors}
+      focus={focus}
+      choice={choiceOf(s)}
+      busy={busy === s.id}
+      failed={failed[s.id] || null}
+      onFocus={setFocus}
+      onToggle={(p) => setSelected((sel) => toggle(sel, p))}
+      onToggleAll={() => setSelected((sel) => toggleGroup(sel, s.items.map((i) => i.source)))}
+      onChoice={(v) => setChoice((c) => ({ ...c, [s.id]: v }))}
+      onApply={() => apply(s)}
+    />
+  );
+
+  const cardNode = (g: SeriesReviewGroup) => (
+    <SeriesReviewCard
+      key={g.id}
+      group={g}
+      best={bestOf(g)}
+      known={names.includes(g.target)}
+      decided={decided}
+      error={errors}
+      busy={busy === g.id}
+      failed={failed[g.id] || null}
+      onPick={(p) => setPicked((x) => ({ ...x, [g.id]: p }))}
+      onConfirm={() => confirm(g)}
+    />
+  );
+
   const onKey = (e: KeyboardEvent<HTMLDivElement>) => {
     const el = e.target as HTMLElement;
     if (el.tagName === "SELECT" || e.altKey || e.ctrlKey || e.metaKey) return;
@@ -169,6 +274,10 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
           {t("decide_head", { files: t("files", { count: total }), series: t("decide_series", { count: series.length }) })}
           {done > 0 && <span className="muted">, {t("decide_done", { n: done })}</span>}
         </p>
+        <label className="check group-events">
+          <input type="checkbox" checked={byEvent} onChange={(e) => setByEvent(e.target.checked)} />
+          <span>{t("decide_group_events")}</span>
+        </label>
         <ul className="keys" aria-label={t("decide_keys")}>
           {shortcuts.map((name, i) => (
             <li key={name}>
@@ -187,27 +296,27 @@ function ReviewBody({ plan, targets }: { plan: PlanState; targets: TargetChoice[
         </ul>
       </div>
       <div className="review-list" ref={listRef} onKeyDown={onKey}>
-        {series.map((s, si) => (
-          <SeriesBlock
-            key={s.id}
-            series={s}
-            first={si === 0}
-            targets={targets}
-            selected={selected}
-            decided={decided}
-            stale={stale}
-            errors={errors}
-            focus={focus}
-            choice={choiceOf(s)}
-            busy={busy === s.id}
-            failed={failed[s.id] || null}
-            onFocus={setFocus}
-            onToggle={(p) => setSelected((sel) => toggle(sel, p))}
-            onToggleAll={() => setSelected((sel) => toggleGroup(sel, s.items.map((i) => i.source)))}
-            onChoice={(v) => setChoice((c) => ({ ...c, [s.id]: v }))}
-            onApply={() => apply(s)}
-          />
-        ))}
+        {byEvent
+          ? events.map((ev) => {
+              const inEvent = new Set(ev.items.map((i) => i.source));
+              return (
+                <EventBlock
+                  key={ev.id}
+                  event={ev}
+                  targets={targets}
+                  choice={eventChoice[ev.id] ?? ""}
+                  covered={eventMembers(ev, eventChoice[ev.id] ?? KEEP).length}
+                  busy={busy === ev.id}
+                  failed={failed[ev.id] || null}
+                  onChoice={(v) => setEventChoice((c) => ({ ...c, [ev.id]: v }))}
+                  onApply={() => decideEvent(ev)}
+                >
+                  {cards.filter((g) => inEvent.has(g.items[0].source)).map(cardNode)}
+                  {series.filter((s) => inEvent.has(s.items[0].source)).map(seriesNode)}
+                </EventBlock>
+              );
+            })
+          : [...cards.map(cardNode), ...series.map(seriesNode)]}
       </div>
     </>
   );
@@ -410,5 +519,134 @@ function ReviewCell({
       </span>
       <span className="rcell-name">{name}</span>
     </button>
+  );
+}
+
+function EventBlock({
+  event,
+  targets,
+  choice,
+  covered,
+  busy,
+  failed,
+  onChoice,
+  onApply,
+  children,
+}: {
+  event: EventGroup;
+  targets: TargetChoice[];
+  choice: string;
+  /** How many of the event's files the chosen action covers. */
+  covered: number;
+  busy: boolean;
+  failed: string | null;
+  onChoice: (v: string) => void;
+  onApply: () => void;
+  children: ReactNode;
+}) {
+  useTranslation();
+  const start = event.start ? `${formatDate(event.start)} ${event.start.slice(11, 16)}` : t("decide_event_undated");
+  const left = event.items.length - covered;
+  return (
+    <section className="event" aria-label={t("decide_event_aria", { start })}>
+      <header className="event-head">
+        <strong>{start}</strong>
+        <span className="muted">{t("files", { count: event.items.length })}</span>
+        <select className="picker" aria-label={t("decide_event_target")} value={choice} onChange={(e) => onChoice(e.target.value)}>
+          <option value="" disabled>
+            {t("decide_choose")}
+          </option>
+          {targets.map((x) => (
+            <option key={x.name} value={x.name}>
+              {x.name}
+            </option>
+          ))}
+          <option value={KEEP}>{t("trace_keep")}</option>
+        </select>
+        <button type="button" className="btn primary" disabled={!choice || covered === 0 || busy} onClick={onApply}>
+          {busy ? t("saving") : t("decide_event_apply", { n: covered })}
+        </button>
+        {choice && choice !== KEEP && left > 0 && <span className="muted small">{t("decide_event_left_out", { n: left })}</span>}
+        {failed && <p className="bad-text small series-failed">{failed}</p>}
+      </header>
+      {children}
+    </section>
+  );
+}
+
+/// A series the `series` conditions held back: every member side by side,
+/// the suggested best marked; picking another best and confirming records
+/// the best as such and sends the others to the suggested target.
+function SeriesReviewCard({
+  group,
+  best,
+  known,
+  decided,
+  error,
+  busy,
+  failed,
+  onPick,
+  onConfirm,
+}: {
+  group: SeriesReviewGroup;
+  best: string;
+  known: boolean;
+  decided: ReadonlyMap<string, OverrideAction>;
+  error: ReadonlyMap<string, string>;
+  busy: boolean;
+  failed: string | null;
+  onPick: (path: string) => void;
+  onConfirm: () => void;
+}) {
+  useTranslation();
+  const head = group.items[0];
+  const allDone = group.items.every((i) => decided.has(i.source));
+  return (
+    <section className={`series series-review${allDone ? " done" : ""}`} aria-label={t("decide_series_card_aria", { name: baseName(group.best) })}>
+      <div className="series-time">
+        <span className="series-clock">{head.captured ? head.captured.slice(11, 19) : ""}</span>
+        <span className="series-date">{head.captured ? formatDate(head.captured) : t("decide_time_unknown")}</span>
+      </div>
+      <div className="series-main">
+        <header className="series-head">
+          <strong>{t("files", { count: group.items.length })}</strong>
+          {allDone && <span className="series-done">{t("decide_decided")}</span>}
+        </header>
+        <p className="muted small">{t("decide_series_hint")}</p>
+        <ul className="series-strip" role="radiogroup" aria-label={t("decide_series_files")}>
+          {group.items.map((it) => {
+            const mine = decided.get(it.source);
+            const err = error.get(it.source);
+            return (
+              <li key={it.source}>
+                <button
+                  type="button"
+                  role="radio"
+                  aria-checked={it.source === best}
+                  className={`rcell${mine ? " decided" : ""}${err ? " failed" : ""}`}
+                  title={err ? `${it.source}\n${err}` : `${it.source}\n${it.reason}`}
+                  onClick={() => onPick(it.source)}
+                >
+                  <span className="rcell-thumb">
+                    <Thumb path={it.source} queue={queue} />
+                    {it.source === best && <span className="rcell-best">{t("decide_series_best")}</span>}
+                    {it.source === group.best && <span className="rcell-suggested">{t("decide_series_suggested")}</span>}
+                    {mine && <span className="rcell-decided">→ {actionText(mine)}</span>}
+                  </span>
+                  <span className="rcell-name">{baseName(it.source)}</span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+        <footer className="series-foot">
+          <button type="button" className="btn primary" disabled={!known || busy || allDone} onClick={onConfirm}>
+            {busy ? t("saving") : t("decide_series_confirm", { target: group.target })}
+          </button>
+          {!known && <span className="muted small">{t("decide_suggested_missing", { name: group.target })}</span>}
+          {failed && <p className="bad-text small series-failed">{failed}</p>}
+        </footer>
+      </div>
+    </section>
   );
 }

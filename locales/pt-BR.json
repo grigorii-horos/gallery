@@ -719,5 +719,7 @@
   "explain.last_copy_held": "Retido para revisão: o destino %{target} o enviaria para a lixeira, mas todas as outras cópias também vão para a lixeira, então esta última é mantida",
   "config.old_shape": "%{path}: usa as três etapas antigas de destinos (before_ai / ai / after_ai); elas são lidas como uma única lista ordenada [[targets]] e a interface salva o arquivo no formato novo",
   "cli.check_config_ok": "configuração %{path}: ok (%{sources} fontes, %{targets} destinos)",
-  "cli.check.config": "Carregar e validar também este arquivo de configuração (TOML)"
+  "cli.check.config": "Carregar e validar também este arquivo de configuração (TOML)",
+  "overrides.changed": "%{path}: o arquivo mudou desde que o plano foi criado; crie o plano de novo",
+  "overrides.best_not_member": "%{path}: não é um dos arquivos da série"
 }

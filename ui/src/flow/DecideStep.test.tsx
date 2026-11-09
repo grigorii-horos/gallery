@@ -83,6 +83,15 @@ const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (c
         mtime_ns: 0,
         error: null,
       }));
+    case "confirm_series":
+    case "decide_event":
+      return (args as { members: { source_path: string }[] }).members.map((m) => ({
+        source_path: m.source_path,
+        key: m.source_path,
+        size: 1,
+        mtime_ns: 0,
+        error: null,
+      }));
     default:
       throw new Error(`unexpected ${cmd}`);
   }
@@ -204,5 +213,70 @@ describe("“Decide”", () => {
     });
     // Enter applied and did not toggle the focused file.
     expect(invoke.mock.calls.filter(([cmd]) => cmd === "set_overrides")).toHaveLength(1);
+  });
+
+  describe("series and events", () => {
+    const members = ["/media/cam/s1.jpg", "/media/cam/s2.jpg", "/media/cam/s3.jpg"];
+    const inSeries = (name: string) => ({
+      ...item(name, "2026-04-12T10:00:00"),
+      suggested: "Photos",
+      series: { members, best: members[0] },
+    });
+    const seriesView = (): PlanView => ({
+      ...base,
+      plan: {
+        ...base.plan,
+        review: [inSeries("s1.jpg"), inSeries("s2.jpg"), inSeries("s3.jpg"), item("late.jpg", "2026-04-12T20:00:00")],
+      },
+    });
+
+    it("shows a held series side by side with the suggested best marked", async () => {
+      view = seriesView();
+      await open();
+      const card = screen.getByRole("region", { name: "Best shot of the series s1.jpg" });
+      const shots = within(card).getAllByRole("radio");
+      expect(shots).toHaveLength(3);
+      expect(shots.map((x) => x.getAttribute("aria-checked"))).toEqual(["true", "false", "false"]);
+      expect(within(shots[0]).getByText("suggested")).toBeInTheDocument();
+    });
+
+    it("confirms another best: series_best for it, the target for the rest", async () => {
+      const user = userEvent.setup();
+      view = seriesView();
+      await open();
+      const card = screen.getByRole("region", { name: "Best shot of the series s1.jpg" });
+      await user.click(within(card).getAllByRole("radio")[1]);
+      await user.click(within(card).getByRole("button", { name: "Confirm best, send the others to “Photos”" }));
+      expect(invoke).toHaveBeenCalledWith("confirm_series", {
+        path: null,
+        members: members.map((m) => ({ source_path: m, size: 1, mtime_ns: 0 })),
+        best: members[1],
+        target: "Photos",
+      });
+      expect(await within(card).findByText("→ best")).toBeInTheDocument();
+      expect(within(card).getAllByText("→ Photos")).toHaveLength(2);
+    });
+
+    it("groups by event and decides a whole event at once", async () => {
+      const user = userEvent.setup();
+      view = seriesView();
+      view.plan.review.push(nameError(item("bad", "2026-04-12T10:30:00", "no ext")));
+      await open();
+      expect(screen.queryByRole("region", { name: /^Event/ })).toBeNull();
+      await user.click(screen.getByRole("checkbox", { name: "Group by event" }));
+      const events = screen.getAllByRole("region", { name: /^Event/ });
+      // 10:00-10:30 is one event; 20:00 is 9.5 h later.
+      expect(events).toHaveLength(2);
+      const first = events[0];
+      await user.selectOptions(within(first).getByRole("combobox", { name: "Target for the whole event" }), "Photos");
+      // The name-error file is left out of a target.
+      await user.click(within(first).getByRole("button", { name: "Apply to the whole event (3)" }));
+      expect(invoke).toHaveBeenCalledWith("decide_event", {
+        path: null,
+        members: members.map((m) => ({ source_path: m, size: 1, mtime_ns: 0 })),
+        action: { kind: "target", name: "Photos" },
+      });
+      expect(invoke.mock.calls.filter((c) => c[0] === "decide_event")).toHaveLength(1);
+    });
   });
 });

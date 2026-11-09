@@ -928,5 +928,16 @@
   "place_km": "半径（公里）",
   "place_remove": "移除地点 {{name}}",
   "place_remove_short": "移除",
-  "explain_miss": "未被选中：{{condition}}：{{detail}}"
+  "explain_miss": "未被选中：{{condition}}：{{detail}}",
+  "decide_group_events": "按事件分组",
+  "decide_event_aria": "事件 {{start}}",
+  "decide_event_undated": "无拍摄时间",
+  "decide_event_target": "整个事件的目标",
+  "decide_event_apply": "应用到整个事件（{{n, number}}）",
+  "decide_event_left_out": "无法生成名称的文件（{{n, number}}）不会进入任何目标；只有“保留在源中”适用于它们。",
+  "decide_series_card_aria": "系列 {{name}} 的最佳照片",
+  "decide_series_hint": "点击一张照片可改选另一张为最佳。最佳照片不再受系列规则约束；其余照片进入建议的目标。",
+  "decide_series_suggested": "建议",
+  "decide_series_best": "最佳",
+  "decide_series_confirm": "确认最佳，其余发送到“{{target}}”"
 }

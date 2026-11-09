@@ -1036,5 +1036,16 @@
   "place_km": "Радиус, км",
   "place_remove": "Удалить место {{name}}",
   "place_remove_short": "Удалить",
-  "explain_miss": "Не взят: {{condition}}: {{detail}}"
+  "explain_miss": "Не взят: {{condition}}: {{detail}}",
+  "decide_group_events": "Группировать по событиям",
+  "decide_event_aria": "Событие {{start}}",
+  "decide_event_undated": "нет времени съёмки",
+  "decide_event_target": "Цель для всего события",
+  "decide_event_apply": "Применить ко всему событию ({{n, number}})",
+  "decide_event_left_out": "Файлы, для которых нельзя построить имя ({{n, number}}), в цель не попадают: их покрывает только «оставить в источнике».",
+  "decide_series_card_aria": "Лучший кадр серии {{name}}",
+  "decide_series_hint": "Нажмите на кадр, чтобы выбрать другой лучший. Лучший кадр выводится из-под правил серии, остальные уходят в предложенную цель.",
+  "decide_series_suggested": "предложен",
+  "decide_series_best": "лучший",
+  "decide_series_confirm": "Подтвердить лучший, остальные отправить в «{{target}}»"
 }
