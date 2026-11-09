@@ -1,6 +1,6 @@
 # Ordered targets and rich filters — design
 
-Status: draft for approval (2026-11-09).
+Status: approved by the user (2026-11-09).
 
 ## Intent
 
@@ -195,8 +195,12 @@ the best shot walks on to the targets below.
 ```toml
 series = { gap = "5s", similar = true, keep = "best", by = "sharpness" }
 ```
-OPEN: whether such files go straight to trash or to review with the whole
-series shown side by side.
+Decided (user): files matched through `series` never go straight to the
+target. They go to review, where the GUI shows the whole series side by side
+with the suggested best shot marked; the user confirms or picks another best
+shot, and only then do the others go to the matching target (e.g. trash). The
+confirmation is a manual decision (override) per series, so later runs don't
+ask again.
 
 **path** — glob(s) on the path relative to the source root
 (`path = "WhatsApp/**"`, lists = OR, `!` excludes), unlike `match`, which sees
