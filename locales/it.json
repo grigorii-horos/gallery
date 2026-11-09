@@ -550,6 +550,7 @@
   "gui.internal_scan": "errore interno di scansione: %{error}",
   "gui.internal_check": "errore interno di controllo: %{error}",
   "gui.place_no_gps": "questo file non contiene una posizione GPS",
+  "gui.place_not_a_file": "non è un percorso assoluto di un file: %{path}",
   "gui.no_config_dir": "nessuna directory delle impostazioni dell’utente",
   "desktop.linux_only": "la voce di menu e l’avvio al login sono disponibili solo su Linux; qui usa le impostazioni del sistema operativo",
   "current.no_files": "Il piano non contiene file da eseguire.",
