@@ -1462,8 +1462,8 @@ fn undo_selection(report: &Path, files: &[PathBuf], targets: &[String]) -> Resul
         .map(|f| std::path::absolute(f).unwrap_or_else(|_| f.clone()))
         .collect();
     let mut sources: Vec<PathBuf> = Vec::new();
-    undo::ensure_in_report(report, &files)?;
-    sources.extend(files);
+    // As the report spells them (a symlinked folder or /var vs /private/var).
+    sources.extend(undo::resolve_in_report(report, &files)?);
     for t in targets {
         sources.extend(undo::target_sources(report, None, t)?);
     }
