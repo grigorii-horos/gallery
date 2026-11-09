@@ -262,8 +262,6 @@
   "search_aria": "Buscar archivo",
   "search_hits_aria": "Archivos coincidentes",
   "search_explain_path": "Explicar la ruta",
-  "explain_stage_before_ai": "Antes de la IA",
-  "explain_stage_after_ai": "Después de la IA",
   "explain_op_write": "Escritura de un archivo nuevo",
   "explain_op_rename": "Renombrado en el sitio",
   "explain_op_keep": "Sin cambios",

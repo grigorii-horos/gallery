@@ -1041,7 +1041,10 @@ fn duplicate_verdict(c: &DuplicateCond, i: usize, groups: &Groups) -> Verdict {
     }
 }
 
-fn series_verdict(c: &SeriesCond, i: usize, groups: &Groups) -> Verdict {
+fn series_verdict(c: &SeriesCond, i: usize, groups: &Groups, confirmed_best: bool) -> Verdict {
+    if confirmed_best {
+        return Err(crate::t!("filter.miss.series_best"));
+    }
     let s = groups
         .series_of(i)
         .ok_or_else(|| crate::t!("filter.miss.not_in_series"))?;
@@ -1061,6 +1064,19 @@ pub fn check_groups(
     facts: &[Facts],
     groups: &Groups,
 ) -> std::result::Result<(), Miss> {
+    check_groups_with(cfg, f, i, facts, groups, false)
+}
+
+/// [`check_groups`] where `confirmed_best` says the user confirmed file `i`
+/// as the best shot of its series: a `series` condition never holds for it.
+pub(crate) fn check_groups_with(
+    cfg: &Config,
+    f: &Filter,
+    i: usize,
+    facts: &[Facts],
+    groups: &Groups,
+    confirmed_best: bool,
+) -> std::result::Result<(), Miss> {
     if let Some(c) = &f.event
         && let Some(key) = EventKey::of(f)
     {
@@ -1079,7 +1095,10 @@ pub fn check_groups(
         )?;
     }
     if let Some(c) = &f.series {
-        miss("series", with_not(c.not, series_verdict(c, i, groups)))?;
+        miss(
+            "series",
+            with_not(c.not, series_verdict(c, i, groups, confirmed_best)),
+        )?;
     }
     Ok(())
 }

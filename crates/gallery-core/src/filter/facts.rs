@@ -804,7 +804,19 @@ fn has_tag(exif: &Value, wanted: &str) -> bool {
     })
 }
 
-fn props_verdict(c: &PropsCond, f: &Facts, exif: &Value) -> Verdict {
+/// How `props.sharpness` is treated by a check.
+#[derive(Debug, Clone, Copy)]
+enum Sharpness {
+    /// Not looked at (the score is not known to the caller).
+    Skip,
+    /// The file's score; `None` when it has none (a video, no thumbnail).
+    Score(Option<f32>),
+}
+
+fn props_verdict(c: &PropsCond, f: &Facts, exif: &Value, sharp: Sharpness) -> Verdict {
+    if let (Some(s), Sharpness::Score(v)) = (&c.sharpness, sharp) {
+        range_verdict("sharpness", s.raw(), &s.val.0, v.map(f64::from))?;
+    }
     if let Some(s) = &c.size {
         range_verdict("size", s.raw(), &s.val.0, Some(f.size as f64))?;
     }
@@ -827,7 +839,7 @@ fn props_verdict(c: &PropsCond, f: &Facts, exif: &Value) -> Verdict {
     if let Some(s) = &c.fps {
         range_verdict("fps", s.raw(), &s.val.0, f.fps)?;
     }
-    // `sharpness` is evaluated by the routing (needs the computed score).
+    // `sharpness` is checked first, when the caller knows the score.
     if let Some(want) = c.orientation {
         let (w, h) = f.width.zip(f.height).ok_or_else(|| no_tag("orientation"))?;
         let have = match w.cmp(&h) {
@@ -914,6 +926,33 @@ pub fn check_file(
     exif: &Value,
     now: NaiveDateTime,
 ) -> std::result::Result<(), Miss> {
+    check_file_in(cfg, f, entry, facts, exif, now, Sharpness::Skip)
+}
+
+/// [`check_file`] with `props.sharpness` checked too, against the file's
+/// score (`None`: it has none, so the sub-option does not hold). The score
+/// is part of the `props` table, so `not = true` inverts it with the rest.
+pub(crate) fn check_file_scored(
+    cfg: &Config,
+    f: &Filter,
+    entry: &FileEntry,
+    facts: &Facts,
+    exif: &Value,
+    now: NaiveDateTime,
+    sharpness: Option<f32>,
+) -> std::result::Result<(), Miss> {
+    check_file_in(cfg, f, entry, facts, exif, now, Sharpness::Score(sharpness))
+}
+
+fn check_file_in(
+    cfg: &Config,
+    f: &Filter,
+    entry: &FileEntry,
+    facts: &Facts,
+    exif: &Value,
+    now: NaiveDateTime,
+    sharp: Sharpness,
+) -> std::result::Result<(), Miss> {
     if let Some(c) = &f.date {
         miss("date", with_not(c.not, date_verdict(c, facts, now)))?;
     }
@@ -924,7 +963,10 @@ pub fn check_file(
         miss("device", with_not(c.not, device_verdict(cfg, c, facts)))?;
     }
     if let Some(c) = &f.props {
-        miss("props", with_not(c.not, props_verdict(c, facts, exif)))?;
+        miss(
+            "props",
+            with_not(c.not, props_verdict(c, facts, exif, sharp)),
+        )?;
     }
     if let Some(m) = &f.path {
         miss("path", path_verdict(cfg, m, entry))?;

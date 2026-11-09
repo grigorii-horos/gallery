@@ -105,7 +105,7 @@ pub fn list_in(file: &Path) -> Vec<SourceExamples> {
                     ai_suggested: c.ai_suggested,
                     user_choice: match c.user_choice {
                         Action::Target { name } => Some(name),
-                        Action::Keep => None,
+                        Action::Keep | Action::SeriesBest => None,
                     },
                     at: c.at,
                 })

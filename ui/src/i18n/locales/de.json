@@ -244,8 +244,6 @@
   "search_aria": "Datei suchen",
   "search_hits_aria": "Passende Dateien",
   "search_explain_path": "Pfad erklären",
-  "explain_stage_before_ai": "Vor der KI",
-  "explain_stage_after_ai": "Nach der KI",
   "explain_op_write": "Neue Datei wird geschrieben",
   "explain_op_rename": "Umbenennung vor Ort",
   "explain_op_keep": "Unverändert",

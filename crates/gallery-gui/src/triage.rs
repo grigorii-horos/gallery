@@ -370,7 +370,7 @@ mod tests {
     use gallery_core::pipeline::NoAi;
     use gallery_core::plan::{Side, build_plan};
     use gallery_core::progress::{Cancel, NoProgress};
-    use gallery_core::route::route_with_overrides;
+    use gallery_core::route::{RouteCtx, route_with_overrides};
     use gallery_core::scan::scan_sources;
     use std::collections::HashMap;
     use std::path::PathBuf;
@@ -416,6 +416,7 @@ mod tests {
         let routed = route_with_overrides(
             &c,
             &files,
+            &RouteCtx::empty(&files),
             &NoAi,
             false,
             &Overrides::default(),

@@ -213,6 +213,8 @@ pub fn render_examples(
             && match &c.user_choice {
                 Action::Target { name } => known(name),
                 Action::Keep => true,
+                // A series choice says nothing about categories.
+                Action::SeriesBest => false,
             };
         if valid && !picked.iter().any(|p| p.same_lesson(c)) {
             picked.push(c);
@@ -230,7 +232,8 @@ fn line(c: &Correction) -> String {
     let chose = c.ai_suggested.as_deref().unwrap_or(NO_CATEGORY);
     let right = match &c.user_choice {
         Action::Target { name } => name.as_str(),
-        Action::Keep => KEEP,
+        // Never picked by `render_examples`.
+        Action::Keep | Action::SeriesBest => KEEP,
     };
     format!("{reason} — AI chose {chose}, correct is {right}")
 }
@@ -254,6 +257,10 @@ pub fn corrections_from_plan(
     };
     let mut out = Vec::new();
     for (path, choice) in decisions {
+        // Confirming a series' best shot corrects no AI answer.
+        if *choice == Action::SeriesBest {
+            continue;
+        }
         let (suggested, reason) = if let Some(it) = plan.items.iter().find(|i| &i.source == path) {
             match &it.via {
                 Via::Ai { reason, .. } => (Some(it.target.clone()), reason.clone()),

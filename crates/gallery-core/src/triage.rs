@@ -147,7 +147,7 @@ mod tests {
     use crate::pipeline::NoAi;
     use crate::plan::{Side, build_plan};
     use crate::progress::{Cancel, NoProgress};
-    use crate::route::route_with_overrides;
+    use crate::route::{RouteCtx, route_with_overrides};
     use crate::scan::scan_sources;
     use std::collections::HashMap;
 
@@ -191,6 +191,7 @@ mod tests {
         let routed = route_with_overrides(
             &fx.cfg,
             &files,
+            &RouteCtx::empty(&files),
             &NoAi,
             false,
             &Overrides::default(),

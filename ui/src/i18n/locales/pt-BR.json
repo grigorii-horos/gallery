@@ -262,8 +262,6 @@
   "search_aria": "Procurar arquivo",
   "search_hits_aria": "Arquivos correspondentes",
   "search_explain_path": "Explicar o caminho",
-  "explain_stage_before_ai": "Antes da IA",
-  "explain_stage_after_ai": "Depois da IA",
   "explain_op_write": "Gravação de um novo arquivo",
   "explain_op_rename": "Renomeação no lugar",
   "explain_op_keep": "Sem alteração",

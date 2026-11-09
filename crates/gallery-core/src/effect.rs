@@ -18,7 +18,9 @@ use crate::config::Config;
 use crate::overrides::Overrides;
 use crate::plan::{OutputOp, Plan, Side, build_plan_with};
 use crate::progress::{Cancel, NoProgress, Progress};
-use crate::route::{AiAnswer, AiRequest, Classifier, Confidence, Decision, route_with_overrides};
+use crate::route::{
+    AiAnswer, AiRequest, Classifier, Confidence, Decision, RouteCtx, route_with_overrides,
+};
 use crate::scan::FileEntry;
 
 /// Examples kept per outcome bucket.
@@ -219,7 +221,10 @@ fn fates(
         model: &cfg.ai.model,
         pending: RefCell::new(HashSet::new()),
     };
-    let routed = route_with_overrides(cfg, files, &ai, false, overrides, progress, cancel)?;
+    // No tools here: conditions needing thumbnails (sharpness, similar
+    // series) do not hold, as without them in a scan.
+    let ctx = RouteCtx::build(cfg, files, exif, None, progress, cancel)?;
+    let routed = route_with_overrides(cfg, files, &ctx, &ai, false, overrides, progress, cancel)?;
     let decisions = routed.decisions;
     let plan: Plan = build_plan_with(cfg, decisions.clone(), exif, Side::Local, progress, cancel)?;
     let by_item: HashMap<&Path, &crate::plan::PlanItem> =

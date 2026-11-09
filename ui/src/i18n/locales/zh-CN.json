@@ -226,8 +226,6 @@
   "search_aria": "查找文件",
   "search_hits_aria": "匹配的文件",
   "search_explain_path": "解释该路径",
-  "explain_stage_before_ai": "AI 之前",
-  "explain_stage_after_ai": "AI 之后",
   "explain_op_write": "写入新文件",
   "explain_op_rename": "原地重命名",
   "explain_op_keep": "无变化",

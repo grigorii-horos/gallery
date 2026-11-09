@@ -244,8 +244,6 @@
   "search_aria": "Find file",
   "search_hits_aria": "Matching files",
   "search_explain_path": "Explain the path",
-  "explain_stage_before_ai": "Before AI",
-  "explain_stage_after_ai": "After AI",
   "explain_op_write": "Writing a new file",
   "explain_op_rename": "Renaming in place",
   "explain_op_keep": "Unchanged",
