@@ -402,9 +402,8 @@ mod tests {
 
     #[test]
     fn default_path_is_under_data_dir() {
-        if let Some(p) = Overrides::default_path() {
-            assert!(p.ends_with("gallery/overrides.json"));
-        }
+        let p = Overrides::default_path().unwrap();
+        assert_eq!(p, crate::paths::data_dir().unwrap().join("overrides.json"));
     }
 
     fn checked_config(root: &Path, recursive: bool) -> Config {

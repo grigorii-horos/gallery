@@ -298,8 +298,7 @@ mod tests {
 
     #[test]
     fn default_dir_is_under_cache_dir() {
-        if let Some(p) = default_dir() {
-            assert!(p.ends_with("gallery/thumbs"));
-        }
+        let p = default_dir().unwrap();
+        assert_eq!(p, crate::paths::cache_dir().unwrap().join("thumbs"));
     }
 }

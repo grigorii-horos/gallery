@@ -30,8 +30,15 @@ iana-time-zone = "0.1.65"
 rust-i18n = "4.2.4"
 sys-locale = "0.3.2"
 
+[features]
+# Test runs only (see `paths`): own files go to a throwaway folder under the
+# build's target dir, never the real data and cache dirs.
+test-paths = []
+
 [dev-dependencies]
 wiremock = "0.6.5"
+# Its own tests (unit and integration) get the feature too.
+gallery-core = { path = ".", features = ["test-paths"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 libc = "0.2"

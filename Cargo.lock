@@ -1554,6 +1554,7 @@ dependencies = [
  "chrono",
  "chrono-tz",
  "dirs",
+ "gallery-core",
  "globset",
  "iana-time-zone",
  "image",

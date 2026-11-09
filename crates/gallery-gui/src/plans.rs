@@ -10,10 +10,7 @@ const SUFFIX: &str = ".plan.json";
 
 /// `<user data dir>/gallery/plans` (`$GALLERY_DATA_DIR/plans` when set).
 pub fn default_dir() -> Option<PathBuf> {
-    match crate::data_dir_override() {
-        Some(dir) => Some(dir.join("plans")),
-        None => dirs::data_dir().map(|d| d.join("gallery").join("plans")),
-    }
+    gallery_core::paths::data_dir().map(|d| d.join("plans"))
 }
 
 /// Where the one current plan per config lives: `current/` next to the
