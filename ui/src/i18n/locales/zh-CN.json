@@ -233,6 +233,7 @@
   "explain_op_write": "写入新文件",
   "explain_op_rename": "原地重命名",
   "explain_op_keep": "无变化",
+  "explain_op_kept_smallest": "未更改：处理链未能使其变小",
   "explain_aria": "为什么是这个文件",
   "explain_trace": "轨迹",
   "explain_working": "正在判断…",

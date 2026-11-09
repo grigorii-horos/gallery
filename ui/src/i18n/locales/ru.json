@@ -287,6 +287,7 @@
   "explain_op_write": "Запись нового файла",
   "explain_op_rename": "Переименование на месте",
   "explain_op_keep": "Без изменений",
+  "explain_op_kept_smallest": "Без изменений: цепочка не сделала его меньше",
   "explain_aria": "Почему этот файл",
   "explain_trace": "След",
   "explain_working": "Выясняем…",

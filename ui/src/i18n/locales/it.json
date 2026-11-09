@@ -269,6 +269,7 @@
   "explain_op_write": "Scrittura di un nuovo file",
   "explain_op_rename": "Ridenominazione sul posto",
   "explain_op_keep": "Invariato",
+  "explain_op_kept_smallest": "Invariato: la catena non l’ha reso più piccolo",
   "explain_aria": "Perché questo file",
   "explain_trace": "Traccia",
   "explain_working": "Valutazione in corso…",

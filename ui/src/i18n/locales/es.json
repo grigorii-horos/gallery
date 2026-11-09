@@ -269,6 +269,7 @@
   "explain_op_write": "Escritura de un archivo nuevo",
   "explain_op_rename": "Renombrado en el sitio",
   "explain_op_keep": "Sin cambios",
+  "explain_op_kept_smallest": "Sin cambios: la cadena no lo hizo más pequeño",
   "explain_aria": "Por qué este archivo",
   "explain_trace": "Rastro",
   "explain_working": "Averiguándolo…",

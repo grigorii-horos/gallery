@@ -269,6 +269,7 @@
   "explain_op_write": "Écriture d’un nouveau fichier",
   "explain_op_rename": "Renommage sur place",
   "explain_op_keep": "Inchangé",
+  "explain_op_kept_smallest": "Inchangé : la chaîne ne l’a pas rendu plus petit",
   "explain_aria": "Pourquoi ce fichier",
   "explain_trace": "Trace",
   "explain_working": "Analyse en cours…",
