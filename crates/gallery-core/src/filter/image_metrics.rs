@@ -183,11 +183,7 @@ impl MetricsCache {
             return Ok(());
         }
         let mut map = self.map.lock().unwrap();
-        map.retain(|key, m| {
-            m.path
-                .as_deref()
-                .is_none_or(|p| current_key(p).as_ref() == Some(key))
-        });
+        map.retain(|key, m| !m.path.as_deref().is_some_and(|p| stale(p, key)));
         let bytes = serde_json::to_vec(&*map).map_err(|e| Error::Io(std::io::Error::other(e)))?;
         drop(map);
         if let Some(dir) = path.parent() {
@@ -199,11 +195,18 @@ impl MetricsCache {
     }
 }
 
-/// The cache key of `p` as it is on disk now; `None` when it is gone.
-fn current_key(p: &Path) -> Option<String> {
-    let m = std::fs::metadata(p).ok()?;
-    let mtime_ns = crate::scan::mtime_ns(&m).ok()?;
-    Some(crate::thumbs::cache_name(p, m.len(), mtime_ns))
+/// The entry `key` of file `p` is of no use any more: the file changed
+/// (another size or mtime), or it is gone from a folder that is still
+/// there. A file whose folder is missing too (an SD card or a share not
+/// mounted now) keeps its entry for when it is back.
+fn stale(p: &Path, key: &str) -> bool {
+    match std::fs::metadata(p) {
+        Ok(m) => crate::scan::mtime_ns(&m)
+            .is_ok_and(|mtime_ns| crate::thumbs::cache_name(p, m.len(), mtime_ns) != key),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => p.parent().is_some_and(Path::is_dir),
+        // Unreadable now (permissions, a share failing): keep it.
+        Err(_) => false,
+    }
 }
 
 #[cfg(test)]
@@ -325,5 +328,22 @@ mod tests {
         let (size, mtime) = stamp(&kept);
         assert!(again.get(&kept, size, mtime).is_some());
         assert!(again.get(&changed, old.0, old.1).is_none());
+    }
+
+    #[test]
+    fn save_keeps_entries_of_files_on_a_folder_not_there_now() {
+        let dir = tempfile::tempdir().unwrap();
+        let card = dir.path().join("card");
+        std::fs::create_dir(&card).unwrap();
+        let p = card.join("a.jpg");
+        std::fs::write(&p, "a").unwrap();
+        let (size, mtime) = stamp(&p);
+        let c = MetricsCache::load(dir.path());
+        c.update(&p, size, mtime, |m| m.dhash = Some(1));
+        // The card is taken out: its folder is gone with the file.
+        std::fs::remove_dir_all(&card).unwrap();
+        c.save().unwrap();
+        let again = MetricsCache::load(dir.path());
+        assert_eq!(again.get(&p, size, mtime).and_then(|m| m.dhash), Some(1));
     }
 }
