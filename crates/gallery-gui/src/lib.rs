@@ -16,6 +16,7 @@ pub mod learn;
 pub mod notify;
 pub mod overrides;
 pub mod pilot;
+pub mod places;
 pub mod plans;
 pub mod presets;
 pub mod scan;
@@ -727,6 +728,13 @@ async fn thumb(path: String) -> Result<String, String> {
     .await
 }
 
+/// GPS of the photo or video at `path`, for a place's coordinates. Rejects
+/// with a message when the file carries no fix.
+#[tauri::command]
+async fn gps_of(path: String) -> Result<places::LatLon, String> {
+    blocking(move || places::gps_of(&tools()?, Path::new(&path))).await
+}
+
 /// Why the scan does what it does with the file at `path`: the core's
 /// read-only explanation under the config at `config_path`, with the
 /// saved manual decisions and the cached AI answers. Never changes anything
@@ -1253,6 +1261,7 @@ pub fn run() {
             thumb,
             set_override,
             explain_file,
+            gps_of,
             set_overrides,
             confirm_series,
             decide_event,

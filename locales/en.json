@@ -545,6 +545,7 @@
   "gui.internal_retry": "internal retry error: %{error}",
   "gui.internal_scan": "internal scan error: %{error}",
   "gui.internal_check": "internal check error: %{error}",
+  "gui.place_no_gps": "no GPS position in this file",
   "gui.no_config_dir": "no user settings directory",
   "desktop.linux_only": "the app-menu entry and start at login are set up on Linux only; on this system use the operating system's own settings",
   "current.no_files": "The plan has no files to run.",

@@ -154,6 +154,16 @@ fn dimensions(exif: &Value) -> Option<(u32, u32)> {
     .find_map(|(w, h)| Some((max_f64(exif, w)? as u32, max_f64(exif, h)? as u32)))
 }
 
+/// The GPS fix of an exiftool record. Some phones write exactly (0, 0) when
+/// they have no fix: that is no fix.
+pub fn gps_of_record(exif: &Value) -> Option<(f64, f64)> {
+    match (tag_f64(exif, "GPSLatitude"), tag_f64(exif, "GPSLongitude")) {
+        (Some(a), Some(o)) if a == 0.0 && o == 0.0 => None,
+        (Some(a), Some(o)) if a.abs() <= 90.0 && o.abs() <= 180.0 => Some((a, o)),
+        _ => None,
+    }
+}
+
 /// Collect the facts of one file. `tz` is the plan's zone.
 pub fn facts_of(entry: &FileEntry, exif: &Value, tz: Option<Tz>) -> Facts {
     let name = entry
@@ -164,12 +174,7 @@ pub fn facts_of(entry: &FileEntry, exif: &Value, tz: Option<Tz>) -> Facts {
     let kind = kind_of(&entry.path);
     let (stem, _) = split_name(name);
 
-    // Some phones write exactly (0, 0) when they have no fix.
-    let gps = match (tag_f64(exif, "GPSLatitude"), tag_f64(exif, "GPSLongitude")) {
-        (Some(a), Some(o)) if a == 0.0 && o == 0.0 => None,
-        (Some(a), Some(o)) if a.abs() <= 90.0 && o.abs() <= 180.0 => Some((a, o)),
-        _ => None,
-    };
+    let gps = gps_of_record(exif);
 
     let (mut width, mut height) = match dimensions(exif) {
         Some((w, h)) => (Some(w), Some(h)),

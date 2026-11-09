@@ -549,6 +549,7 @@
   "gui.internal_retry": "erreur interne de reprise : %{error}",
   "gui.internal_scan": "erreur interne d’analyse : %{error}",
   "gui.internal_check": "erreur interne de vérification : %{error}",
+  "gui.place_no_gps": "ce fichier ne contient pas de position GPS",
   "gui.no_config_dir": "pas de dossier de réglages utilisateur",
   "desktop.linux_only": "l’entrée de menu et le lancement à la connexion n’existent que sous Linux ; ici, utilisez les réglages du système",
   "current.no_files": "Le plan ne contient aucun fichier à exécuter.",

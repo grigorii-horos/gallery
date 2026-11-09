@@ -549,6 +549,7 @@
   "gui.internal_retry": "error interno de reintento: %{error}",
   "gui.internal_scan": "error interno de escaneo: %{error}",
   "gui.internal_check": "error interno de comprobación: %{error}",
+  "gui.place_no_gps": "este archivo no tiene posición GPS",
   "gui.no_config_dir": "sin directorio de ajustes del usuario",
   "desktop.linux_only": "la entrada del menú y el inicio de sesión automático solo existen en Linux; en este sistema use los ajustes del sistema operativo",
   "current.no_files": "El plan no tiene archivos que ejecutar.",

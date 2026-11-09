@@ -41,6 +41,26 @@ export async function pickFolder(current: string | null, title: string): Promise
   return typeof picked === "string" ? picked : null;
 }
 
+const MEDIA_EXTENSIONS = [
+  "jpg", "jpeg", "png", "heic", "heif", "avif", "webp", "tif", "tiff", "dng", "cr2", "cr3", "nef", "arw", "orf", "raf", "rw2",
+  "mp4", "mov", "m4v", "3gp", "mkv", "avi", "webm",
+];
+
+/// Pick a photo or video (to take its GPS); null if cancelled.
+export async function pickMediaFile(title: string): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const picked = await open({
+    title,
+    directory: false,
+    multiple: false,
+    filters: [{ name: t("dialog_media_filter"), extensions: MEDIA_EXTENSIONS }],
+  });
+  return typeof picked === "string" ? picked : null;
+}
+
+/// GPS of a photo or video; rejects with a message when it has no fix.
+export const gpsOf = (path: string) => invoke<{ lat: number; lon: number }>("gps_of", { path });
+
 /// Pick a text file (an AI prompt part); null if cancelled.
 export async function pickTextFile(current: string | null, title: string): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
