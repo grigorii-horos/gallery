@@ -335,3 +335,43 @@ fn not_smaller_under_a_new_name_in_its_folder_renames_the_source() {
     assert_eq!(names(&root), ["shot.png"]);
     assert_eq!(hash(&src), orig);
 }
+
+/// Every file of a run is recorded (the store is written once, at the end,
+/// with all of them), whatever worker finished it.
+#[test]
+fn every_file_of_a_parallel_run_is_remembered() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let d = d.path();
+    let root = d.join("src");
+    let srcs: Vec<PathBuf> = (0..6)
+        .map(|i| tiny_png(&root, &format!("shot{i}.png")))
+        .collect();
+    let c = config(d, None, "", 72);
+    let routed = |srcs: &[PathBuf]| -> Vec<(FileEntry, Decision)> {
+        srcs.iter()
+            .map(|s| {
+                (
+                    entry(d, s),
+                    Decision::Target {
+                        name: "t".into(),
+                        via: Via::Mask,
+                        ai_meta: None,
+                    },
+                )
+            })
+            .collect()
+    };
+    let plan = build_plan(&c, routed(&srcs), &HashMap::new(), Side::Local).unwrap();
+    assert_eq!(plan.items.len(), 6);
+    let path = d.join("plan.json");
+    plan.save(&path).unwrap();
+    let o = ApplyOptions { jobs: 4, ..opts() };
+    let rep = apply(&path, &Tools::discover().unwrap(), &o).unwrap();
+    for r in &rep.items {
+        untouched(r);
+    }
+    let again = build_plan(&c, routed(&srcs), &HashMap::new(), Side::Local).unwrap();
+    assert!(again.items.is_empty(), "{again:?}");
+    assert_eq!(again.unchanged.len(), 6);
+}

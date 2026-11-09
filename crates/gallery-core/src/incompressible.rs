@@ -123,38 +123,62 @@ impl Known {
     }
 }
 
-/// Record that the pipe of fingerprint `pipe` could not make the file at
-/// `path` (as it is on disk now) any smaller. Entries of files that are gone
-/// or changed are dropped on the way. Best effort: a failure only means the
-/// file is encoded again next time.
-pub fn remember(path: &Path, pipe: &str) {
-    let (Some(store), Some(k)) = (store_path(), key(path)) else {
+/// A file the pipe of fingerprint `pipe` could not make any smaller, as
+/// apply saw it: `size` and `mtime_ns` are the plan's (already checked
+/// against the file), or those of the file apply just placed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Record {
+    pub path: PathBuf,
+    pub size: u64,
+    pub mtime_ns: i128,
+    pub pipe: String,
+}
+
+/// Record `records` in one write of the store; entries of files that are
+/// gone or changed are dropped on the way (see [`stale`]). Best effort: a
+/// failure only means the files are encoded again next time.
+pub fn remember_many(records: &[Record]) {
+    if records.is_empty() {
         return;
-    };
-    let Ok(meta) = std::fs::metadata(path) else {
-        return;
-    };
-    let Ok(mtime) = mtime_ns(&meta) else {
+    }
+    let Some(store) = store_path() else {
         return;
     };
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut s = load(&store);
     s.version = VERSION;
     s.files.retain(|p, e| !stale(Path::new(p), e));
-    s.files.insert(
-        k,
-        Entry {
-            size: meta.len(),
-            mtime_ns: mtime,
-            pipe: pipe.to_string(),
-        },
-    );
+    for r in records {
+        let Some(k) = key(&r.path) else {
+            continue;
+        };
+        s.files.insert(
+            k,
+            Entry {
+                size: r.size,
+                mtime_ns: r.mtime_ns,
+                pipe: r.pipe.clone(),
+            },
+        );
+    }
     if let Some(dir) = store.parent() {
         let _ = std::fs::create_dir_all(dir);
     }
     if let Ok(bytes) = serde_json::to_vec_pretty(&s) {
         let _ = crate::paths::write_atomic(&store, &bytes);
     }
+}
+
+/// [`remember_many`] of one file as it is on disk now (tests).
+#[cfg(test)]
+pub(crate) fn remember(path: &Path, pipe: &str) {
+    let meta = std::fs::metadata(path).unwrap();
+    remember_many(&[Record {
+        path: path.to_path_buf(),
+        size: meta.len(),
+        mtime_ns: mtime_ns(&meta).unwrap(),
+        pipe: pipe.to_string(),
+    }]);
 }
 
 #[cfg(test)]

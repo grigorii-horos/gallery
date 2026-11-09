@@ -413,6 +413,7 @@ fn apply_impl(
         opts,
         dirs: Mutex::new(HashMap::new()),
         journal: journal.as_ref(),
+        incompressible: Mutex::new(Vec::new()),
     };
     let collected = Mutex::new(Collected::new(
         report.clone(),
@@ -474,6 +475,12 @@ fn apply_impl(
             .for_each(|(i, item)| one(i, item));
     });
 
+    // One write for the whole run (cancelled or stopped too: what finished).
+    let found = run
+        .incompressible
+        .into_inner()
+        .unwrap_or_else(|e| e.into_inner());
+    crate::incompressible::remember_many(&found);
     let collected = collected.into_inner().unwrap_or_else(|e| e.into_inner());
     report.cancelled = collected.results.iter().any(Option::is_none);
     report.stopped_by_anomalies = stop.load(Ordering::SeqCst);
@@ -797,6 +804,8 @@ struct Run<'a> {
     dirs: Mutex<HashMap<PathBuf, HashSet<String>>>,
     /// None in a dry run.
     journal: Option<&'a Journal>,
+    /// Files no pipe made smaller, written to the store once at the end.
+    incompressible: Mutex<Vec<crate::incompressible::Record>>,
 }
 
 fn same_file_state(item: &PlanItem, meta: &std::fs::Metadata) -> bool {
@@ -1322,7 +1331,16 @@ impl Run<'_> {
         let pipe =
             crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n));
         if let Some(pipe) = pipe {
-            crate::incompressible::remember(at, &pipe);
+            // The plan's size and mtime: the file was just checked to be them.
+            self.incompressible
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push(crate::incompressible::Record {
+                    path: at.to_path_buf(),
+                    size: item.size,
+                    mtime_ns: item.mtime_ns,
+                    pipe,
+                });
         }
     }
 
@@ -2597,6 +2615,7 @@ mod tests {
             opts: &opts,
             dirs: Mutex::new(HashMap::new()),
             journal: None,
+            incompressible: Mutex::new(Vec::new()),
         };
         let staged = d.path().join(".gallery-tmp-r-x");
         std::fs::write(&staged, b"12345").unwrap();
