@@ -90,11 +90,22 @@ fn ai_target(mut t: Table, style: &Style) -> Table {
     t
 }
 
-/// Whether the document's `targets` is the old three-stage table.
+/// Whether the document's `targets` is the old three-stage table: some
+/// stage lists a target (as in the core, stages that are all empty are not).
 pub fn is_old_shape(doc: &DocumentMut) -> bool {
     doc.get("targets")
         .and_then(Item::as_table_like)
-        .is_some_and(|t| t.iter().any(|(k, _)| STAGES.contains(&k)))
+        .is_some_and(|t| {
+            t.iter().any(|(k, v)| {
+                STAGES.contains(&k)
+                    && match v {
+                        Item::ArrayOfTables(a) => !a.is_empty(),
+                        Item::Value(Value::Array(a)) => !a.is_empty(),
+                        // Not a list: the shape is old, the edit reports it.
+                        _ => true,
+                    }
+            })
+        })
 }
 
 /// Rewrite an old-shape `targets` table as the `[[targets]]` list. `false`
@@ -106,8 +117,8 @@ pub fn to_ordered(doc: &mut DocumentMut) -> R<bool> {
     if let Some((k, _)) = old.iter().find(|(k, _)| !STAGES.contains(k)) {
         return Err(not_understood(format!("targets.{k}")));
     }
-    if old.is_empty() {
-        // `[targets]` naming no stage is not the old shape; an empty list.
+    if !is_old_shape(doc) {
+        // `[targets]` naming no stage target is not the old shape; an empty list.
         doc.remove("targets");
         return Ok(false);
     }
@@ -145,4 +156,25 @@ pub fn to_ordered(doc: &mut DocumentMut) -> R<bool> {
     // The blocks in list order (the file may have had the stages in another).
     regroup(doc, Group::Targets, Shape::Slots, |_| ())?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn parse(s: &str) -> DocumentMut {
+        s.parse().unwrap()
+    }
+
+    /// Stage lists that are all empty are not the old shape (as in the
+    /// core): no `.bak` is held back for them and nothing is rewritten.
+    #[test]
+    fn all_empty_stages_are_not_the_old_shape() {
+        let empty = "[targets]\nbefore_ai = []\nai = []\n";
+        assert!(!is_old_shape(&parse(empty)));
+        let mut d = parse(empty);
+        assert!(!to_ordered(&mut d).unwrap());
+        assert!(d.get("targets").is_none());
+        assert!(is_old_shape(&parse("[[targets.after_ai]]\nname = \"A\"\n")));
+    }
 }

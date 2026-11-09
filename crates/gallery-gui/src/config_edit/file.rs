@@ -53,8 +53,10 @@ pub enum Backup {
     Keep,
 }
 
-/// Copy `real` to its backup; the path written.
-fn back_up(real: &Path, how: Backup) -> std::io::Result<PathBuf> {
+/// Copy `real` to its backup; the path written. `original` is the text
+/// that was checked against the expected version: a `Keep` backup holds
+/// those bytes, not whatever the file holds by now.
+fn back_up(real: &Path, original: &[u8], how: Backup) -> std::io::Result<PathBuf> {
     for n in 0.. {
         let bak = numbered_backup(real, n);
         match how {
@@ -74,7 +76,7 @@ fn back_up(real: &Path, how: Backup) -> std::io::Result<PathBuf> {
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                     Err(e) => return Err(e),
                 };
-                fill_or_remove(&bak, out, |f| f.write_all(&std::fs::read(real)?))?;
+                fill_or_remove(&bak, out, |f| f.write_all(original))?;
                 return Ok(bak);
             }
         }
@@ -125,14 +127,14 @@ pub fn write_atomic(
 ) -> Result<PathBuf, WriteError> {
     let real = std::fs::canonicalize(path)?;
     let dir = real.parent().unwrap_or(Path::new("."));
-    let check = || -> Result<(), WriteError> {
+    let check = || -> Result<Vec<u8>, WriteError> {
         match std::fs::read(&real) {
-            Ok(b) if version_of(&b) == expected => Ok(()),
+            Ok(b) if version_of(&b) == expected => Ok(b),
             Ok(_) => Err(WriteError::Changed),
             Err(e) => Err(e.into()),
         }
     };
-    check()?;
+    let original = check()?;
     let perms = std::fs::metadata(&real)?.permissions();
     let mut tmp = tempfile::Builder::new()
         .prefix(".gallery-config-")
@@ -141,7 +143,7 @@ pub fn write_atomic(
     tmp.write_all(text.as_bytes())?;
     tmp.as_file().sync_all()?;
     std::fs::set_permissions(tmp.path(), perms)?;
-    let bak = back_up(&real, how)?;
+    let bak = back_up(&real, &original, how)?;
     // Last look right before the swap: an outside save in between wins.
     check()?;
     tmp.persist(&real).map_err(|e| WriteError::Io(e.error))?;
@@ -154,6 +156,15 @@ pub fn write_atomic(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn keep_backup_holds_the_checked_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        let real = dir.path().join("gallery.toml");
+        std::fs::write(&real, "live").unwrap();
+        let bak = back_up(&real, b"checked", Backup::Keep).unwrap();
+        assert_eq!(std::fs::read(bak).unwrap(), b"checked");
+    }
 
     #[test]
     fn failed_keep_backup_is_removed() {

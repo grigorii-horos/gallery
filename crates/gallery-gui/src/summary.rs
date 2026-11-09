@@ -51,7 +51,8 @@ pub struct FilterSummary {
     pub exclude: Option<String>,
     /// AI category description.
     pub ai: Option<String>,
-    /// The keys of its other conditions (`date`, `near`, ...).
+    /// The keys of its conditions besides sources, `match`, `exclude` and `ai`
+    /// (`expand`, `date`, `near`, ...).
     pub conditions: Vec<&'static str>,
 }
 

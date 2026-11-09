@@ -219,6 +219,7 @@ mod tests {
             action: Action::Target {
                 name: "rest".into(),
             },
+            expect: None,
         };
         let res = set_many_learning_in(
             &ovf,

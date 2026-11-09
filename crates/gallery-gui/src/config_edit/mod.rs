@@ -447,7 +447,7 @@ pub fn preview_change(
     let (error, warnings) = warnings_of(&e.a);
     Ok(ChangePreview {
         version: e.version.clone(),
-        changed: e.a.text != e.a.base,
+        changed: e.a.text != e.original,
         // Against the file as it is: an old-shape file shows its rewrite.
         diff: diff_lines(&e.original, &e.a.text),
         error,
