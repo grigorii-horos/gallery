@@ -56,6 +56,7 @@ fn to(target: &str) -> Decision {
     Decision::Target {
         name: target.into(),
         via: Via::Mask,
+        ai_meta: None,
     }
 }
 
@@ -197,6 +198,7 @@ fn guard_keeps_the_best_shot_of_a_series_trashed_by_manual_decisions() {
             Decision::Target {
                 name: "Junk".into(),
                 via: Via::Manual,
+                ai_meta: None,
             },
         )
     };

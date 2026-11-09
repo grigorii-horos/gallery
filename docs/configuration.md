@@ -28,7 +28,7 @@ Rules that hold everywhere:
 - [Masks](#masks) (syntax, `@refs`, `!` exclusions, built-in masks)
 - [Content presets](#content-presets-the-content-pipe) (built-ins, your own, bundles)
 - [Name presets](#name-presets-the-rename-pipe)
-- [`[ai]`](#ai)
+- [`[ai]`](#ai) ([keywords and description](#ai-keywords-and-description))
 - [Migration from the three stages](#migration-from-the-three-stages)
 - [Where related files live](#related-files)
 
@@ -725,11 +725,32 @@ examples = 20                    # default: how many of your latest corrections 
 | `effort` | `low` | Request effort. Classification of a thumbnail rarely needs more. |
 | `jobs` | `8` | Requests in flight at once. |
 | `examples` | `20` | When you change what the AI decided (or settle a doubtful answer), the correction is stored as **text** (no images) and the latest `examples` for the same source are shown to the model in later requests. `0` turns learning off. List/clear them with `gallery examples list` / `clear` or in the GUI Settings. Examples affect only *new* requests: answers already cached stay valid. |
-| `language` | unset | Language the model writes each answer's short reason in: a name or a code (`"en"`, `"ru"`, `"Ukrainian"`). **Unset, it follows the interface language** — the GUI's *Settings → Language*, or the CLI's `--lang` / `LANG` — and is English by default. An explicit value always wins. Category names and descriptions are sent exactly as you wrote them. |
+| `language` | unset | Language the model writes each answer's short reason, keywords and description in: a name or a code (`"en"`, `"ru"`, `"Ukrainian"`). **Unset, it follows the interface language** — the GUI's *Settings → Language*, or the CLI's `--lang` / `LANG` — and is English by default. An explicit value always wins. Category names and descriptions are sent exactly as you wrote them. |
 
 Answers are cached per file (path, size, mtime), model and prompt in
 `<cache dir>/gallery/ai-cache.jsonl`, so a file is asked about only once; examples are deliberately
 not part of the cache key.
+
+### AI keywords and description
+
+The same request that picks a category also asks for 3–10 short lowercase keywords and a
+one-sentence description of the frame, written in the `language` above. They never influence
+routing; they are only written into the file's metadata:
+
+- **Only for files the AI routed** (the decision is *via AI*, including an unsure answer accepted with
+  `--accept-low`). Files routed by masks or by your manual decisions get nothing.
+- **Only into processed outputs** — outputs whose content pipe has at least one step. A byte-for-byte
+  copy (an empty content pipe) stays exactly the source.
+- Keywords go to `XMP-dc:Subject` (and `IPTC:Keywords` in a JPEG), the description to
+  `XMP-dc:Description`; videos in MP4/MOV get the same XMP tags. Keywords the file already has are
+  kept (and not repeated); an existing description is never replaced. exiftool cannot write
+  WebM/MKV: such an output is placed without them, with a warning.
+- They are written before the output is verified against its source, so verification sees the
+  final file; capture dates, GPS, dimensions and duration are untouched.
+
+Answers cached before keywords were asked for are used as they are — without keywords, and without
+a new (paid) request. A plan that carries keywords is a version 2 plan (an older `gallery apply`
+refuses it; update the server binary).
 
 ## Migration from the three stages
 

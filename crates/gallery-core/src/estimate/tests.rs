@@ -27,6 +27,7 @@ fn plan_of(items: Vec<PlanItem>) -> Plan {
 
 fn item(src: &str, target: &str, size: u64, ops: &[(OutputOp, &[&str])]) -> PlanItem {
     PlanItem {
+        ai_meta: None,
         source: src.into(),
         source_root: "/s".into(),
         size,

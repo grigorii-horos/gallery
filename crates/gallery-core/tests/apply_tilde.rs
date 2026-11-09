@@ -32,6 +32,7 @@ fn apply_expands_tilde_with_local_home() {
         tz: None,
         content_presets: Default::default(),
         items: vec![PlanItem {
+            ai_meta: None,
             source: PathBuf::from("~/phone/a.jpg"),
             source_root: PathBuf::from("~/phone"),
             size: meta.len(),

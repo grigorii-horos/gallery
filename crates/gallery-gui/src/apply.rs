@@ -444,6 +444,7 @@ mod tests {
 
     fn item(src: &str, ops: &[OutputOp]) -> PlanItem {
         PlanItem {
+            ai_meta: None,
             source: src.into(),
             source_root: "/s".into(),
             size: 1,

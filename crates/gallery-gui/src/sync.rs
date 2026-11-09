@@ -86,6 +86,7 @@ mod tests {
         use gallery_core::route::Via;
         let d = tempfile::tempdir().unwrap();
         let item = |n: &str| PlanItem {
+            ai_meta: None,
             source: PathBuf::from(format!("/phone/{n}/a.jpg")),
             source_root: PathBuf::from(format!("/phone/{n}")),
             size: 1,

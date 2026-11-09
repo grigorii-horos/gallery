@@ -486,6 +486,7 @@ fn an_ai_scan_returns_its_cost_and_leaves_the_current_plan_rebuilt() {
                     category: Some("cats".into()),
                     reason: "a cat".into(),
                     confidence: Confidence::Ok,
+                    meta: None,
                 })
                 .collect())
         }

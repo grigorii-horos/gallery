@@ -10,6 +10,7 @@ use super::{ContentStep, StepCtx, StepResult, copy_keep_mtime, tmp_output};
 use crate::config::MetadataPreset;
 use crate::datetime::parse_tag;
 use crate::media::split_name;
+use crate::route::AiMeta;
 use crate::tools::Tools;
 use crate::{Error, Result, exif};
 use chrono::offset::LocalResult;
@@ -380,6 +381,41 @@ fn remux_creation_time(ctx: &StepCtx, input: &Path, out: &Path, d: NaiveDateTime
         )));
     }
     Ok(true)
+}
+
+/// Add the AI's keywords to `path` (`XMP-dc:Subject`, and `IPTC:Keywords`
+/// in a JPEG) and its description (`XMP-dc:Description`) when the file has
+/// none: keywords already there and an existing description stay.
+/// `Error::Unwritable` when exiftool has no writer for the format (WebM, MKV).
+pub(crate) fn write_ai_meta(tools: &Tools, path: &Path, meta: &AiMeta) -> Result<()> {
+    let ext = path
+        .extension()
+        .map(|e| e.to_string_lossy().to_ascii_lowercase())
+        .unwrap_or_default();
+    let jpeg = ext == "jpg" || ext == "jpeg";
+    let mut args = Vec::new();
+    if jpeg && !meta.tags.is_empty() {
+        // IPTC strings are Latin-1 unless the record says UTF-8.
+        args.push("-IPTC:CodedCharacterSet=UTF8".to_string());
+    }
+    for t in &meta.tags {
+        // Removing first keeps a keyword the file already has from repeating.
+        args.push(format!("-XMP-dc:Subject-={t}"));
+        args.push(format!("-XMP-dc:Subject+={t}"));
+        if jpeg {
+            args.push(format!("-IPTC:Keywords-={t}"));
+            args.push(format!("-IPTC:Keywords+={t}"));
+        }
+    }
+    if !meta.description.is_empty() {
+        // Deleted only when empty, then set: written only where there is none.
+        args.push("-XMP-dc:Description-=".to_string());
+        args.push(format!("-XMP-dc:Description={}", meta.description));
+    }
+    if args.is_empty() {
+        return Ok(());
+    }
+    exif::write(tools, path, &args)
 }
 
 /// `d` as a wall-clock time in the tools' zone (this machine's without one).

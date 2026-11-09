@@ -12,11 +12,17 @@ use crate::Result;
 use crate::scan::FileEntry;
 
 /// The model's structured answer as stored (category is the raw enum value).
+/// `tags` and `description` are absent in answers cached before they were
+/// asked for: such an answer is used as is, without them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Stored {
     pub category: String,
     pub reason: String,
     pub confidence: String,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 #[derive(Serialize, Deserialize)]

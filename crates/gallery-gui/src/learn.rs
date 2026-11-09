@@ -172,6 +172,7 @@ mod tests {
         let config = crate::scan::tests::fixture(d.path());
         let src = d.path().join("src");
         let item = |f: &str, target: &str, via: Via| PlanItem {
+            ai_meta: None,
             source: src.join(f),
             source_root: src.clone(),
             size: 1,

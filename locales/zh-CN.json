@@ -132,6 +132,8 @@
   "apply.exif_not_read": "EXIF 未读取：%{error}；来源未改动",
   "apply.earlier_failed": "已跳过：之前的输出失败",
   "apply.kept_in_place": "保持原位：来源已经是这个名称",
+  "apply.ai_meta_unwritable": "exiftool 不写入 %{container}：AI 关键词未写入",
+  "apply.ai_meta_failed": "AI 关键词未写入：%{error}",
   "apply.discrepancy_allowed": "已允许不一致：%{message}",
   "apply.result_differs": "结果与来源不一致：%{details}；未放置，来源未改动",
   "apply.check_not_performed": "未执行检查：%{error}",

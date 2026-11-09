@@ -38,7 +38,8 @@ pub struct SourcePrompt {
     /// Prompt lines of the user's corrections (see [`crate::learn`]), shown
     /// after the suffix.
     pub examples: Vec<String>,
-    /// Language the model writes `reason` in (`[ai] language`); blank is the interface language.
+    /// Language the model writes `reason`, tags and description in (`[ai] language`); blank is
+    /// the interface language.
     pub language: String,
 }
 
@@ -57,6 +58,21 @@ pub struct AiAnswer {
     pub category: Option<String>,
     pub reason: String,
     pub confidence: Confidence,
+    /// Keywords and a description of the frame, written into the metadata of
+    /// the processed outputs of a file the AI routes; `None` when the answer
+    /// has neither (e.g. one cached before they were asked for). Never used
+    /// for routing.
+    pub meta: Option<AiMeta>,
+}
+
+/// Keywords and a one-sentence description the AI gave a file, in the
+/// language of its answer (`[ai] language`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AiMeta {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub description: String,
 }
 
 pub trait Classifier {
@@ -115,6 +131,9 @@ pub enum Decision {
     Target {
         name: String,
         via: Via,
+        /// The AI's keywords and description when the AI took the file
+        /// (`Via::Ai`), else `None`.
+        ai_meta: Option<AiMeta>,
     },
     Review {
         suggested: String,
@@ -473,18 +492,19 @@ impl Router<'_> {
             if !hit {
                 continue;
             }
-            let via = match (&f.ai, &w.answer) {
-                (None, _) => Via::Mask,
+            let (via, ai_meta) = match (&f.ai, &w.answer) {
+                (None, _) => (Via::Mask, None),
                 (Some(_), _) if !w.asked => {
                     need_ai = true;
                     continue;
                 }
-                (Some(_), Some(a)) if a.category.as_deref() == Some(target.name.as_str()) => {
+                (Some(_), Some(a)) if a.category.as_deref() == Some(target.name.as_str()) => (
                     Via::Ai {
                         reason: a.reason.clone(),
                         low: a.confidence == Confidence::Low,
-                    }
-                }
+                    },
+                    a.meta.clone(),
+                ),
                 (Some(_), _) => continue,
             };
             // Shots matched through `series` always go to review first.
@@ -505,6 +525,7 @@ impl Router<'_> {
             return Step::Take(Decision::Target {
                 name: target.name.clone(),
                 via,
+                ai_meta,
             });
         }
         if need_ai {
@@ -728,6 +749,7 @@ pub fn route_with_overrides(
                 decisions[i] = Some(Decision::Target {
                     name: name.clone(),
                     via: Via::Manual,
+                    ai_meta: None,
                 });
                 overrides_applied += 1;
             }
@@ -939,6 +961,7 @@ mod tests {
             category: cat.map(String::from),
             reason: "why".into(),
             confidence: conf,
+            meta: None,
         }
     }
 
@@ -964,6 +987,7 @@ mod tests {
         Decision::Target {
             name: name.into(),
             via,
+            ai_meta: None,
         }
     }
 
@@ -1027,6 +1051,38 @@ mod tests {
         );
         let r = run(&c, &[file("a", "Screenshot_1.png")], &Panics, false).unwrap();
         assert_eq!(r[0].1, target("shots", Via::Mask));
+    }
+
+    #[test]
+    fn ai_keywords_ride_on_the_decision_and_never_route() {
+        let meta = AiMeta {
+            tags: vec!["cat".into()],
+            description: "A cat.".into(),
+        };
+        let with_meta = |cat: Option<&str>| AiAnswer {
+            meta: Some(meta.clone()),
+            ..ans(cat, Confidence::Ok)
+        };
+        let c = cfg(
+            vec![],
+            vec![ai_target("cats", None)],
+            vec![mask_target("rest", "a", "*")],
+        );
+        let fake = Fake::new(vec![with_meta(Some("cats")), with_meta(None)]);
+        let r = run(&c, &[file("a", "p.jpg"), file("a", "q.jpg")], &fake, false).unwrap();
+        assert_eq!(
+            r[0].1,
+            Decision::Target {
+                name: "cats".into(),
+                via: Via::Ai {
+                    reason: "why".into(),
+                    low: false,
+                },
+                ai_meta: Some(meta.clone()),
+            }
+        );
+        // A "none" answer walks on; a mask target takes it without them.
+        assert_eq!(r[1].1, target("rest", Via::Mask));
     }
 
     #[test]
@@ -1539,6 +1595,7 @@ path = "/o"
                         category: c.map(String::from),
                         reason: "why".into(),
                         confidence,
+                        meta: None,
                     }
                 })
                 .collect();

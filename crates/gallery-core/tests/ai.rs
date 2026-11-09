@@ -81,11 +81,15 @@ fn with_examples(lines: &[&str]) -> SourcePrompt {
 }
 
 fn answer_body(category: &str, reason: &str, confidence: &str) -> Value {
+    answer_body_with(json!({
+        "category": category, "reason": reason, "confidence": confidence
+    }))
+}
+
+fn answer_body_with(answer: Value) -> Value {
     json!({
         "stop_reason": "end_turn",
-        "content": [{"type": "text", "text": json!({
-            "category": category, "reason": reason, "confidence": confidence
-        }).to_string()}],
+        "content": [{"type": "text", "text": answer.to_string()}],
         "usage": {"input_tokens": 10, "output_tokens": 5,
                   "cache_creation_input_tokens": 100, "cache_read_input_tokens": 0},
     })
@@ -153,13 +157,39 @@ ANSWER FORMAT:\n\
 - category — exactly one category name from the list (no description); \
 NONE — no category fits;\n\
 - reason — the reason in 3-6 words, written in English (\"Lidl receipt\", \"ESP32 board close-up\");\n\
-- confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n";
+- confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n\
+- tags — 3-10 short keywords for what the frame shows, lowercase, written in English;\n\
+- description — one sentence describing the frame, written in English.\n";
     assert_eq!(system_prompt(&cats(), &SourcePrompt::default()), expected);
     // Blank texts add nothing.
     assert_eq!(
         system_prompt(&cats(), &frame(Some(" \n"), Some(""))),
         expected
     );
+}
+
+#[test]
+fn cache_prompt_is_the_prompt_before_tags_were_asked_for() {
+    use gallery_core::ai::cache_prompt;
+    // Exactly the text cache keys were made from before: asking for tags
+    // and a description must not invalidate a single cached answer.
+    let before = "You sort photos and videos into categories. \
+Each request is one frame (a 512px preview; for videos, 3 frames in a row). \
+The categories are below; there are no others.\n\
+\n\
+<categories>\n\
+- Receipts — store receipts\n\
+- Boards — electronic boards\n\
+- NONE — no category fits; don't guess: \
+a doubtful frame is better left uncategorized\n\
+</categories>\n\
+\n\
+ANSWER FORMAT:\n\
+- category — exactly one category name from the list (no description); \
+NONE — no category fits;\n\
+- reason — the reason in 3-6 words, written in English (\"Lidl receipt\", \"ESP32 board close-up\");\n\
+- confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n";
+    assert_eq!(cache_prompt(&cats(), &SourcePrompt::default()), before);
 }
 
 #[test]
@@ -756,4 +786,84 @@ fn classify_with_reports_each_answer_and_stops_on_cancel() {
     assert!(evs.iter().all(|e| e.stage == Stage::Ai && e.total == 3));
     let dones: Vec<usize> = evs.iter().map(|e| e.done).collect();
     assert_eq!(dones, [1, 2, 3]);
+}
+
+#[test]
+fn classify_asks_for_tags_and_reads_them() {
+    require_tool!("magick");
+    let rt = rt();
+    let s = server(
+        &rt,
+        ResponseTemplate::new(200).set_body_json(answer_body_with(json!({
+            "category": "Receipts", "reason": "Lidl receipt", "confidence": "OK",
+            "tags": ["Receipt", " lidl ", "receipt", "", "shop\nfood"],
+            "description": "A  Lidl receipt\non a table.",
+        }))),
+    );
+    let d = tempfile::tempdir().unwrap();
+    let cache = d.path().join("cache.jsonl");
+    let file = req(d.path(), "a.jpg", cats());
+    let r = classifier(&s.uri(), &cache)
+        .classify(vec![file.clone()])
+        .unwrap();
+    let meta = r[0].meta.clone().expect("tags and description");
+    // Lowercase, one line, no blanks or repeats.
+    assert_eq!(meta.tags, ["receipt", "lidl", "shop food"]);
+    assert_eq!(meta.description, "A Lidl receipt on a table.");
+
+    let body: Value = serde_json::from_slice(&received(&rt, &s)[0].body).unwrap();
+    let schema = &body["output_config"]["format"]["schema"];
+    assert_eq!(schema["properties"]["tags"]["type"], "array");
+    assert_eq!(schema["properties"]["tags"]["items"]["type"], "string");
+    assert_eq!(schema["properties"]["description"]["type"], "string");
+    // Optional: an answer without them is still valid.
+    assert_eq!(
+        schema["required"],
+        json!(["category", "reason", "confidence"])
+    );
+    let system = body["system"][0]["text"].as_str().unwrap();
+    assert!(system.contains("- tags — 3-10 short keywords"), "{system}");
+
+    // The cache keeps them: the next run has them without a request.
+    let again = classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
+    assert_eq!(received(&rt, &s).len(), 1);
+    assert_eq!(again[0].meta.as_ref(), Some(&meta));
+}
+
+#[test]
+fn answer_cached_before_tags_is_used_without_a_request() {
+    use gallery_core::ai::cache::{key, prompt_hash};
+    use gallery_core::ai::cache_prompt;
+    use gallery_core::ai::client::cached_answer;
+    require_tool!("magick");
+    let rt = rt();
+    let s = server(
+        &rt,
+        ResponseTemplate::new(200).set_body_json(answer_body("Boards", "new answer", "OK")),
+    );
+    let d = tempfile::tempdir().unwrap();
+    let cache = d.path().join("cache.jsonl");
+    let file = req(d.path(), "a.jpg", cats());
+    // A row exactly as an older build wrote it: no tags, no description.
+    let model = AiSettings::default().model;
+    let k = key(
+        &file.entry,
+        &model,
+        &prompt_hash(&cache_prompt(&cats(), &SourcePrompt::default())),
+    );
+    let row = json!({"key": k, "result": {
+        "category": "Receipts", "reason": "old answer", "confidence": "OK"
+    }});
+    std::fs::write(&cache, format!("{row}\n")).unwrap();
+
+    let r = classifier(&s.uri(), &cache)
+        .classify(vec![file.clone()])
+        .unwrap();
+    assert!(received(&rt, &s).is_empty(), "no new paid request");
+    assert_eq!(r[0].category.as_deref(), Some("Receipts"));
+    assert_eq!(r[0].reason, "old answer");
+    assert!(r[0].meta.is_none());
+    let loaded = gallery_core::ai::cache::Cache::load(&cache);
+    let hit = cached_answer(&loaded, &model, &file).expect("cached");
+    assert!(hit.meta.is_none());
 }
