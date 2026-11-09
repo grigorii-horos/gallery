@@ -170,6 +170,10 @@ pub struct OutputCheck {
     pub rename: Vec<StepCheck>,
     pub dest: PathBuf,
     pub op: OutputOp,
+    /// Kept as it is: apply found that the content pipe does not make the
+    /// file any smaller (see [`crate::incompressible`]).
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    pub incompressible: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -405,11 +409,15 @@ fn output_checks(
             });
             before = t.after.clone();
         }
+        // A Keep output never runs a content step, unless the planner kept
+        // the file because its pipe did not make it smaller before.
+        let incompressible = po.op == OutputOp::Keep && content_tr.iter().any(|t| t.matched);
         result.push(OutputCheck {
             content,
             rename,
             dest: po.dest.clone(),
             op: po.op,
+            incompressible,
         });
     }
     result
@@ -782,8 +790,13 @@ fn replay_output(
             rename: Vec::new(),
             dest: PathBuf::from(file_name),
             op: OutputOp::Keep,
+            incompressible: false,
         };
     };
+    // The plan keeps every output of the file (it is replayed only then):
+    // one that runs content steps is kept because they did not make the
+    // file smaller before.
+    let incompressible = !run.steps.is_empty();
     let name = run.name;
     let mut before = file_name.to_string();
     let mut content = Vec::new();
@@ -854,11 +867,12 @@ fn replay_output(
         content,
         rename,
         dest: PathBuf::from(final_name),
-        op: if src.file_name().and_then(|n| n.to_str()) == Some(name.as_str()) {
+        op: if incompressible || src.file_name().and_then(|n| n.to_str()) == Some(name.as_str()) {
             OutputOp::Keep
         } else {
             OutputOp::Rename
         },
+        incompressible,
     }
 }
 
@@ -1103,6 +1117,9 @@ fn verdict(
             );
         }
     }
+    if ex.outputs.iter().any(|o| o.incompressible) {
+        return crate::t!("explain.kept_smallest", target = target, via = via);
+    }
     crate::t!("explain.nothing_to_do", target = target, via = via)
 }
 
@@ -1214,7 +1231,11 @@ impl Explanation {
                     "explain.tree.output",
                     n = i + 1,
                     dest = out.dest.display(),
-                    op = op_text(out.op)
+                    op = if out.incompressible {
+                        crate::t!("explain.op_kept_smallest")
+                    } else {
+                        op_text(out.op)
+                    }
                 )
             );
             for (kind, steps) in [

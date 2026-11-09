@@ -127,6 +127,43 @@ describe("explain view", () => {
     expect(within(out).getByText("mask @photo-original = *.{jpg,jpeg,heic,heif}")).toBeInTheDocument();
     expect(within(out).getByText("applied, same name")).toBeInTheDocument();
   });
+
+  it("says when a file is kept because its pipe did not make it smaller", () => {
+    render(
+      <ExplainView
+        ex={{
+          ...base,
+          path: "/media/shots/shot.png",
+          outcome: "unchanged",
+          verdict: "Target shots (mask) keeps the file as it is",
+          decision: { kind: "target", target: "shots", via: { kind: "mask" }, detail: null },
+          outputs: [
+            {
+              op: "keep",
+              incompressible: true,
+              dest: "/media/shots/shot.png",
+              content: [
+                {
+                  index: 0,
+                  preset: "png-avif",
+                  bundle: null,
+                  mask: "@png",
+                  mask_expanded: "*.png",
+                  matched: true,
+                  before: "shot.png",
+                  after: "shot.avif",
+                  skipped: null,
+                },
+              ],
+              rename: [],
+            },
+          ],
+        }}
+      />,
+    );
+    expect(screen.getByText("Unchanged: the pipe did not make it smaller")).toBeInTheDocument();
+    expect(screen.queryByText("Unchanged")).not.toBeInTheDocument();
+  });
 });
 
 describe("file search", () => {

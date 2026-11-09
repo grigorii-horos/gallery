@@ -206,7 +206,7 @@ export function ExplainView({ ex }: { ex: Explanation }) {
           <ol className="outputs">
             {ex.outputs.map((o, i) => (
               <li key={i} className="output-block">
-                <p className={`op op-${o.op}`}>{t(OP[o.op])}</p>
+                <p className={`op op-${o.op}`}>{t(o.incompressible ? "explain_op_kept_smallest" : OP[o.op])}</p>
                 <StepList title={t("pipe_content")} steps={o.content} empty={t("explain_no_steps_copy")} />
                 <StepList title={t("pipe_name")} steps={o.rename} empty={t("explain_no_steps")} />
                 <p className="dest">

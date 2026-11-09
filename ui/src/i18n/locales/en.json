@@ -251,6 +251,7 @@
   "explain_op_write": "Writing a new file",
   "explain_op_rename": "Renaming in place",
   "explain_op_keep": "Unchanged",
+  "explain_op_kept_smallest": "Unchanged: the pipe did not make it smaller",
   "explain_aria": "Why this file",
   "explain_trace": "Trace",
   "explain_working": "Working it out…",

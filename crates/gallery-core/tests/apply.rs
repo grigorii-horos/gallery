@@ -535,7 +535,7 @@ fn apply_twice_keeps_previous_report() {
 }
 
 #[test]
-fn apply_fell_back_onto_the_source_path_is_in_place() {
+fn apply_fell_back_onto_the_source_path_leaves_the_source() {
     require_tools!();
     let d = tempfile::tempdir().unwrap();
     let root = d.path().join("src");
@@ -544,6 +544,7 @@ fn apply_fell_back_onto_the_source_path_is_in_place() {
     // extension, so the result wants the source's own path.
     let src = support::fixture_clip(&root, "X.mp4", (160, 120), "libsvtav1", false);
     let orig = hash(&src);
+    let orig_mtime = mtime_ns(&src);
     let plan_for = |src: &Path| {
         save_plan(
             d.path(),
@@ -554,25 +555,26 @@ fn apply_fell_back_onto_the_source_path_is_in_place() {
             )],
         )
     };
+    // The same bytes at the same path: nothing is written or trashed.
     let rep = run(&plan_for(&src), &opts());
     let r = &rep.items[0];
-    let t = trashed_path(r);
-    assert_eq!(hash(&t), orig);
+    assert_eq!(r.status, ItemStatus::Done { trashed: None }, "{r:?}");
     assert!(r.outputs[0].fell_back);
     assert_eq!(r.outputs[0].actual.as_deref(), Some(src.as_path()));
-    assert_eq!(hash(&src), orig);
-    assert_eq!(names(&root), [".gallery-trash", "X.mp4"]);
-
-    // A rerun over the result does not grow the name either (a new second:
-    // the run id names the trash folder).
-    std::thread::sleep(std::time::Duration::from_millis(1100));
-    let rep = run(&plan_for(&src), &opts());
-    trashed_path(&rep.items[0]);
-    assert_eq!(
-        rep.items[0].outputs[0].actual.as_deref(),
-        Some(src.as_path())
+    assert!(
+        r.outputs[0]
+            .warnings
+            .contains(&gallery_core::t!("apply.already_smallest"))
     );
-    assert_eq!(names(&root), [".gallery-trash", "X.mp4"]);
+    assert_eq!(hash(&src), orig);
+    assert_eq!(mtime_ns(&src), orig_mtime);
+    assert_eq!(names(&root), ["X.mp4"]);
+
+    // A rerun over the result changes nothing either.
+    let rep = run(&plan_for(&src), &opts());
+    assert_eq!(rep.items[0].status, ItemStatus::Done { trashed: None });
+    assert_eq!(names(&root), ["X.mp4"]);
+    assert_eq!(hash(&src), orig);
 }
 
 /// Raw QuickTime:CreateDate (stored as UTC) and the mtime of `p`, in UTC.

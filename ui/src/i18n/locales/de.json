@@ -251,6 +251,7 @@
   "explain_op_write": "Neue Datei wird geschrieben",
   "explain_op_rename": "Umbenennung vor Ort",
   "explain_op_keep": "Unverändert",
+  "explain_op_kept_smallest": "Unverändert: Die Pipeline hat sie nicht kleiner gemacht",
   "explain_aria": "Warum diese Datei",
   "explain_trace": "Spur",
   "explain_working": "Wird ermittelt …",

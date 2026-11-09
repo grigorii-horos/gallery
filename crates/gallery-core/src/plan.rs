@@ -418,6 +418,8 @@ pub fn build_plan_with(
     let mut warnings = Vec::new();
     // (capture time, target, source) of planned items, for SeriesSplit.
     let mut timeline = Vec::new();
+    // Files apply found no smaller after their pipe: read when first needed.
+    let mut incompressible: Option<crate::incompressible::Known> = None;
 
     'files: for (done, (e, decision)) in routed.into_iter().enumerate() {
         cancel.check()?;
@@ -598,6 +600,24 @@ pub fn build_plan_with(
             steps.is_empty() && inside_root(dir, &source_root, side == Side::Local)
         });
 
+        // (4b) Or an output whose pipe apply already found unable to make
+        // this very file any smaller: it would only fall back to the source
+        // bytes again, under the source's own name in its own folder. Such
+        // an output keeps the source where it is, like a consumer.
+        let keeps = match (side, consumer) {
+            (Side::Local, None) => pending.iter().position(|(dir, _, steps, .., wanted)| {
+                !steps.is_empty()
+                    && fallback_is_source(&dir.join(wanted), &source)
+                    && incompressible
+                        .get_or_insert_with(crate::incompressible::Known::load)
+                        .keeps(&e.path, e.size, e.mtime_ns, steps, |n| {
+                            cfg.content_preset(n)
+                        })
+            }),
+            _ => None,
+        };
+        let stays = consumer.or(keeps);
+
         // (5) Free name in the directory.
         let mut outputs = Vec::with_capacity(pending.len());
         let src_name = source
@@ -607,10 +627,19 @@ pub fn build_plan_with(
         for (k, (dir, local_dir, steps, trace, reencodes, wanted)) in
             pending.into_iter().enumerate()
         {
+            if keeps == Some(k) {
+                outputs.push(PlannedOutput {
+                    dest: source.clone(),
+                    op: OutputOp::Keep,
+                    steps: Vec::new(),
+                    trace,
+                });
+                continue;
+            }
             // A source that stays needs a byte copy only once: an earlier run
             // already wrote it when the folder holds the same bytes. Checked
             // here, with the scanned file and the local (mirrored) folder.
-            if consumer.is_some_and(|c| c != k)
+            if stays.is_some_and(|c| c != k)
                 && steps.is_empty()
                 && has_copy(&local_dir, &e.path, &mut source_hash)
             {
@@ -627,7 +656,7 @@ pub fn build_plan_with(
             // The source's name is free for the output that consumes the
             // source, or for any output when none does (an in-place write);
             // never for a copy next to a source that stays.
-            let source_free = consumer.is_none_or(|c| c == k);
+            let source_free = stays.is_none_or(|c| c == k);
             // The consumer may also take its own name in another case
             // (`IMG.JPG` -> `IMG.jpg`); apply falls back to the next name where
             // the file system does not tell the two apart.
@@ -744,6 +773,30 @@ pub fn build_plan_with(
         retry_of: None,
     }
     .versioned())
+}
+
+/// Whether a pipe falling back to the source bytes would place them at the
+/// source itself: `dest` in the source's folder with the source's name once
+/// the extension is the source's again (as apply names a fallback).
+fn fallback_is_source(dest: &Path, source: &Path) -> bool {
+    let (Some(dir), Some(name), Some(src_name)) =
+        (dest.parent(), dest.file_name(), source.file_name())
+    else {
+        return false;
+    };
+    if Some(dir) != source.parent() {
+        return false;
+    }
+    let src_name = src_name.to_string_lossy();
+    let ext = split_name(&src_name).1;
+    let stem = split_name(&name.to_string_lossy()).0;
+    let fallback = if ext.is_empty() {
+        stem
+    } else {
+        format!("{stem}.{ext}")
+    };
+    let at = dir.join(&fallback);
+    at == source || same_file(&at, source)
 }
 
 /// Never trash the last copy: for every duplicate group (an original and its
@@ -1429,6 +1482,81 @@ mod tests {
         );
         let p = local(&c, vec![(entry(tmp.path(), "phone", "a.png"), to("t"))]);
         assert_eq!(p.items[0].outputs[0].dest, src.join("a.png"));
+        assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
+    }
+
+    /// A file apply found no smaller after its pipe stays where it is, for
+    /// that very file and pipe only.
+    #[test]
+    fn plan_keeps_a_known_incompressible_file_in_place() {
+        let tmp = tempfile::tempdir().unwrap();
+        let dir = tmp.path().join("phone");
+        std::fs::create_dir_all(&dir).unwrap();
+        let src = dir.join("a.jpg");
+        std::fs::write(&src, b"jpeg").unwrap();
+        let real = |p: &Path| {
+            let m = std::fs::metadata(p).unwrap();
+            FileEntry {
+                size: m.len(),
+                mtime_ns: crate::scan::mtime_ns(&m).unwrap(),
+                ..entry(tmp.path(), "phone", "a.jpg")
+            }
+        };
+        let backup = tmp.path().join("backup");
+        let c = cfg(
+            tmp.path(),
+            vec![
+                output(&dir, vec![step("*.jpg", "AVIF")], vec![]),
+                output(&backup, vec![], vec![]),
+            ],
+        );
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert_eq!(
+            ops(&p.items[0].outputs),
+            [
+                (OutputOp::Write, dir.join("a.avif")),
+                (OutputOp::Write, backup.join("a.jpg")),
+            ]
+        );
+        let steps = ["AVIF".to_string()];
+        let pipe = |v| crate::incompressible::fingerprint(&steps, |n| c.content_preset(n), v);
+        // Recorded with older encoders: tried again.
+        let old = BTreeMap::from([("avifenc".to_string(), "avifenc 0.9.0".to_string())]);
+        crate::incompressible::remember(&src, &pipe(&old).unwrap());
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
+        // With this machine's encoders: kept.
+        let now = crate::incompressible::current_versions();
+        crate::incompressible::remember(&src, &pipe(&now).unwrap());
+
+        // Kept in place; only the backup is left to write.
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert_eq!(
+            ops(&p.items[0].outputs),
+            [
+                (OutputOp::Keep, src.clone()),
+                (OutputOp::Write, backup.join("a.jpg")),
+            ]
+        );
+        assert!(p.items[0].outputs[0].steps.is_empty());
+        // Once the backup holds the bytes, nothing is left to do.
+        std::fs::create_dir_all(&backup).unwrap();
+        std::fs::copy(&src, backup.join("a.jpg")).unwrap();
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert!(p.items.is_empty(), "{p:?}");
+        assert_eq!(p.unchanged, std::slice::from_ref(&src));
+
+        // Another pipe setting encodes again.
+        let mut other = c.clone();
+        other
+            .content_presets
+            .insert("AVIF".into(), ContentPreset::Photo(PhotoPreset::avif_low()));
+        let p = local(&other, vec![(real(&src), to("t"))]);
+        assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
+
+        // So does a changed file.
+        std::fs::write(&src, b"jpeg, edited").unwrap();
+        let p = local(&c, vec![(real(&src), to("t"))]);
         assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
     }
 
