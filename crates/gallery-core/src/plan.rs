@@ -270,7 +270,7 @@ pub fn inside_root(dir: &Path, root: &Path, on_disk: bool) -> bool {
 
 /// `p` with its longest existing ancestor resolved on disk and the missing
 /// rest appended; `None` when nothing resolves or the rest is not plain names.
-fn resolve(p: &Path) -> Option<PathBuf> {
+pub(crate) fn resolve(p: &Path) -> Option<PathBuf> {
     let mut rest = Vec::new();
     let mut cur = p;
     loop {

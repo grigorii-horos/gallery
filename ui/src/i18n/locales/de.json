@@ -601,6 +601,8 @@
   "effect_title": "Auswirkung",
   "effect_calculating": "wird berechnet …",
   "effect_working": "Es wird ermittelt, was sich ändert …",
+  "effect_counting": "Duplikate und Schärfe werden gezählt … {{done, number}} von {{total, number}}",
+  "effect_counting_aria": "Duplikate und Schärfe werden gezählt",
   "effect_none_one": "Die Änderungen betreffen keine der {{count, number}} Datei.",
   "effect_none_other": "Die Änderungen betreffen keine der {{count, number}} Dateien.",
   "effect_some_one": "{{changed, number}} von {{count, number}} Datei ändert sich. Jetzt: {{before}}. Danach: {{after}}.",

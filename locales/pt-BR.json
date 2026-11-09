@@ -728,6 +728,7 @@
   "cli.check.config": "Carregar e validar também este arquivo de configuração (TOML)",
   "overrides.changed": "%{path}: o arquivo mudou desde que o plano foi criado; crie o plano de novo",
   "overrides.best_not_member": "%{path}: não é um dos arquivos da série",
+  "overrides.plan_changed": "O plano mudou desde que esta revisão foi exibida — escaneie novamente",
   "undo.no_plan": "nenhum plano ao lado do relatório para saber os destinos",
   "undo.no_such_target": "nenhum arquivo do destino \"%{target}\" no relatório",
   "undo.no_such_file": "não é um arquivo desta execução: %{path}",

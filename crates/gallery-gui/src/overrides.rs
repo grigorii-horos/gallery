@@ -225,7 +225,9 @@ pub fn plan_series(plan: &Path, best: &str) -> Vec<PathBuf> {
 /// The user's pick in a series review: `best` is marked `SeriesBest` and
 /// every other member goes to `target`. Only the listed members are
 /// written, and only if `series` (the series the current plan holds) has
-/// them all. If the best shot's file changed, nothing is written.
+/// them all (else the plan changed since the review was shown). A `best`
+/// that is not among `members` is refused as such. If the best shot's file
+/// changed, nothing is written.
 pub fn confirm_series_in(
     members: Vec<Member>,
     best: &str,
@@ -233,19 +235,18 @@ pub fn confirm_series_in(
     series: &[PathBuf],
     set: impl FnOnce(Vec<OverrideRequest>) -> Result<Vec<OverrideResult>, String>,
 ) -> Result<Vec<OverrideResult>, String> {
-    // Only files of a series the current plan holds for review.
-    if let Some(m) = members
-        .iter()
-        .find(|m| !series.iter().any(|p| p == Path::new(&m.source_path)))
-    {
-        return Err(gallery_core::t!(
-            "overrides.best_not_member",
-            path = m.source_path
-        ));
-    }
     let Some(b) = members.iter().find(|m| m.source_path == best) else {
         return Err(gallery_core::t!("overrides.best_not_member", path = best));
     };
+    // The series the review showed is not (or no longer) in the stored plan,
+    // or holds other files now: the plan changed under the review.
+    if series.is_empty()
+        || members
+            .iter()
+            .any(|m| !series.iter().any(|p| p == Path::new(&m.source_path)))
+    {
+        return Err(gallery_core::t!("overrides.plan_changed"));
+    }
     if let Some(e) = b.stale() {
         return Err(e);
     }
@@ -684,7 +685,7 @@ mod tests {
             &[a.clone(), b.clone()],
             |r| set_many_in(&file, &cfg, r),
         );
-        assert!(err.is_err());
+        assert_eq!(err.unwrap_err(), gallery_core::t!("overrides.plan_changed"));
         assert!(!file.exists());
         // No series in the plan: everything is refused.
         let err = confirm_series_in(
@@ -694,7 +695,54 @@ mod tests {
             &[],
             |r| set_many_in(&file, &cfg, r),
         );
-        assert!(err.is_err());
+        assert_eq!(err.unwrap_err(), gallery_core::t!("overrides.plan_changed"));
+        assert!(!file.exists());
+    }
+
+    /// A stored plan that is missing or unreadable holds no series, so a
+    /// confirm answers "the plan changed", not "best is not a member"; a
+    /// best that is really no member of the sent list keeps its message.
+    #[test]
+    fn confirm_series_names_a_changed_plan_and_a_foreign_best() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("overrides.json");
+        let root = dir.path().join("src");
+        std::fs::create_dir_all(&root).unwrap();
+        let cfg = config(dir.path(), &root);
+        let (a, b) = (root.join("a.jpg"), root.join("b.jpg"));
+        for (p, body) in [(&a, "1"), (&b, "22")] {
+            std::fs::write(p, body).unwrap();
+        }
+        let best = b.display().to_string();
+        let missing = dir.path().join("no-plan.json");
+        let broken = dir.path().join("plan.json");
+        std::fs::write(&broken, "{ not a plan").unwrap();
+        for plan in [&missing, &broken] {
+            let series = plan_series(plan, &best);
+            assert!(series.is_empty());
+            let err = confirm_series_in(
+                vec![member(&a), member(&b)],
+                &best,
+                "Photos",
+                &series,
+                |r| set_many_in(&file, &cfg, r),
+            )
+            .unwrap_err();
+            assert_eq!(err, gallery_core::t!("overrides.plan_changed"));
+        }
+        // The plan still has the series, but the best is not in the sent members.
+        let err = confirm_series_in(
+            vec![member(&a)],
+            &best,
+            "Photos",
+            &[a.clone(), b.clone()],
+            |r| set_many_in(&file, &cfg, r),
+        )
+        .unwrap_err();
+        assert_eq!(
+            err,
+            gallery_core::t!("overrides.best_not_member", path = best)
+        );
         assert!(!file.exists());
     }
 

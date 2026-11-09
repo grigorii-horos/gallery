@@ -58,7 +58,9 @@ pub struct Capabilities {
 
 /// Search directories in priority order: `GALLERY_TOOLS_DIR`, a `tools`
 /// folder next to the app executable (tools bundled with the app), then
-/// `PATH`.
+/// `PATH`, then well-known folders that a non-login shell's `PATH` misses
+/// (Arch puts exiftool in `/usr/bin/vendor_perl`, added to `PATH` only by
+/// `/etc/profile.d`, so `ssh server gallery apply` would not see it).
 fn search_dirs() -> Vec<PathBuf> {
     let mut dirs: Vec<PathBuf> = Vec::new();
     if let Some(d) = std::env::var_os("GALLERY_TOOLS_DIR") {
@@ -70,8 +72,19 @@ fn search_dirs() -> Vec<PathBuf> {
     if let Some(p) = std::env::var_os("PATH") {
         dirs.extend(std::env::split_paths(&p));
     }
+    dirs.extend(EXTRA_DIRS.iter().map(PathBuf::from));
     dirs
 }
+
+/// Searched after `PATH` (see [`search_dirs`]).
+#[cfg(unix)]
+const EXTRA_DIRS: &[&str] = &[
+    "/usr/bin/vendor_perl",
+    "/usr/local/bin",
+    "/opt/homebrew/bin",
+];
+#[cfg(not(unix))]
+const EXTRA_DIRS: &[&str] = &[];
 
 /// `<folder of the running executable>/tools`.
 fn bundled_dir() -> Option<PathBuf> {
@@ -325,6 +338,14 @@ mod tests {
         std::fs::write(&p, "#!/bin/sh\n").unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
         p
+    }
+
+    #[test]
+    fn well_known_dirs_come_after_path() {
+        let dirs = search_dirs();
+        let tail: Vec<PathBuf> = EXTRA_DIRS.iter().map(PathBuf::from).collect();
+        assert!(dirs.ends_with(&tail), "{dirs:?}");
+        assert!(tail.contains(&PathBuf::from("/usr/bin/vendor_perl")));
     }
 
     #[test]

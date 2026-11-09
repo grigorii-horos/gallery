@@ -4,6 +4,14 @@ import type { EditOp } from "./model";
 
 const invoke = vi.fn<(cmd: string, args: unknown) => Promise<unknown>>();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args: unknown) => invoke(cmd, args) }));
+type Handler = (e: { payload: unknown }) => void;
+const handlers = new Map<string, Handler>();
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: async (name: string, h: Handler) => {
+    handlers.set(name, h);
+    return () => handlers.delete(name);
+  },
+}));
 const { useEffectPreview, EFFECT_PAUSE_MS } = await import("./useEffectPreview");
 
 const op = (name: string): EditOp => ({ op: "remove_target", index: name.length });
@@ -35,5 +43,24 @@ describe("useEffectPreview", () => {
     rerender({ ops: [], active: false });
     await act(async () => void vi.advanceTimersByTime(1000));
     expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it("reports the slow plan-stage counting while the answer is pending, and drops it with the answer", async () => {
+    let answer!: (v: unknown) => void;
+    invoke.mockReturnValue(new Promise((r) => (answer = r)));
+    const ops = [op("a")];
+    const { result } = renderHook(() => useEffectPreview("/c.toml", ops, true));
+    await act(async () => void vi.advanceTimersByTime(EFFECT_PAUSE_MS + 10));
+    const emit = (payload: unknown) => act(() => handlers.get("effect-progress")!({ payload }));
+    expect(result.current.counting).toBeNull();
+    // Scan and EXIF stages are not the slow pass.
+    await emit({ stage: "exif", done: 3, total: 10, current: null });
+    expect(result.current.counting).toBeNull();
+    await emit({ stage: "plan", done: 40, total: 120, current: "/m/a.jpg" });
+    expect(result.current).toMatchObject({ loading: true, counting: { done: 40, total: 120 } });
+    await act(async () => {
+      answer({ files: 1, changed: 0 });
+    });
+    expect(result.current).toMatchObject({ loading: false, counting: null });
   });
 });

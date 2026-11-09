@@ -280,6 +280,61 @@ mod tests {
         );
     }
 
+    /// What a preview reports besides the scan: with a duplicate condition
+    /// the content hashes are counted as `Stage::Plan` events (the UI shows
+    /// "counting duplicates and sharpness"); without one there are none.
+    #[test]
+    fn counting_duplicates_reports_plan_progress_and_nothing_else_does() {
+        use gallery_core::progress::{ProgressEvent, Stage};
+        let f = fx();
+        let plan_events = |f: &Fx| {
+            let seen = Mutex::new(Vec::<ProgressEvent>::new());
+            let cache = f.dir.path().join("cache.jsonl");
+            let env = Env {
+                ai_cache: &cache,
+                overrides: None,
+                examples: None,
+                tools: None,
+            };
+            let sink = |e: ProgressEvent| seen.lock().unwrap().push(e);
+            preview(
+                &EffectState::default(),
+                &env,
+                &f.cfg,
+                &[],
+                false,
+                &sink,
+                &Cancel::new(),
+            )
+            .unwrap()
+            .unwrap();
+            seen.into_inner()
+                .unwrap()
+                .into_iter()
+                .filter(|e| e.stage == Stage::Plan)
+                .collect::<Vec<_>>()
+        };
+        assert!(plan_events(&f).is_empty(), "no group pass, no hint");
+
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
+        std::fs::write(
+            &f.cfg,
+            format!(
+                "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
+                 [[targets.after_ai]]\nname = \"dups\"\n\
+                 [[targets.after_ai.filters]]\nsources = [\"s\"]\nduplicate = {{ of = [\"sources\"] }}\n\
+                 [[targets.after_ai.outputs]]\ndir = \"{r}/out\"\n"
+            ),
+        )
+        .unwrap();
+        let evs = plan_events(&f);
+        assert!(!evs.is_empty(), "hashing is reported");
+        assert!(
+            evs.iter().all(|e| e.total > 0 && e.done <= e.total),
+            "{evs:?}"
+        );
+    }
+
     #[test]
     fn a_large_library_is_fast_after_the_first_scan() {
         let f = fx();

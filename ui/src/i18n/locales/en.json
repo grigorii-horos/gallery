@@ -601,6 +601,8 @@
   "effect_title": "Effect",
   "effect_calculating": "calculating…",
   "effect_working": "Working out what will change…",
+  "effect_counting": "counting duplicates and sharpness… {{done, number}} of {{total, number}}",
+  "effect_counting_aria": "Counting duplicates and sharpness",
   "effect_none_one": "The changes affect none of the {{count, number}} file.",
   "effect_none_other": "The changes affect none of the {{count, number}} files.",
   "effect_some_one": "{{changed, number}} of {{count, number}} file will change. Now: {{before}}. After: {{after}}.",

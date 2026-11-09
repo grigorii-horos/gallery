@@ -567,6 +567,8 @@
   "effect_title": "影响",
   "effect_calculating": "正在计算…",
   "effect_working": "正在计算会有什么变化…",
+  "effect_counting": "正在统计重复项和清晰度… {{done, number}} / {{total, number}}",
+  "effect_counting_aria": "正在统计重复项和清晰度",
   "effect_none_other": "这些更改不影响这 {{count, number}} 个文件中的任何一个。",
   "effect_some_other": "{{count, number}} 个文件中有 {{changed, number}} 个会变化。现在：{{before}}。之后：{{after}}。",
   "effect_unmatched": "未匹配：{{before, number}} → {{after, number}}。",
