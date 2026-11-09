@@ -134,3 +134,29 @@ fn exif_read_reports_batches_and_stops_on_cancel() {
         (Stage::Exif, 2, 2)
     );
 }
+
+#[test]
+fn exif_write_carries_non_ascii_values_and_paths() {
+    require_tool!("magick");
+    require_tool!("exiftool");
+    let dir = tempfile::tempdir().unwrap();
+    let sub = dir.path().join("фото 写真");
+    std::fs::create_dir_all(&sub).unwrap();
+    let p = support::fixture_jpeg(&sub, "кот.jpg", None, None);
+    let tools = Tools::discover().unwrap();
+    // Through the UTF-8 argument file: Cyrillic and CJK survive on every
+    // platform (on Windows the command line would turn them into `?`).
+    exif::write(
+        &tools,
+        &p,
+        &[
+            "-XMP-dc:Subject+=кот".to_string(),
+            "-XMP-dc:Subject+=猫".to_string(),
+            "-XMP-dc:Description=Рыжий кот, 猫.".to_string(),
+        ],
+    )
+    .unwrap();
+    let m = exif::read(&tools, std::slice::from_ref(&p)).unwrap();
+    assert_eq!(m[&p]["XMP-dc:Subject"], serde_json::json!(["кот", "猫"]));
+    assert_eq!(m[&p]["XMP-dc:Description"], "Рыжий кот, 猫.");
+}

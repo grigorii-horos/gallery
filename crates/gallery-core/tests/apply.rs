@@ -826,3 +826,51 @@ fn apply_warns_when_the_format_takes_no_ai_tags() {
     assert!(w.len() == 1 && w[0].contains("mkv"), "{w:?}");
     assert!(d.path().join("out/v.mkv").exists());
 }
+
+#[test]
+fn apply_keeps_an_existing_description_and_merges_tags() {
+    require_tools!();
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path().join("src");
+    std::fs::create_dir_all(&root).unwrap();
+    let photo = support::fixture_jpeg(&root, "a.jpg", Some("2026:04:12 10:33:14"), None);
+    support::exiftool_set(
+        &photo,
+        &[
+            "-XMP-dc:Description=Бабушкин кот, 2026.",
+            "-XMP-dc:Subject=семья",
+            "-IPTC:CodedCharacterSet=UTF8",
+            "-IPTC:Keywords=семья",
+        ],
+    );
+    let mut it = item(
+        &photo,
+        &root,
+        vec![(d.path().join("out/a.jpg"), vec!["Metadata"])],
+    );
+    it.via = Via::Ai {
+        reason: "кот".into(),
+        low: false,
+    };
+    it.ai_meta = Some(AiMeta {
+        tags: vec!["кот".into(), "семья".into()],
+        description: "Рыжий кот спит на диване.".into(),
+    });
+    let rep = run(&save_plan(d.path(), vec![it]), &opts());
+    let r = &rep.items[0];
+    assert!(matches!(r.status, ItemStatus::Done { .. }), "{r:?}");
+    assert!(r.outputs[0].warnings.is_empty() && r.outputs[0].anomalies.is_empty());
+    let t = tags_of(
+        &d.path().join("out/a.jpg"),
+        &["XMP-dc:Subject", "XMP-dc:Description", "IPTC:Keywords"],
+    );
+    // The user's description is never overwritten; keywords merge, once each.
+    assert_eq!(t["XMP-dc:Description"], "Бабушкин кот, 2026.", "{t}");
+    let sorted = |v: &serde_json::Value| {
+        let mut v: Vec<String> = serde_json::from_value(v.clone()).unwrap();
+        v.sort();
+        v
+    };
+    assert_eq!(sorted(&t["XMP-dc:Subject"]), ["кот", "семья"], "{t}");
+    assert_eq!(sorted(&t["IPTC:Keywords"]), ["кот", "семья"], "{t}");
+}
