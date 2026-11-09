@@ -713,4 +713,75 @@ dir = "{r}/out/{{YYYY}}"
         assert_eq!(plan.review[0].source, cam);
         assert_eq!(plan.review[0].reason, crate::t!("plan.last_copy_kept"));
     }
+
+    /// `duplicate` with `outputs` only: the camera's copy is in the album,
+    /// and the album's copy (a scanned file of a source inside the album)
+    /// goes to the trash by another rule. One copy is held for review.
+    #[test]
+    fn a_scan_never_trashes_every_copy_with_outputs_scope_only() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let put = |rel: &str| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"placed before").unwrap();
+            p
+        };
+        let cam = put("camera/b.jpg");
+        let placed = put("out/2026/b.jpg");
+        let r = root.display().to_string().replace('\\', "/");
+        let text = format!(
+            r#"
+[[sources]]
+id = "camera"
+path = "{r}/camera"
+
+[[sources]]
+id = "outsrc"
+path = "{r}/out"
+recursive = true
+
+[[targets]]
+name = "Placed"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera"]
+duplicate = {{ of = ["outputs"] }}
+
+[[targets]]
+name = "OldAlbum"
+kind = "trash"
+[[targets.filters]]
+sources = ["outsrc"]
+match = "*"
+
+[[targets]]
+name = "Album"
+[[targets.outputs]]
+dir = "{r}/out/{{YYYY}}"
+"#
+        );
+        let cfg: Config = toml::from_str(&text).unwrap();
+        let opts = ScanOptions {
+            no_ai: true,
+            ..Default::default()
+        };
+        let out = scan_plan_using(
+            &cfg,
+            &tools(),
+            opts,
+            &Overrides::default(),
+            None,
+            &crate::progress::NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        let plan = &out.plan;
+        let trashed: Vec<&Path> = plan.items.iter().map(|i| i.source.as_path()).collect();
+        assert_eq!(trashed, [placed.as_path()], "{plan:#?}");
+        assert_eq!(plan.review.len(), 1, "{plan:#?}");
+        assert_eq!(plan.review[0].source, cam);
+        assert_eq!(plan.review[0].suggested, "Placed");
+        assert_eq!(plan.review[0].reason, crate::t!("plan.last_copy_kept"));
+    }
 }

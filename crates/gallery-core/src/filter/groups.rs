@@ -367,6 +367,11 @@ pub struct Groups {
     pub dup_original: HashMap<usize, usize>,
     /// Files whose content already exists in an output folder.
     pub dup_in_outputs: HashSet<usize>,
+    /// Every group of scanned files with the same content (whatever the
+    /// `duplicate` scope), with the one to keep should all go to the trash
+    /// (ranked like the original of `dup_original`). Only the last-copy guard
+    /// reads it: it never makes a condition hold.
+    pub same_content: Vec<(Vec<usize>, usize)>,
     /// File → index into `series`.
     pub series_of: HashMap<usize, usize>,
     pub series: Vec<Series>,
@@ -502,7 +507,8 @@ fn compute_with(
     };
     let result = (|| -> Result<()> {
         if !needs.duplicates.is_empty() {
-            let (orig, outs) = duplicates(cfg, files, facts, &needs.duplicates, &work)?;
+            let (orig, outs, same) = duplicates(cfg, files, facts, &needs.duplicates, &work)?;
+            g.same_content = same;
             g.dup_original = orig;
             g.dup_in_outputs = outs;
         }
@@ -734,7 +740,12 @@ fn output_files(
     Ok((roots, out))
 }
 
-type DupResult = (HashMap<usize, usize>, HashSet<usize>);
+/// Original per duplicate, files already in an output, same-content groups.
+type DupResult = (
+    HashMap<usize, usize>,
+    HashSet<usize>,
+    Vec<(Vec<usize>, usize)>,
+);
 
 fn duplicates(
     cfg: &Config,
@@ -819,29 +830,41 @@ fn duplicates(
         groups.entry((size, h.as_str())).or_default().push(*i);
     }
 
+    let rank = |i: usize| {
+        let src = cfg
+            .sources
+            .iter()
+            .position(|s| s.id == files[i].source_id)
+            .unwrap_or(usize::MAX);
+        (
+            src,
+            facts[i].capture.is_none(),
+            facts[i].capture,
+            &files[i].path,
+        )
+    };
+    // Kept for the last-copy guard whatever the scope: with `outputs` only,
+    // a file and its copy in an output folder may both be scanned files.
+    let mut same_content: Vec<(Vec<usize>, usize)> = groups
+        .values()
+        .filter(|m| m.len() > 1)
+        .map(|m| {
+            let mut m = m.clone();
+            m.sort_unstable();
+            let keep = *m.iter().min_by_key(|&&i| rank(i)).unwrap();
+            (m, keep)
+        })
+        .collect();
+    same_content.sort_unstable();
     let mut original_of = HashMap::new();
     if in_sources {
-        let rank = |i: usize| {
-            let src = cfg
-                .sources
-                .iter()
-                .position(|s| s.id == files[i].source_id)
-                .unwrap_or(usize::MAX);
-            (
-                src,
-                facts[i].capture.is_none(),
-                facts[i].capture,
-                &files[i].path,
-            )
-        };
-        for members in groups.values().filter(|m| m.len() > 1) {
-            let orig = *members.iter().min_by_key(|&&i| rank(i)).unwrap();
-            for &i in members.iter().filter(|&&i| i != orig) {
-                original_of.insert(i, orig);
+        for (members, orig) in &same_content {
+            for &i in members.iter().filter(|&&i| i != *orig) {
+                original_of.insert(i, *orig);
             }
         }
     }
-    Ok((original_of, in_outputs))
+    Ok((original_of, in_outputs, same_content))
 }
 
 fn series(
@@ -1431,6 +1454,8 @@ dir = "{out}/{{YYYY}}"
         assert!(!g.dup_in_outputs.contains(&3));
         // Hidden folders of an output are not looked at.
         assert!(!g.dup_in_outputs.contains(&1));
+        // Every same-content group, with the copy to keep (camera first).
+        assert_eq!(g.same_content, vec![(vec![0, 1], 1), (vec![2, 3], 2)]);
         // Hashes are cached.
         let cached = std::fs::read_to_string(cache.path().join("metrics.json")).unwrap();
         assert!(cached.contains("blake3"));
