@@ -47,10 +47,19 @@ pub fn default_dir() -> Option<PathBuf> {
     crate::paths::cache_dir().map(|d| d.join("thumbs"))
 }
 
+/// The path rebuilt from its components: `/` and `\` are one separator on
+/// Windows (a config template spells paths with `/`, a directory walk with
+/// `\`), and repeated or `.` parts go. Case is kept.
+fn normal_path(path: &Path) -> PathBuf {
+    path.components().collect()
+}
+
 /// Cache file name for a file in this state: blake3 of path, size, mtime.
+/// The path is taken in its [`normal_path`] spelling, so one file is one
+/// entry however its path was written.
 pub fn cache_name(path: &Path, size: u64, mtime_ns: i128) -> String {
     let mut h = blake3::Hasher::new();
-    h.update(path.as_os_str().as_encoded_bytes());
+    h.update(normal_path(path).as_os_str().as_encoded_bytes());
     h.update(&[0]);
     h.update(&size.to_le_bytes());
     h.update(&mtime_ns.to_le_bytes());
@@ -151,6 +160,19 @@ mod tests {
         assert_ne!(a, cache_name(Path::new("/s/b.jpg"), 1, 2));
         assert_ne!(a, cache_name(Path::new("/s/a.jpg"), 3, 2));
         assert_ne!(a, cache_name(Path::new("/s/a.jpg"), 1, 3));
+    }
+
+    #[test]
+    fn cache_name_ignores_the_spelling_of_a_path() {
+        let a = cache_name(Path::new("/s/a.jpg"), 1, 2);
+        assert_eq!(a, cache_name(Path::new("/s//./a.jpg"), 1, 2));
+        assert_ne!(a, cache_name(Path::new("/S/a.jpg"), 1, 2), "case is kept");
+        #[cfg(windows)]
+        {
+            let w = cache_name(Path::new(r"C:\s\out\a.jpg"), 1, 2);
+            assert_eq!(w, cache_name(Path::new("C:/s/out/a.jpg"), 1, 2));
+            assert_eq!(w, cache_name(Path::new(r"C:\s/out\a.jpg"), 1, 2));
+        }
     }
 
     #[test]
