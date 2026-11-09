@@ -1364,6 +1364,63 @@ near = { sources = ["partner"], time = "2h", km = 1 }
     }
 
     #[test]
+    fn mixed_zones_quicktime_utc_video_and_other_phone_photo_are_close() {
+        // The plan zone is Chisinau (+03:00 in August). The camera's video
+        // stores its QuickTime date in UTC (09:20Z = 12:20 local); the partner's
+        // phone writes its local wall clock, 12:50, in EXIF (its
+        // OffsetTimeOriginal is not read). Compared as plan-zone wall clock
+        // they are 30 minutes apart, not 3 hours 30.
+        let zone = "Europe/Chisinau";
+        let tz: chrono_tz::Tz = zone.parse().unwrap();
+        let unused = PathBuf::from("unused");
+        let tools = crate::tools::Tools {
+            ffmpeg: unused.clone(),
+            ffprobe: unused.clone(),
+            exiftool: unused.clone(),
+            avifenc: unused.clone(),
+            magick: unused,
+            optipng: None,
+            tz: Some(zone.into()),
+        };
+        let mut video = serde_json::json!({
+            "QuickTime:CreateDate": "2026:08:01 09:20:00",
+            "Track1:ImageWidth": 1920, "Track1:ImageHeight": 1080,
+        });
+        crate::exif::quicktime_to_local(&tools, &mut video);
+        let photo = serde_json::json!({
+            "ExifIFD:DateTimeOriginal": "2026:08:01 12:50:00",
+            "ExifIFD:OffsetTimeOriginal": "+03:00",
+        });
+        let files = vec![virt("camera", "clip.mp4"), virt("partner", "o.jpg")];
+        let facts: Vec<Facts> = vec![
+            crate::filter::facts::facts_of(&files[0], &video, Some(tz)),
+            crate::filter::facts::facts_of(&files[1], &photo, Some(tz)),
+        ];
+        assert_eq!(facts[0].capture, Some(dt("2026-08-01 12:20:00")));
+        assert_eq!(facts[1].capture, Some(dt("2026-08-01 12:50:00")));
+
+        let near = config(&NEAR.replace("\"2h\"", "\"45m\""));
+        let g = run(&near, &files, &facts, &no_thumbs);
+        assert!(holds(&near, 0, &facts, &g).is_ok());
+
+        let event = config(
+            r#"
+[[targets]]
+name = "Trips"
+[[targets.filters]]
+sources = ["camera", "partner"]
+event = { gap = "45m", min_files = 2 }
+"#,
+        );
+        let g = run(&event, &files, &facts, &no_thumbs);
+        let key = EventKey::of(&event.targets[0].filters[0]).unwrap();
+        assert_eq!(g.events[&key].len(), 1);
+        assert_eq!(g.events[&key][0].members, vec![0, 1]);
+        assert!(holds(&event, 0, &facts, &g).is_ok());
+        assert!(holds(&event, 1, &facts, &g).is_ok());
+    }
+
+    #[test]
     fn near_without_capture_date_misses() {
         let cfg = config(NEAR);
         let files = vec![virt("camera", "c.jpg"), virt("partner", "o.jpg")];
