@@ -635,6 +635,8 @@
   "effect_title": "Efect",
   "effect_calculating": "se calculează…",
   "effect_working": "Se stabilește ce se va schimba…",
+  "effect_counting": "se numără duplicatele și claritatea… {{done, number}} din {{total, number}}",
+  "effect_counting_aria": "Numărarea duplicatelor și a clarității",
   "effect_none_one": "Modificările nu afectează niciun fișier din cel {{count, number}}.",
   "effect_none_few": "Modificările nu afectează niciunul dintre cele {{count, number}} fișiere.",
   "effect_none_other": "Modificările nu afectează niciunul dintre cele {{count, number}} de fișiere.",

@@ -265,8 +265,17 @@ fn fates(
     let exif = ctx.exif.as_ref();
     let routed = route_with_overrides(cfg, files, ctx, &ai, false, overrides, progress, cancel)?;
     let decisions = routed.decisions;
-    let mut plan: Plan =
-        build_plan_with(cfg, decisions.clone(), exif, Side::Local, progress, cancel)?;
+    // The plan itself is in-memory and quick: its per-file events stay out,
+    // so the `Stage::Plan` events of a preview are the group passes (content
+    // hashes, series, sharpness) of `RouteCtx::build_in`, which are slow.
+    let mut plan: Plan = build_plan_with(
+        cfg,
+        decisions.clone(),
+        exif,
+        Side::Local,
+        &NoProgress,
+        cancel,
+    )?;
     guard_last_copies(&mut plan, &ctx.groups, files);
     let by_item: HashMap<&Path, &crate::plan::PlanItem> =
         plan.items.iter().map(|i| (i.source.as_path(), i)).collect();

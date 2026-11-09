@@ -82,19 +82,36 @@ pub fn undo_items_with(
     undo_selected(report_path, Some(&only), progress, cancel)
 }
 
-/// An error naming the first of `sources` that is not an item of the report
-/// (a typo or another run's file): [`undo_items`] alone ignores such a path.
-pub fn ensure_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<()> {
+/// The spelling of a path that stands for the file itself: its longest
+/// existing ancestor canonical (`/var` and `/private/var` are one place on
+/// macOS, a symlinked folder is its target) and the rest appended, so a file
+/// that is gone (moved by the run) still has one.
+fn file_identity(p: &Path) -> PathBuf {
+    crate::plan::resolve(p).unwrap_or_else(|| p.to_path_buf())
+}
+
+/// `sources` as the report spells them, matched by the exact path and else by
+/// file identity ([`file_identity`]); an error names the first that is not an
+/// item of the report (a typo or another run's file: [`undo_items`] alone
+/// ignores such a path). Hand the result to [`undo_items`], which compares
+/// the report's own spelling.
+pub fn resolve_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut report = read_report(report_path)?;
     merge_journal(report_path, &mut report)?;
-    let known: HashSet<&PathBuf> = report.items.iter().map(|it| &it.source).collect();
-    match sources.iter().find(|s| !known.contains(s)) {
-        Some(s) => Err(Error::Plan(crate::t!(
-            "undo.no_such_file",
-            path = s.display()
-        ))),
-        None => Ok(()),
-    }
+    let known: Vec<&PathBuf> = report.items.iter().map(|it| &it.source).collect();
+    let ids: HashMap<PathBuf, &PathBuf> = known.iter().map(|k| (file_identity(k), *k)).collect();
+    sources
+        .iter()
+        .map(|s| {
+            known
+                .iter()
+                .find(|k| **k == s)
+                .copied()
+                .or_else(|| ids.get(&file_identity(s)).copied())
+                .cloned()
+                .ok_or_else(|| Error::Plan(crate::t!("undo.no_such_file", path = s.display())))
+        })
+        .collect()
 }
 
 /// The plan the report belongs to: `plan`, else the one the report names,
@@ -844,6 +861,45 @@ mod tests {
     fn put(p: &Path, data: &[u8]) {
         std::fs::create_dir_all(p.parent().unwrap()).unwrap();
         std::fs::write(p, data).unwrap();
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn requested_files_match_the_report_by_file_identity() {
+        let d = tempfile::tempdir().unwrap();
+        let real = d.path().join("real");
+        put(&real.join("a.jpg"), b"a");
+        // The report spells the folder through a symlink (as /var is on
+        // macOS); the user names the same file by its real path.
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(&real, &link).unwrap();
+        let gone = link.join("gone.jpg");
+        let item = |source: PathBuf| ItemResult {
+            source,
+            status: ItemStatus::Missing,
+            outputs: vec![],
+            error: None,
+            elapsed_ms: None,
+            target: None,
+        };
+        let rp = save(d.path(), vec![item(link.join("a.jpg")), item(gone.clone())]);
+        let by_real = real.join("a.jpg");
+        assert_eq!(
+            resolve_in_report(&rp, std::slice::from_ref(&by_real)).unwrap(),
+            vec![link.join("a.jpg")]
+        );
+        // A file that is gone still matches by its exact spelling, and by its
+        // real folder when the report spells it through the symlink.
+        assert_eq!(
+            resolve_in_report(&rp, std::slice::from_ref(&gone)).unwrap(),
+            vec![gone.clone()]
+        );
+        assert_eq!(
+            resolve_in_report(&rp, &[real.join("gone.jpg")]).unwrap(),
+            vec![gone]
+        );
+        // Another file is no item of the run.
+        assert!(resolve_in_report(&rp, &[real.join("b.jpg")]).is_err());
     }
 
     #[test]

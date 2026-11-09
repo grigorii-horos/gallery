@@ -735,6 +735,7 @@
   "cli.check.config": "Wczytaj i sprawdź także ten plik konfiguracji (TOML)",
   "overrides.changed": "%{path}: plik zmienił się od utworzenia planu; utwórz plan ponownie",
   "overrides.best_not_member": "%{path}: nie jest plikiem tej serii",
+  "overrides.plan_changed": "Plan zmienił się od czasu wyświetlenia tego przeglądu — przeskanuj ponownie",
   "undo.no_plan": "brak planu obok raportu, by poznać cele",
   "undo.no_such_target": "brak plików celu „%{target}” w raporcie",
   "undo.no_such_file": "to nie jest plik tego uruchomienia: %{path}",

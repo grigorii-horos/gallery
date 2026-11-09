@@ -635,6 +635,8 @@
   "effect_title": "Effetto",
   "effect_calculating": "calcolo in corso…",
   "effect_working": "Calcolo di ciò che cambierà…",
+  "effect_counting": "conteggio di duplicati e nitidezza… {{done, number}} di {{total, number}}",
+  "effect_counting_aria": "Conteggio di duplicati e nitidezza",
   "effect_none_one": "Le modifiche non riguardano nessuno dei {{count, number}} file.",
   "effect_none_many": "Le modifiche non riguardano nessuno dei {{count, number}} file.",
   "effect_none_other": "Le modifiche non riguardano nessuno dei {{count, number}} file.",

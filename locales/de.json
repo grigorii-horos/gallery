@@ -721,6 +721,7 @@
   "cli.check.config": "Zusätzlich diese Konfigurationsdatei laden und prüfen (TOML)",
   "overrides.changed": "%{path}: Die Datei hat sich seit dem Erstellen des Plans geändert; Plan neu erstellen",
   "overrides.best_not_member": "%{path}: gehört nicht zu den Dateien der Serie",
+  "overrides.plan_changed": "Der Plan hat sich geändert, seit diese Prüfung angezeigt wurde — bitte erneut scannen",
   "undo.no_plan": "kein Plan neben dem Bericht, um die Ziele zu bestimmen",
   "undo.no_such_target": "keine Datei des Ziels „%{target}“ im Bericht",
   "undo.no_such_file": "keine Datei dieses Laufs: %{path}",

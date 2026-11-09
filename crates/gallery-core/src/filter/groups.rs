@@ -1831,7 +1831,14 @@ dir = "{outdir}/{{YYYY}}"
             for p in paths {
                 let m = std::fs::metadata(p).unwrap();
                 let mtime_ns = crate::scan::mtime_ns(&m).unwrap();
-                forged.update(p, m.len(), mtime_ns, |m| m.blake3 = Some("stale".into()));
+                // The output walk starts from the canonical root (on Windows
+                // `\\?\C:\...`, long names), so its keys are canonical.
+                let key = if *p == &out {
+                    std::fs::canonicalize(p).unwrap()
+                } else {
+                    (*p).clone()
+                };
+                forged.update(&key, m.len(), mtime_ns, |m| m.blake3 = Some("stale".into()));
             }
             forged.save().unwrap();
         };

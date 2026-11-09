@@ -597,7 +597,10 @@ pub fn undo_selected(
     if sources.is_empty() {
         return Err(gallery_core::t!("history.no_files_selected").into());
     }
-    gallery_core::undo::ensure_in_report(path, &sources).map_err(|e| e.to_string())?;
+    // As the report spells them: a file named by another spelling of its path
+    // must still be undone, not skipped.
+    let sources =
+        gallery_core::undo::resolve_in_report(path, &sources).map_err(|e| e.to_string())?;
     let progress = |ev: ProgressEvent| {
         on_progress(UndoProgress {
             done: ev.done,
@@ -1138,6 +1141,29 @@ outputs = [{{ dir = "{out}/rest" }}]
         assert!(done.undone);
         assert_eq!(src_files(d.path()).len(), 4);
         assert!(out_names(d.path(), "rest").is_empty());
+    }
+
+    /// A file named through another spelling of its folder (a symlink, or
+    /// `/var` for `/private/var`) is undone, not skipped as "0 restored".
+    #[cfg(unix)]
+    #[test]
+    fn partial_undo_by_another_spelling_of_the_path_restores_the_file() {
+        let d = tempfile::tempdir().unwrap();
+        let (rp, plans) = three_targets(d.path());
+        let link = d.path().join("link");
+        std::os::unix::fs::symlink(d.path(), &link).unwrap();
+        // The run moved the source away: only the folder can be resolved.
+        assert!(!d.path().join("src/cat.jpg").exists());
+        let r = undo_selected(
+            &rp,
+            Some(&plans),
+            &Selection::Files(vec![link.join("src/cat.jpg")]),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!(r.restored, 1);
+        assert!(d.path().join("src/cat.jpg").exists());
     }
 
     #[test]
