@@ -18,8 +18,10 @@ use crate::route::{Decision, SeriesReview, Via};
 use crate::scan::FileEntry;
 use crate::{Error, Result};
 
-/// Version 2 adds `trash` items (`PlanItem::kind`) and the `kept` list; an
-/// older `gallery apply` refuses such a plan. Version 1 plans still load.
+/// The newest plan version this build reads and writes. Version 2 adds
+/// `trash` items (`PlanItem::kind`) and the `kept` list; a plan without them
+/// is written as version 1 (see [`Plan::needed_version`]), so an older
+/// `gallery apply` still runs it. Version 1 plans load.
 pub const PLAN_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -76,7 +78,7 @@ pub struct PlanItem {
     /// What the target does: `folders` places the outputs (and trashes or
     /// consumes the source), `trash` only moves the source to the trash
     /// (no outputs). Absent (folders) in version-1 plans.
-    #[serde(default)]
+    #[serde(default, skip_serializing_if = "TargetKind::is_folders")]
     pub kind: TargetKind,
     pub outputs: Vec<PlannedOutput>,
 }
@@ -716,11 +718,13 @@ pub fn build_plan_with(
         unchanged,
         kept,
         retry_of: None,
-    })
+    }
+    .versioned())
 }
 
 /// Never trash the last copy: for every duplicate group (an original and its
-/// duplicates) and every series of `groups` whose every member is a `trash`
+/// duplicates, or scanned files of the same content under any `duplicate`
+/// scope) and every series of `groups` whose every member is a `trash`
 /// item of `plan`, the original (duplicate group) or the best shot (series)
 /// is taken out of the trash and held for review instead. `groups` and
 /// `files` are what routing used (`groups` indexes `files`).
@@ -740,6 +744,8 @@ pub fn guard_last_copies(plan: &mut Plan, groups: &Groups, files: &[FileEntry]) 
             .push(dup);
     }
     sets.extend(by_original.into_iter().map(|(orig, m)| (m, orig)));
+    // Same content found with any `duplicate` scope (`outputs` alone too).
+    sets.extend(groups.same_content.iter().cloned());
     sets.extend(groups.series.iter().map(|s| (s.members.clone(), s.best)));
     if sets.is_empty() {
         return;
@@ -807,6 +813,7 @@ pub fn guard_last_copies(plan: &mut Plan, groups: &Groups, files: &[FileEntry]) 
             series: None,
         });
     }
+    plan.version = plan.needed_version();
 }
 
 /// IANA name of this machine's zone: `TZ` when it names one, else the
@@ -871,6 +878,7 @@ pub fn subplan(plan: &Plan, report: &Report) -> Plan {
         kept: Vec::new(),
         retry_of: None,
     }
+    .versioned()
 }
 
 /// Split `plan` for a trial run: the pilot takes up to `per_target` items of
@@ -912,50 +920,72 @@ pub fn pilot(plan: &Plan, per_target: usize) -> (Plan, Plan) {
         }
     }
     let created = Local::now().to_rfc3339();
-    let part = |want: bool| Plan {
-        version: PLAN_VERSION,
-        created: created.clone(),
-        side: plan.side,
-        tz: plan.tz.clone(),
-        content_presets: plan.content_presets.clone(),
-        items: plan
-            .items
-            .iter()
-            .zip(&chosen)
-            .filter(|(_, c)| **c == want)
-            .map(|(it, _)| it.clone())
-            .collect(),
-        review: if want {
-            Vec::new()
-        } else {
-            plan.review.clone()
-        },
-        unmatched: if want {
-            Vec::new()
-        } else {
-            plan.unmatched.clone()
-        },
-        warnings: if want {
-            Vec::new()
-        } else {
-            plan.warnings.clone()
-        },
-        unchanged: if want {
-            Vec::new()
-        } else {
-            plan.unchanged.clone()
-        },
-        kept: if want { Vec::new() } else { plan.kept.clone() },
-        retry_of: plan.retry_of.clone(),
+    let part = |want: bool| {
+        Plan {
+            version: PLAN_VERSION,
+            created: created.clone(),
+            side: plan.side,
+            tz: plan.tz.clone(),
+            content_presets: plan.content_presets.clone(),
+            items: plan
+                .items
+                .iter()
+                .zip(&chosen)
+                .filter(|(_, c)| **c == want)
+                .map(|(it, _)| it.clone())
+                .collect(),
+            review: if want {
+                Vec::new()
+            } else {
+                plan.review.clone()
+            },
+            unmatched: if want {
+                Vec::new()
+            } else {
+                plan.unmatched.clone()
+            },
+            warnings: if want {
+                Vec::new()
+            } else {
+                plan.warnings.clone()
+            },
+            unchanged: if want {
+                Vec::new()
+            } else {
+                plan.unchanged.clone()
+            },
+            kept: if want { Vec::new() } else { plan.kept.clone() },
+            retry_of: plan.retry_of.clone(),
+        }
+        .versioned()
     };
     (part(true), part(false))
 }
 
 impl Plan {
-    /// Write the plan as pretty JSON.
+    /// The oldest version that holds everything in the plan: 2 with a
+    /// `trash` item or a `kept` file, else 1 (an older `gallery apply` loses
+    /// nothing reading it).
+    pub fn needed_version(&self) -> u32 {
+        let v2 = !self.kept.is_empty() || self.items.iter().any(|i| !i.kind.is_folders());
+        if v2 { 2 } else { 1 }
+    }
+
+    /// The plan with `version` set to [`Plan::needed_version`].
+    pub fn versioned(mut self) -> Plan {
+        self.version = self.needed_version();
+        self
+    }
+
+    /// Write the plan as pretty JSON, as the version it needs
+    /// ([`Plan::needed_version`]), whatever `version` says.
     pub fn save(&self, path: &Path) -> Result<()> {
-        let json = serde_json::to_string_pretty(self)
-            .map_err(|e| plan_err(format!("{}: {e}", path.display())))?;
+        let json = if self.version == self.needed_version() {
+            serde_json::to_string_pretty(self)
+        } else {
+            serde_json::to_string_pretty(&self.clone().versioned())
+        }
+        .map_err(|e| plan_err(format!("{}: {e}", path.display())))?;
         crate::paths::write_atomic(path, json.as_bytes())?;
         Ok(())
     }
@@ -1172,7 +1202,7 @@ mod tests {
         );
         let e = entry(tmp.path(), "phone", "IMG_20260412_103314.jpg");
         let p = local(&c, vec![(e.clone(), to("t"))]);
-        assert_eq!(p.version, 2);
+        assert_eq!(p.version, 1);
         assert_eq!(p.side, Side::Local);
         assert!(chrono::DateTime::parse_from_rfc3339(&p.created).is_ok());
         let item = &p.items[0];
@@ -2182,7 +2212,7 @@ mod tests {
         assert_eq!(q.warnings, p.warnings);
         assert_eq!(
             (q.version, q.side, &q.created),
-            (2, Side::Local, &p.created)
+            (1, Side::Local, &p.created)
         );
         // The planning machine's zone is recorded and read back; a plan
         // written before the field existed still loads.
@@ -2217,22 +2247,25 @@ mod tests {
     fn plan_load_rejects_other_version() {
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("plan.json");
-        let mut p = local(&cfg(tmp.path(), vec![]), vec![]);
+        let p = local(&cfg(tmp.path(), vec![]), vec![]);
+        // `save` writes the version a plan needs: write others by hand.
+        let write = |v: u32| {
+            let mut j = serde_json::to_value(&p).unwrap();
+            j["version"] = v.into();
+            std::fs::write(&path, j.to_string()).unwrap();
+        };
         // Version 1 (before trash/keep targets) and 2 load.
         for v in [1, 2] {
-            p.version = v;
-            p.save(&path).unwrap();
+            write(v);
             assert_eq!(Plan::load(&path).unwrap().version, v);
         }
         // A newer plan names the way out: update gallery.
-        p.version = 3;
-        p.save(&path).unwrap();
+        write(3);
         match Plan::load(&path) {
             Err(Error::Plan(m)) => assert!(m.contains(&crate::t!("plan.newer_version")), "{m}"),
             other => panic!("{other:?}"),
         }
-        p.version = 0;
-        p.save(&path).unwrap();
+        write(0);
         match Plan::load(&path) {
             Err(Error::Plan(m)) => assert!(!m.contains(&crate::t!("plan.newer_version")), "{m}"),
             other => panic!("{other:?}"),
@@ -2426,7 +2459,7 @@ mod tests {
         assert_eq!(sub.items, vec![failed]);
         assert_eq!(sub.side, Side::Local);
         assert_eq!(sub.tz, plan.tz);
-        assert_eq!(sub.version, PLAN_VERSION);
+        assert_eq!(sub.version, 1);
         assert_eq!(
             sub.content_presets.keys().collect::<Vec<_>>(),
             presets.keys().collect::<Vec<_>>()

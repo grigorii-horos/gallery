@@ -256,3 +256,103 @@ fn pilot_takes_trash_items_per_target_like_any_other() {
     assert!(pilot.kept.is_empty());
     assert_eq!(rest.kept.len(), 1);
 }
+
+/// What `save` wrote, as JSON.
+fn saved(p: &Plan, path: &Path) -> serde_json::Value {
+    p.save(path).unwrap();
+    serde_json::from_str(&std::fs::read_to_string(path).unwrap()).unwrap()
+}
+
+#[test]
+fn a_plan_is_version_2_only_when_it_needs_to_be() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let path = root.join("plan.json");
+    // Folders items only: version 1, no `kind`, no `kept` (an older
+    // `gallery apply` runs it).
+    let plain = build_plan(
+        &cfg(root),
+        vec![(entry(root, "a.jpg"), to("Album"))],
+        &HashMap::new(),
+        Side::Local,
+    )
+    .unwrap();
+    assert_eq!(plain.version, 1);
+    let j = saved(&plain, &path);
+    assert_eq!(j["version"], 1);
+    assert!(j["items"][0].get("kind").is_none() && j.get("kept").is_none());
+    // Even when told otherwise, `save` writes the version the plan needs.
+    let mut told = plain.clone();
+    told.version = 2;
+    assert_eq!(saved(&told, &path)["version"], 1);
+
+    for (name, target) in [("j.jpg", "Junk"), ("k.jpg", "Keep")] {
+        let p = build_plan(
+            &cfg(root),
+            vec![
+                (entry(root, "a.jpg"), to("Album")),
+                (entry(root, name), to(target)),
+            ],
+            &HashMap::new(),
+            Side::Local,
+        )
+        .unwrap();
+        assert_eq!(p.version, 2, "{target}");
+        assert_eq!(saved(&p, &path)["version"], 2, "{target}");
+        assert_eq!(Plan::load(&path).unwrap().version, 2);
+    }
+}
+
+#[test]
+fn guard_and_pilot_parts_get_the_version_they_need() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // One trash item: the pilot (1 per target) takes it, so the pilot is
+    // version 2 and the rest (folders items only) version 1.
+    let routed = vec![
+        (entry(root, "a0.jpg"), to("Album")),
+        (entry(root, "a1.jpg"), to("Album")),
+        (entry(root, "j0.jpg"), to("Junk")),
+    ];
+    let p = build_plan(&cfg(root), routed, &HashMap::new(), Side::Local).unwrap();
+    assert_eq!(p.version, 2);
+    let (pilot_part, rest) = pilot(&p, 1);
+    assert_eq!(pilot_part.version, 2);
+    assert_eq!(rest.version, 1, "{rest:#?}");
+    let files = vec![entry(root, "s0.jpg"), entry(root, "s1.jpg")];
+    let groups = groups_with(
+        &[],
+        vec![Series {
+            members: vec![0, 1],
+            best: 0,
+        }],
+    );
+    let routed = vec![
+        (files[0].clone(), to("Junk")),
+        (files[1].clone(), to("Album")),
+    ];
+    let mut q = build_plan(&cfg(root), routed, &HashMap::new(), Side::Local).unwrap();
+    assert_eq!(q.version, 2);
+    // s1 goes to the album: nothing is held, still version 2.
+    guard_last_copies(&mut q, &groups, &files);
+    assert_eq!(q.version, 2);
+    // A plan whose only trash item is held back: version 1 again.
+    let files0 = vec![files[0].clone()];
+    let mut q = build_plan(
+        &cfg(root),
+        vec![(files[0].clone(), to("Junk"))],
+        &HashMap::new(),
+        Side::Local,
+    )
+    .unwrap();
+    let single = groups_with(
+        &[],
+        vec![Series {
+            members: vec![0],
+            best: 0,
+        }],
+    );
+    guard_last_copies(&mut q, &single, &files0);
+    assert!(q.items.is_empty() && q.review.len() == 1);
+    assert_eq!(q.version, 1);
+}
