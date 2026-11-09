@@ -166,6 +166,10 @@ pub enum Outcome {
     Process,
     /// Routed, but every output leaves the file as it is.
     Unchanged,
+    /// A `trash` target takes the file: it goes to the trash.
+    Trash,
+    /// A `keep` target takes the file: it stays where it is.
+    Kept,
     Review,
     Unmatched,
     NotScanned,
@@ -636,7 +640,11 @@ pub fn explain(
         source_id,
     };
     let item = plan.items.first();
-    let (outcome, outputs) = if let Some(it) = item {
+    let (outcome, outputs) = if item.is_some_and(|it| it.kind == TargetKind::Trash) {
+        (Outcome::Trash, Vec::new())
+    } else if !plan.kept.is_empty() {
+        (Outcome::Kept, Vec::new())
+    } else if let Some(it) = item {
         (
             Outcome::Process,
             output_checks(cfg, &it.target, &it.outputs, &file_name, &ctx),
@@ -987,6 +995,12 @@ fn verdict(
         Some(Via::Ai { .. }) => crate::t!("explain.via_ai"),
         _ => crate::t!("explain.via_mask"),
     };
+    if ex.outcome == Outcome::Trash {
+        return crate::t!("explain.will_trash", target = target, via = via);
+    }
+    if ex.outcome == Outcome::Kept {
+        return crate::t!("explain.will_keep", target = target, via = via);
+    }
     if ex.outcome == Outcome::Process {
         let dest = ex
             .outputs

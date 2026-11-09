@@ -1860,7 +1860,8 @@ kbd {
   min-width: 4px;
 }
 
-.fate-trash {
+.fate-trash,
+.fate-to_trash {
   background: var(--warn);
 }
 
@@ -3580,6 +3581,8 @@ ul.preview-rows .no .mark {
 
 .verdict.unmatched,
 .verdict.unchanged,
+.verdict.trash,
+.verdict.kept,
 .verdict.review,
 .verdict.not_scanned {
   border-left-color: var(--warn);

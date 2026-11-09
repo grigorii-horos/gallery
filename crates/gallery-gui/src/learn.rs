@@ -179,6 +179,7 @@ mod tests {
             target: target.into(),
             via,
             outputs: vec![],
+            kind: Default::default(),
         };
         let plan = Plan {
             version: 1,
@@ -202,6 +203,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         let plan_path = d.path().join("current.plan.json");
         plan.save(&plan_path).unwrap();

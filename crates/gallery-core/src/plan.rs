@@ -8,16 +8,19 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::apply::{ItemResult, ItemStatus, Report, file_hash, same_file};
-use crate::config::{Config, ContentPreset, Output, expand_tilde};
+use crate::config::{Config, ContentPreset, Output, TargetKind, expand_tilde};
 use crate::datetime::{capture_date, file_created};
+use crate::filter::groups::Groups;
 use crate::media::{kind_of, split_name};
 use crate::name::{NameCtx, Pipe, TraceStep, apply_name_pipe, reserve};
 use crate::progress::{Cancel, NoProgress, Progress, ProgressEvent, Stage};
-use crate::route::{Decision, Via};
+use crate::route::{Decision, SeriesReview, Via};
 use crate::scan::FileEntry;
 use crate::{Error, Result};
 
-pub const PLAN_VERSION: u32 = 1;
+/// Version 2 adds `trash` items (`PlanItem::kind`) and the `kept` list; an
+/// older `gallery apply` refuses such a plan. Version 1 plans still load.
+pub const PLAN_VERSION: u32 = 2;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -46,10 +49,20 @@ pub struct Plan {
     /// exclude mask turned away: nothing to do.
     #[serde(default)]
     pub unchanged: Vec<PathBuf>,
+    /// Files a `keep` target takes: left in their source, untouched by apply.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub kept: Vec<KeptItem>,
     /// `run_id` of the report whose failed files this plan retries
     /// (`undo::prepare_retry`); `None` for a scanned plan.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub retry_of: Option<String>,
+}
+
+/// A file a `keep` target takes.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct KeptItem {
+    pub source: PathBuf,
+    pub target: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -60,6 +73,11 @@ pub struct PlanItem {
     pub mtime_ns: i128,
     pub target: String,
     pub via: Via,
+    /// What the target does: `folders` places the outputs (and trashes or
+    /// consumes the source), `trash` only moves the source to the trash
+    /// (no outputs). Absent (folders) in version-1 plans.
+    #[serde(default)]
+    pub kind: TargetKind,
     pub outputs: Vec<PlannedOutput>,
 }
 
@@ -109,6 +127,10 @@ pub struct ReviewItem {
     /// help. Absent (false) in older plans.
     #[serde(default, skip_serializing_if = "is_false")]
     pub name_error: bool,
+    /// Held because a `series` condition matched: the whole series and its
+    /// suggested best shot, for a side-by-side review.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series: Option<SeriesReview>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -377,6 +399,7 @@ pub fn build_plan_with(
     let mut review = Vec::new();
     let mut unmatched = Vec::new();
     let mut unchanged = Vec::new();
+    let mut kept = Vec::new();
     let mut warnings = Vec::new();
     // (capture time, target, source) of planned items, for SeriesSplit.
     let mut timeline = Vec::new();
@@ -404,9 +427,10 @@ pub fn build_plan_with(
             |c: Option<NaiveDateTime>| c.map(|t| t.format("%Y-%m-%dT%H:%M:%S").to_string());
         let (target, via) = match decision {
             Decision::Target { name, via } => (name, via),
-            // TODO(T6): carry `series` into the review item (ruling R3).
             Decision::Review {
-                suggested, reason, ..
+                suggested,
+                reason,
+                series,
             } => {
                 review.push(ReviewItem {
                     source,
@@ -417,6 +441,7 @@ pub fn build_plan_with(
                     captured: captured(capture()),
                     source_root: Some(source_root),
                     name_error: false,
+                    series,
                 });
                 continue;
             }
@@ -431,11 +456,27 @@ pub fn build_plan_with(
                 continue;
             }
         };
-        // TODO(T6): `trash` and `keep` targets become plan decisions of their
-        // own; until then nothing at all is planned for their files.
-        if cfg.target(&target).is_some_and(|t| !t.kind.is_folders()) {
-            unchanged.push(source);
-            continue;
+        // `trash` and `keep` targets have no outputs: the file goes to the
+        // trash (after every placement of the run) or stays as it is.
+        match cfg.target(&target).map(|t| t.kind) {
+            Some(TargetKind::Trash) => {
+                items.push(PlanItem {
+                    source,
+                    source_root,
+                    size: e.size,
+                    mtime_ns: e.mtime_ns,
+                    target,
+                    via,
+                    kind: TargetKind::Trash,
+                    outputs: Vec::new(),
+                });
+                continue;
+            }
+            Some(TargetKind::Keep) => {
+                kept.push(KeptItem { source, target });
+                continue;
+            }
+            Some(TargetKind::Folders) | None => {}
         }
         let outputs_cfg = target_outputs(cfg, &target)
             .ok_or_else(|| plan_err(crate::t!("plan.unknown_target", target = target)))?;
@@ -488,6 +529,7 @@ pub fn build_plan_with(
                         captured: captured(capture),
                         source_root: Some(source_root),
                         name_error: true,
+                        series: None,
                     });
                     continue 'files;
                 }
@@ -627,6 +669,7 @@ pub fn build_plan_with(
             mtime_ns: e.mtime_ns,
             target,
             via,
+            kind: TargetKind::Folders,
             outputs,
         });
     }
@@ -671,8 +714,99 @@ pub fn build_plan_with(
         unmatched,
         warnings,
         unchanged,
+        kept,
         retry_of: None,
     })
+}
+
+/// Never trash the last copy: for every duplicate group (an original and its
+/// duplicates) and every series of `groups` whose every member is a `trash`
+/// item of `plan`, the original (duplicate group) or the best shot (series)
+/// is taken out of the trash and held for review instead. `groups` and
+/// `files` are what routing used (`groups` indexes `files`).
+///
+/// A plan item is found by its source path on the local side; on the server
+/// side (where sources are re-rooted) by its path below the source root,
+/// size and mtime. Should two files share that, both count as trashed when
+/// one is, and both are held: the check errs on keeping files.
+pub fn guard_last_copies(plan: &mut Plan, groups: &Groups, files: &[FileEntry]) {
+    // (file indexes, the one to keep)
+    let mut sets: Vec<(Vec<usize>, usize)> = Vec::new();
+    let mut by_original: BTreeMap<usize, Vec<usize>> = BTreeMap::new();
+    for (&dup, &orig) in &groups.dup_original {
+        by_original
+            .entry(orig)
+            .or_insert_with(|| vec![orig])
+            .push(dup);
+    }
+    sets.extend(by_original.into_iter().map(|(orig, m)| (m, orig)));
+    sets.extend(groups.series.iter().map(|s| (s.members.clone(), s.best)));
+    if sets.is_empty() {
+        return;
+    }
+
+    type Key = (PathBuf, u64, i128);
+    let server = plan.side == Side::Server;
+    let item_key = |it: &PlanItem| -> Key {
+        let p = if server {
+            it.source
+                .strip_prefix(&it.source_root)
+                .unwrap_or(&it.source)
+                .to_path_buf()
+        } else {
+            it.source.clone()
+        };
+        (p, it.size, it.mtime_ns)
+    };
+    let file_key = |e: &FileEntry| -> Key {
+        let p = if server { &e.rel } else { &e.path };
+        (p.clone(), e.size, e.mtime_ns)
+    };
+    let mut trash_at: HashMap<Key, Vec<usize>> = HashMap::new();
+    for (pos, it) in plan.items.iter().enumerate() {
+        if it.kind == TargetKind::Trash {
+            trash_at.entry(item_key(it)).or_default().push(pos);
+        }
+    }
+    let positions = |i: usize, held: &BTreeSet<usize>| -> Vec<usize> {
+        files.get(i).map_or_else(Vec::new, |e| {
+            trash_at
+                .get(&file_key(e))
+                .into_iter()
+                .flatten()
+                .copied()
+                .filter(|p| !held.contains(p))
+                .collect()
+        })
+    };
+
+    let mut held = BTreeSet::new();
+    for (members, keep) in sets {
+        if members.iter().all(|&i| !positions(i, &held).is_empty()) {
+            held.extend(positions(keep, &held));
+        }
+    }
+    if held.is_empty() {
+        return;
+    }
+    let items = std::mem::take(&mut plan.items);
+    for (pos, it) in items.into_iter().enumerate() {
+        if !held.contains(&pos) {
+            plan.items.push(it);
+            continue;
+        }
+        plan.review.push(ReviewItem {
+            source: it.source,
+            size: it.size,
+            mtime_ns: it.mtime_ns,
+            suggested: it.target,
+            reason: crate::t!("plan.last_copy_kept"),
+            captured: None,
+            source_root: Some(it.source_root),
+            name_error: false,
+            series: None,
+        });
+    }
 }
 
 /// IANA name of this machine's zone: `TZ` when it names one, else the
@@ -734,6 +868,7 @@ pub fn subplan(plan: &Plan, report: &Report) -> Plan {
         unmatched: Vec::new(),
         warnings: Vec::new(),
         unchanged: Vec::new(),
+        kept: Vec::new(),
         retry_of: None,
     }
 }
@@ -742,8 +877,9 @@ pub fn subplan(plan: &Plan, report: &Report) -> Plan {
 /// each target, preferring different extensions (one per extension, in plan
 /// order, then the remaining items in plan order); the rest is everything
 /// else. Both keep the plan's order, side, zone and content presets, so the
-/// two together cover every item exactly once; the rest also carries the
-/// review, unmatched and unchanged lists and the warnings (the pilot has none).
+/// two together cover every item exactly once (`trash` items are split per
+/// target like any other); the rest also carries the review, unmatched,
+/// unchanged and kept lists and the warnings (the pilot has none).
 pub fn pilot(plan: &Plan, per_target: usize) -> (Plan, Plan) {
     // Indexes of the items per target, in plan order.
     let mut by_target: BTreeMap<&str, Vec<usize>> = BTreeMap::new();
@@ -809,6 +945,7 @@ pub fn pilot(plan: &Plan, per_target: usize) -> (Plan, Plan) {
         } else {
             plan.unchanged.clone()
         },
+        kept: if want { Vec::new() } else { plan.kept.clone() },
         retry_of: plan.retry_of.clone(),
     };
     (part(true), part(false))
@@ -823,9 +960,9 @@ impl Plan {
         Ok(())
     }
 
-    /// Read a plan; only version 1 is understood. A value this build does
-    /// not know (e.g. a manual decision, `Via::Manual`, read by an older
-    /// server binary) gets a hint to update gallery.
+    /// Read a plan; versions 1 and 2 are understood. A newer version, or a
+    /// value this build does not know (e.g. a manual decision, `Via::Manual`,
+    /// read by an older server binary), gets a hint to update gallery.
     pub fn load(path: &Path) -> Result<Plan> {
         let text = std::fs::read_to_string(path)?;
         Plan::parse(&text, path)
@@ -843,12 +980,16 @@ impl Plan {
             };
             plan_err(format!("{}: {msg}{hint}", path.display()))
         })?;
-        if plan.version != PLAN_VERSION {
-            return Err(plan_err(crate::t!(
+        if !(1..=PLAN_VERSION).contains(&plan.version) {
+            let mut msg = crate::t!(
                 "plan.unsupported_version",
                 path = path.display(),
                 version = plan.version
-            )));
+            );
+            if plan.version > PLAN_VERSION {
+                msg.push_str(&crate::t!("plan.newer_version"));
+            }
+            return Err(plan_err(msg));
         }
         Ok(plan)
     }
@@ -1031,7 +1172,7 @@ mod tests {
         );
         let e = entry(tmp.path(), "phone", "IMG_20260412_103314.jpg");
         let p = local(&c, vec![(e.clone(), to("t"))]);
-        assert_eq!(p.version, 1);
+        assert_eq!(p.version, 2);
         assert_eq!(p.side, Side::Local);
         assert!(chrono::DateTime::parse_from_rfc3339(&p.created).is_ok());
         let item = &p.items[0];
@@ -2041,7 +2182,7 @@ mod tests {
         assert_eq!(q.warnings, p.warnings);
         assert_eq!(
             (q.version, q.side, &q.created),
-            (1, Side::Local, &p.created)
+            (2, Side::Local, &p.created)
         );
         // The planning machine's zone is recorded and read back; a plan
         // written before the field existed still loads.
@@ -2075,11 +2216,27 @@ mod tests {
     #[test]
     fn plan_load_rejects_other_version() {
         let tmp = tempfile::tempdir().unwrap();
-        let mut p = local(&cfg(tmp.path(), vec![]), vec![]);
-        p.version = 2;
         let path = tmp.path().join("plan.json");
+        let mut p = local(&cfg(tmp.path(), vec![]), vec![]);
+        // Version 1 (before trash/keep targets) and 2 load.
+        for v in [1, 2] {
+            p.version = v;
+            p.save(&path).unwrap();
+            assert_eq!(Plan::load(&path).unwrap().version, v);
+        }
+        // A newer plan names the way out: update gallery.
+        p.version = 3;
         p.save(&path).unwrap();
-        assert!(matches!(Plan::load(&path), Err(Error::Plan(_))));
+        match Plan::load(&path) {
+            Err(Error::Plan(m)) => assert!(m.contains(&crate::t!("plan.newer_version")), "{m}"),
+            other => panic!("{other:?}"),
+        }
+        p.version = 0;
+        p.save(&path).unwrap();
+        match Plan::load(&path) {
+            Err(Error::Plan(m)) => assert!(!m.contains(&crate::t!("plan.newer_version")), "{m}"),
+            other => panic!("{other:?}"),
+        }
     }
 
     #[test]
@@ -2136,6 +2293,7 @@ mod tests {
                 steps: vec!["AVIF".into()],
                 trace: vec![],
             }],
+            kind: Default::default(),
         }
     }
 
@@ -2204,11 +2362,13 @@ mod tests {
                 captured: None,
                 source_root: None,
                 name_error: false,
+                series: None,
             }],
             unmatched: vec![tmp.path().join("u.txt")],
             warnings: vec![Warning::MissingServerPath { what: "x".into() }],
             unchanged: vec![tmp.path().join("k.jpg")],
             retry_of: None,
+            kept: Vec::new(),
         };
         let result = |it: &PlanItem, status: ItemStatus| ItemResult {
             source: it.source.clone(),
@@ -2260,6 +2420,7 @@ mod tests {
             undone_sources: vec![],
             cancelled: true,
             stopped_by_anomalies: false,
+            kept: 0,
         };
         let sub = subplan(&plan, &report);
         assert_eq!(sub.items, vec![failed]);
@@ -2298,6 +2459,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         // As an older binary sees it: a `via` kind it does not know.
         let text = serde_json::to_string(&plan)
@@ -2327,6 +2489,7 @@ mod tests {
                 steps: vec![],
                 trace: vec![],
             }],
+            kind: Default::default(),
         }
     }
 
@@ -2348,6 +2511,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![PathBuf::from("/y")],
             retry_of: None,
+            kept: Vec::new(),
         }
     }
 
@@ -2613,6 +2777,7 @@ mod tests {
             warnings: vec![],
             unchanged: vec![],
             retry_of: None,
+            kept: Vec::new(),
         };
         plan.save(&path).unwrap();
         plan.save(&path).unwrap();
@@ -2625,3 +2790,6 @@ mod tests {
         assert_eq!(Plan::parse(&text, &path).unwrap().created, "c");
     }
 }
+
+#[cfg(test)]
+mod trash_tests;

@@ -21,6 +21,8 @@ const preview = (p: Partial<ApplyPreview> = {}): ApplyPreview => ({
   trash: 84,
   renamed: 30,
   kept: 6,
+  to_trash: 0,
+  kept_targets: 0,
   writes: 96,
   review: 7,
   unmatched: 4,
@@ -90,7 +92,15 @@ describe("confirmLines", () => {
     const c = confirmLines(preview({ files: 1, trash: 1, renamed: 0, kept: 0, writes: 1, review: 0, unmatched: 0, unchanged: 0 }));
     expect(c.title).toBe("Run the plan: 1 file?");
     expect(c.lines.join("\n")).toContain("1 source goes to the trash");
-    expect(c.lines.join("\n")).not.toMatch(/renamed in place|stay where|outside the plan/);
+    expect(c.lines.join("\n")).not.toMatch(/renamed in place|stay where|outside the plan|Trash targets|Keep targets/);
+  });
+
+  it("names the files of trash and keep targets", () => {
+    const p = preview({ files: 3, trash: 0, renamed: 0, kept: 0, to_trash: 3, kept_targets: 2, writes: 0 });
+    const c = confirmLines(p);
+    expect(c.lines.join("\n")).toContain("Trash targets: 3 files go to the trash");
+    expect(c.lines.join("\n")).toContain("Keep targets: 2 files are kept");
+    expect(fates(p).find((f) => f.id === "to_trash")?.count).toBe(3);
   });
 });
 

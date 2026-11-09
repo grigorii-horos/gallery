@@ -148,6 +148,8 @@ export interface ScanSummary {
   review: number;
   unmatched: number;
   unchanged: number;
+  /** Files keep targets take (also counted in `targets`). */
+  kept: number;
   warnings: number;
   notes: string[];
   overrides_applied: number;
@@ -199,6 +201,8 @@ export interface PlanItem {
   mtime_ns: number;
   target: string;
   via: Via;
+  /** What the target does; absent (folders) in version-1 plans. A `trash` item has no outputs. */
+  kind?: "folders" | "trash" | "keep";
   outputs: PlannedOutput[];
 }
 
@@ -214,6 +218,8 @@ export interface ReviewItem {
   source_root?: string | null;
   /** Held back because its name could not be built, not by the AI; absent in older plans. */
   name_error?: boolean;
+  /** Held because a `series` condition matched: the whole series and the suggested best shot. */
+  series?: { members: string[]; best: string } | null;
 }
 
 export interface OverrideResult {
@@ -241,6 +247,8 @@ export interface Plan {
   unmatched: string[];
   warnings: PlanWarning[];
   unchanged?: string[];
+  /** Files `keep` targets take: left untouched by a run. */
+  kept?: { source: string; target: string }[];
 }
 
 export type OverrideAction = { kind: "target"; name: string } | { kind: "keep" };
@@ -362,7 +370,7 @@ export interface Explanation {
   other_targets: string[];
   ai: ExplainAi;
   decision: ExplainDecision | null;
-  outcome: "process" | "unchanged" | "review" | "unmatched" | "not_scanned";
+  outcome: "process" | "unchanged" | "trash" | "kept" | "review" | "unmatched" | "not_scanned";
   outputs: OutputCheck[];
   verdict: string;
 }
@@ -454,6 +462,10 @@ export interface ApplyPreview {
   renamed: number;
   /** Sources an output keeps where they are. */
   kept: number;
+  /** Files of trash targets: no copies, they go to the trash after every placement of the run. */
+  to_trash: number;
+  /** Files keep targets take: outside the run, untouched. */
+  kept_targets: number;
   /** New files written. */
   writes: number;
   review: number;

@@ -15,8 +15,9 @@ use crate::Result;
 use crate::ai::cache::Cache;
 use crate::ai::client::cached_answer;
 use crate::config::Config;
+use crate::config::TargetKind;
 use crate::overrides::Overrides;
-use crate::plan::{OutputOp, Plan, Side, build_plan_with};
+use crate::plan::{OutputOp, Plan, Side, build_plan_with, guard_last_copies};
 use crate::progress::{Cancel, NoProgress, Progress};
 use crate::route::{
     AiAnswer, AiRequest, Classifier, Confidence, Decision, RouteCtx, route_with_overrides,
@@ -36,6 +37,10 @@ pub enum Outcome {
     Renamed,
     /// Left exactly as it is.
     Unchanged,
+    /// A `trash` target takes it: it goes to the trash.
+    Trash,
+    /// A `keep` target takes it: it stays where it is.
+    Kept,
     /// Turned away by an exclude mask.
     Excluded,
     /// Held for the user's review.
@@ -68,6 +73,8 @@ pub struct Counts {
     pub compressed: usize,
     pub renamed: usize,
     pub unchanged: usize,
+    pub trash: usize,
+    pub kept: usize,
     pub excluded: usize,
     pub review: usize,
     pub unmatched: usize,
@@ -80,6 +87,8 @@ impl Counts {
             Outcome::Compressed => &mut self.compressed,
             Outcome::Renamed => &mut self.renamed,
             Outcome::Unchanged => &mut self.unchanged,
+            Outcome::Trash => &mut self.trash,
+            Outcome::Kept => &mut self.kept,
             Outcome::Excluded => &mut self.excluded,
             Outcome::Review => &mut self.review,
             Outcome::Unmatched => &mut self.unmatched,
@@ -92,6 +101,8 @@ impl Counts {
         self.compressed
             + self.renamed
             + self.unchanged
+            + self.trash
+            + self.kept
             + self.excluded
             + self.review
             + self.unmatched
@@ -174,6 +185,8 @@ fn label(outcome: Outcome, target: &Option<String>, outputs: &[OutputFate]) -> S
     match outcome {
         Outcome::Unchanged if target.is_none() => crate::t!("effect.unchanged"),
         Outcome::Unchanged => crate::t!("effect.target_unchanged", target = t),
+        Outcome::Trash => crate::t!("effect.target_trash", target = t),
+        Outcome::Kept => crate::t!("effect.target_kept", target = t),
         Outcome::Excluded => crate::t!("effect.excluded"),
         Outcome::Review => crate::t!("effect.review"),
         Outcome::Unmatched => crate::t!("effect.unmatched"),
@@ -226,10 +239,13 @@ fn fates(
     let ctx = RouteCtx::build(cfg, files, exif, None, progress, cancel)?;
     let routed = route_with_overrides(cfg, files, &ctx, &ai, false, overrides, progress, cancel)?;
     let decisions = routed.decisions;
-    let plan: Plan = build_plan_with(cfg, decisions.clone(), exif, Side::Local, progress, cancel)?;
+    let mut plan: Plan =
+        build_plan_with(cfg, decisions.clone(), exif, Side::Local, progress, cancel)?;
+    guard_last_copies(&mut plan, &ctx.groups, files);
     let by_item: HashMap<&Path, &crate::plan::PlanItem> =
         plan.items.iter().map(|i| (i.source.as_path(), i)).collect();
     let in_review: HashSet<&Path> = plan.review.iter().map(|r| r.source.as_path()).collect();
+    let in_kept: HashSet<&Path> = plan.kept.iter().map(|k| k.source.as_path()).collect();
     let mut out = HashMap::new();
     for (entry, decision) in decisions {
         let target = match &decision {
@@ -242,7 +258,14 @@ fn fates(
             Decision::Review { .. } => fate(Outcome::Review, None, vec![]),
             Decision::Unmatched => fate(Outcome::Unmatched, None, vec![]),
             Decision::Target { .. } => {
-                if let Some(item) = by_item.get(entry.path.as_path()) {
+                if let Some(item) = by_item
+                    .get(entry.path.as_path())
+                    .filter(|it| it.kind == TargetKind::Trash)
+                {
+                    fate(Outcome::Trash, Some(item.target.clone()), vec![])
+                } else if in_kept.contains(entry.path.as_path()) {
+                    fate(Outcome::Kept, target, vec![])
+                } else if let Some(item) = by_item.get(entry.path.as_path()) {
                     let outputs: Vec<OutputFate> = item
                         .outputs
                         .iter()
@@ -462,6 +485,61 @@ mod tests {
 
     fn target<'a>(d: &'a EffectDiff, n: &str) -> &'a TargetDelta {
         d.targets.iter().find(|t| t.name == n).unwrap()
+    }
+
+    #[test]
+    fn trash_and_keep_targets_count_as_to_trash_and_kept() {
+        let f = fx();
+        let old = load(&f.dir, "", "*.png", "", &[], "");
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
+             [[targets]]\nname = \"Junk\"\nkind = \"trash\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nmatch = \"keep_*\"\n\
+             [[targets]]\nname = \"Keep\"\nkind = \"keep\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nmatch = \"*.jpg\"\n\
+             [[targets]]\nname = \"pngs\"\n[[targets.filters]]\n\
+             sources = [\"s\"]\nmatch = \"*.png\"\n\
+             [[targets.outputs]]\ndir = \"{r}/out\"\n"
+        );
+        let new = Config::from_str_at(&toml, f.dir.path(), Path::new("t.toml")).unwrap();
+        new.validate().unwrap();
+        let d = run(&old, &new, &f);
+        assert_eq!((d.after.trash, d.after.kept), (1, 1));
+        assert_eq!(target(&d, "Junk").after.trash, 1);
+        assert_eq!(target(&d, "Keep").after.kept, 1);
+        let fate_of = |o: Outcome| {
+            d.examples
+                .iter()
+                .find(|g| g.outcome == o)
+                .map(|g| g.files[0].after.label.clone())
+        };
+        assert_eq!(
+            fate_of(Outcome::Trash),
+            Some(crate::t!("effect.target_trash", target = "Junk"))
+        );
+        assert_eq!(
+            fate_of(Outcome::Kept),
+            Some(crate::t!("effect.target_kept", target = "Keep"))
+        );
+    }
+
+    /// Every file of the fixture has the same bytes: one duplicate group.
+    #[test]
+    fn the_last_copy_is_held_for_review_not_trashed() {
+        let f = fx();
+        let old = load(&f.dir, "", "*.png", "", &[], "");
+        let r = f.dir.path().to_string_lossy().replace('\\', "/");
+        let toml = format!(
+            "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
+             [[targets]]\nname = \"Junk\"\nkind = \"trash\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nmatch = \"*\"\n\
+             [[targets.filters]]\nsources = [\"s\"]\nduplicate = {{ of = [\"sources\"] }}\n"
+        );
+        let new = Config::from_str_at(&toml, f.dir.path(), Path::new("t.toml")).unwrap();
+        new.validate().unwrap();
+        let d = run(&old, &new, &f);
+        assert_eq!((d.after.trash, d.after.review), (4, 1));
     }
 
     #[test]

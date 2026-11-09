@@ -509,3 +509,56 @@ content = ["compress-all"]
     assert!(text.contains("compress-all › png-avif: applied"), "{text}");
     assert!(text.contains("compress-all › avif-high: mask did not match"));
 }
+
+#[test]
+fn trash_and_keep_targets_say_what_happens() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    touch(&root.join("src/junk.gif"));
+    touch(&root.join("src/keep.jpg"));
+    let toml = format!(
+        r#"
+[[sources]]
+id = "s"
+path = "{r}/src"
+
+[[targets]]
+name = "Junk"
+kind = "trash"
+[[targets.filters]]
+sources = ["s"]
+match = "*.gif"
+
+[[targets]]
+name = "Stay"
+kind = "keep"
+[[targets.filters]]
+sources = ["s"]
+match = "*.jpg"
+"#,
+        r = root.to_string_lossy().replace('\\', "/")
+    );
+    let cfg = Config::from_str_at(&toml, root, Path::new("t.toml")).unwrap();
+    let fx = Fx { dir, cfg };
+    let ex = fx.explain("src/junk.gif");
+    assert_eq!(ex.outcome, Outcome::Trash);
+    assert!(ex.outputs.is_empty());
+    assert_eq!(
+        ex.verdict,
+        crate::t!(
+            "explain.will_trash",
+            target = "Junk",
+            via = crate::t!("explain.via_mask")
+        )
+    );
+    let ex = fx.explain("src/keep.jpg");
+    assert_eq!(ex.outcome, Outcome::Kept);
+    assert_eq!(
+        ex.verdict,
+        crate::t!(
+            "explain.will_keep",
+            target = "Stay",
+            via = crate::t!("explain.via_mask")
+        )
+    );
+}

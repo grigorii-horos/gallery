@@ -73,7 +73,7 @@ const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (c
     case "refresh_current":
       return true;
     case "apply_preview":
-      return { plan_path: a.planPath, created: "", side: "local", files: 2, trash: 2, renamed: 0, kept: 0, writes: 2, review: 0, unmatched: 0, unchanged: 0, applied: null };
+      return { plan_path: a.planPath, created: "", side: "local", files: 2, trash: 2, renamed: 0, kept: 0, to_trash: 0, kept_targets: 0, writes: 2, review: 0, unmatched: 0, unchanged: 0, applied: null };
     case "load_config":
       throw new Error("no config in this test");
     case "app_status":

@@ -14,7 +14,7 @@ export function filesWord(n: number): string {
   return t("files", { count: n });
 }
 
-export type FateId = "trash" | "renamed" | "kept";
+export type FateId = "trash" | "renamed" | "kept" | "to_trash";
 
 export interface Fate {
   id: FateId;
@@ -22,13 +22,16 @@ export interface Fate {
   count: number;
 }
 
-/** What happens to the sources: each processed file has exactly one fate. */
+/** What happens to the sources: each processed file has exactly one fate. Files of trash targets
+ *  (no copies) are a row of their own, shown only when the plan has some. */
 export function fates(p: ApplyPreview): Fate[] {
-  return [
+  const rows: Fate[] = [
     { id: "trash", label: t("fate_trash"), count: p.trash },
     { id: "renamed", label: t("fate_renamed"), count: p.renamed },
     { id: "kept", label: t("fate_kept"), count: p.kept },
   ];
+  if (p.to_trash > 0) rows.push({ id: "to_trash", label: t("fate_to_trash"), count: p.to_trash });
+  return rows;
 }
 
 export type ConfirmKind = "all" | "pilot" | "rest";
@@ -45,6 +48,8 @@ export function confirmLines(p: ApplyPreview, kind: ConfirmKind = "all"): { titl
     lines.push(t("confirm_renamed", { count: p.renamed }));
   }
   if (p.kept > 0) lines.push(t("confirm_kept", { count: p.kept }));
+  if (p.to_trash > 0) lines.push(t("confirm_to_trash", { n: p.to_trash }));
+  if (p.kept_targets > 0) lines.push(t("confirm_kept_targets", { n: p.kept_targets }));
   const outside = p.review + p.unmatched + p.unchanged;
   if (outside > 0) lines.push(t("confirm_outside", { count: outside }));
   lines.push(t("confirm_skipped_undo"));

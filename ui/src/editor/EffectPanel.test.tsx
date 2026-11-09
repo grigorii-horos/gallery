@@ -9,6 +9,8 @@ const c = (o: Partial<Counts> = {}): Counts => ({
   compressed: 0,
   renamed: 0,
   unchanged: 0,
+  trash: 0,
+  kept: 0,
   excluded: 0,
   review: 0,
   unmatched: 0,

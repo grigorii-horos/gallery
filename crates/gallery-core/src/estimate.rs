@@ -450,6 +450,18 @@ pub fn estimate_with(plan: &Plan, history: &History, jobs: usize) -> Estimate {
         t.seconds.high += secs[2];
     }
 
+    // A `keep` target's files stay as they are: no work, nothing freed. A
+    // `trash` target's items (no outputs) are counted above as "to trash".
+    for k in &plan.kept {
+        targets
+            .entry(k.target.clone())
+            .or_insert_with(|| TargetEstimate {
+                name: k.target.clone(),
+                ..Default::default()
+            })
+            .kept += 1;
+    }
+
     let mut total = TargetEstimate::default();
     for t in targets.values_mut() {
         let inb = t.input_bytes as i64;
