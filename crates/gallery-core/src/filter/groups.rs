@@ -249,7 +249,8 @@ impl EventKey {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Needs {
     /// Some condition reads file metadata (date, place, device, properties,
-    /// events, neighbours, series), so every file's metadata is needed.
+    /// events, neighbours, series, the capture date ranking duplicates), so
+    /// every file's metadata is needed.
     pub exif_all: bool,
     /// Event parameter sets in use (each computed once).
     pub events: Vec<EventKey>,
@@ -293,7 +294,12 @@ pub fn needs(cfg: &Config) -> Needs {
             || f.event.is_some()
             || f.expand.is_some()
             || f.near.is_some()
-            || f.series.is_some();
+            || f.series.is_some()
+            // The original of a duplicate group is the oldest capture.
+            || f
+                .duplicate
+                .as_ref()
+                .is_some_and(|d| d.of.contains(&DupScope::Sources));
     }
     n.events = events.into_iter().collect();
     n.duplicates = dups.into_iter().collect();
@@ -1407,6 +1413,47 @@ dir = "{out}/{{YYYY}}"
         // Hashes are cached.
         let cached = std::fs::read_to_string(cache.path().join("metrics.json")).unwrap();
         assert!(cached.contains("blake3"));
+    }
+
+    #[test]
+    fn oldest_capture_is_the_original_within_one_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let a = tmp.path().join("a.jpg");
+        let b = tmp.path().join("b.jpg");
+        std::fs::write(&a, b"same picture").unwrap();
+        std::fs::write(&b, b"same picture").unwrap();
+        let cfg = config(
+            r#"
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+[[targets.filters]]
+sources = ["camera"]
+duplicate = {}
+"#,
+        );
+        let n = needs(&cfg);
+        assert!(n.exif_all, "the capture date ranks the original");
+        assert_eq!(n.duplicates, vec![DupScope::Sources]);
+        let files = vec![entry("camera", &a), entry("camera", &b)];
+        // b.jpg is later by path but older by capture: it is the original.
+        let facts = vec![
+            fact(Some("2026-08-02 10:00:00"), None),
+            fact(Some("2026-08-01 10:00:00"), None),
+        ];
+        let g = run(&cfg, &files, &facts, &no_thumbs);
+        assert_eq!(g.dup_original.get(&0), Some(&1));
+        assert!(!g.dup_original.contains_key(&1));
+        assert!(holds(&cfg, 0, &facts, &g).is_ok());
+        assert!(holds(&cfg, 1, &facts, &g).is_err());
+        // Without capture dates the path decides.
+        let g = run(
+            &cfg,
+            &files,
+            &[fact(None, None), fact(None, None)],
+            &no_thumbs,
+        );
+        assert_eq!(g.dup_original.get(&1), Some(&0));
     }
 
     #[test]
