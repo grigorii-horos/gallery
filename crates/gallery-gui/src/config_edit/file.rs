@@ -65,7 +65,7 @@ fn back_up(real: &Path, how: Backup) -> std::io::Result<PathBuf> {
             }
             Backup::Keep => {
                 // Created exclusively: an existing backup is never replaced.
-                let mut out = match std::fs::OpenOptions::new()
+                let out = match std::fs::OpenOptions::new()
                     .write(true)
                     .create_new(true)
                     .open(&bak)
@@ -74,14 +74,29 @@ fn back_up(real: &Path, how: Backup) -> std::io::Result<PathBuf> {
                     Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => continue,
                     Err(e) => return Err(e),
                 };
-                let bytes = std::fs::read(real)?;
-                out.write_all(&bytes)?;
-                out.sync_all()?;
+                fill_or_remove(&bak, out, |f| f.write_all(&std::fs::read(real)?))?;
                 return Ok(bak);
             }
         }
     }
     unreachable!("a free backup name")
+}
+
+/// Write the freshly created backup `bak` through `fill` and sync it; on
+/// failure the partial file is removed, so a broken copy never takes a
+/// backup name that is then never replaced.
+fn fill_or_remove(
+    bak: &Path,
+    mut out: std::fs::File,
+    fill: impl FnOnce(&mut std::fs::File) -> std::io::Result<()>,
+) -> std::io::Result<()> {
+    let r = fill(&mut out).and_then(|()| out.sync_all());
+    // Closed first: Windows removes an open file only once it is closed.
+    drop(out);
+    if r.is_err() {
+        let _ = std::fs::remove_file(bak);
+    }
+    r
 }
 
 /// The file was changed since `expected` was read.
@@ -134,4 +149,36 @@ pub fn write_atomic(
         let _ = d.sync_all();
     }
     Ok(bak)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn failed_keep_backup_is_removed() {
+        let dir = tempfile::tempdir().unwrap();
+        let bak = dir.path().join("gallery.toml.bak");
+        let out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&bak)
+            .unwrap();
+        let err = fill_or_remove(&bak, out, |f| {
+            f.write_all(b"half")?;
+            Err(std::io::Error::other("disk full"))
+        })
+        .unwrap_err();
+        assert_eq!(err.to_string(), "disk full");
+        assert!(!bak.exists());
+
+        // A good fill keeps the file.
+        let out = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&bak)
+            .unwrap();
+        fill_or_remove(&bak, out, |f| f.write_all(b"whole")).unwrap();
+        assert_eq!(std::fs::read(&bak).unwrap(), b"whole");
+    }
 }
