@@ -409,7 +409,7 @@
   "cli.presets.about": "Show the built-in presets",
   "cli.presets.long": "Prints the built-in name and content presets with their key parameters. They can be used in the config by name without a definition; a user preset with the same name is an error.",
   "cli.undo.about": "Undo a run from its report",
-  "cli.undo.long": "Restores the sources from the trash and deletes the outputs the run created. Outputs changed after the run stay. A report can be undone once.",
+  "cli.undo.long": "Restores the sources from the trash and deletes the outputs the run created. Outputs changed after the run stay. A report can be undone once. With --file or --target only those files are undone (a later full undo skips them).",
   "cli.undo.report": "Report file (<plan>.report.json)",
   "cli.h.usage": "Usage:",
   "cli.h.commands": "Commands:",
@@ -717,5 +717,11 @@
   "cli.check_config_ok": "config %{path}: ok (%{sources} sources, %{targets} targets)",
   "cli.check.config": "Also load and validate this config file (TOML)",
   "overrides.changed": "%{path}: the file changed since the plan was built; build the plan again",
-  "overrides.best_not_member": "%{path}: not one of the series' files"
+  "overrides.best_not_member": "%{path}: not one of the series' files",
+  "undo.no_plan": "no plan next to the report to tell the targets",
+  "undo.no_such_target": "no file of target \"%{target}\" in the report",
+  "undo.no_such_file": "not a file of this run: %{path}",
+  "history.no_files_selected": "Select at least one file to undo.",
+  "cli.undo.files": "Undo only this source file of the run (repeatable)",
+  "cli.undo.targets": "Undo only the files of this target (repeatable)"
 }

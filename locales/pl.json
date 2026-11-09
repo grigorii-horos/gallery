@@ -413,7 +413,7 @@
   "cli.presets.about": "Pokaż wbudowane ustawienia wstępne",
   "cli.presets.long": "Drukuje wbudowane ustawienia wstępne nazw i zawartości z ich kluczowymi parametrami. Można ich używać w konfiguracji po nazwie bez definicji; własne ustawienie o tej samej nazwie to błąd.",
   "cli.undo.about": "Cofnij uruchomienie na podstawie jego raportu",
-  "cli.undo.long": "Przywraca źródła z kosza i usuwa wyjścia utworzone przez uruchomienie. Wyjścia zmienione po uruchomieniu zostają. Raport można cofnąć raz.",
+  "cli.undo.long": "Przywraca źródła z kosza i usuwa wyjścia utworzone przez uruchomienie. Wyjścia zmienione po uruchomieniu zostają. Raport można cofnąć raz. Z --file lub --target cofane są tylko te pliki (późniejsze pełne cofnięcie je pomija).",
   "cli.undo.report": "Plik raportu (<plan>.report.json)",
   "cli.h.usage": "Użycie:",
   "cli.h.commands": "Polecenia:",
@@ -731,5 +731,11 @@
   "cli.check_config_ok": "konfiguracja %{path}: w porządku (źródeł: %{sources}, celów: %{targets})",
   "cli.check.config": "Wczytaj i sprawdź także ten plik konfiguracji (TOML)",
   "overrides.changed": "%{path}: plik zmienił się od utworzenia planu; utwórz plan ponownie",
-  "overrides.best_not_member": "%{path}: nie jest plikiem tej serii"
+  "overrides.best_not_member": "%{path}: nie jest plikiem tej serii",
+  "undo.no_plan": "brak planu obok raportu, by poznać cele",
+  "undo.no_such_target": "brak plików celu „%{target}” w raporcie",
+  "undo.no_such_file": "to nie jest plik tego uruchomienia: %{path}",
+  "history.no_files_selected": "Wybierz co najmniej jeden plik do cofnięcia.",
+  "cli.undo.files": "Cofnij tylko ten plik źródłowy uruchomienia (można powtarzać)",
+  "cli.undo.targets": "Cofnij tylko pliki tego celu (można powtarzać)"
 }

@@ -8,6 +8,7 @@ import {
   FILTERS,
   filterCounts,
   filterItems,
+  partialUndoConfirmLines,
   retryBlock,
   retryConfirmLines,
   runTime,
@@ -15,6 +16,7 @@ import {
   undoBlock,
   undoConfirmLines,
   undoResultText,
+  undoTargets,
   type ItemFilter,
 } from "../history/model";
 import type { HistoryState } from "../history/useHistory";
@@ -197,7 +199,9 @@ function Detail({
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<ItemFilter>("all");
   const [shown, setShown] = useState(PAGE);
-  const [confirm, setConfirm] = useState<"undo" | "retry" | null>(null);
+  const [confirm, setConfirm] = useState<
+    "undo" | "retry" | { target: string; sources: string[] } | { file: ItemView } | null
+  >(null);
 
   useEffect(() => {
     let live = true;
@@ -216,6 +220,7 @@ function Detail({
 
   const items = useMemo(() => (detail ? filterItems(detail.items, filter) : []), [detail, filter]);
   const counts = useMemo(() => (detail ? filterCounts(detail.items) : null), [detail]);
+  const targets = useMemo(() => (detail ? undoTargets(detail.items) : []), [detail]);
   const when = runTime(entry.started);
   const mineUndo = history.undo?.reportPath === entry.path ? history.undo : null;
   const opBusy = busy ?? (history.undo ? t("busy_undo_short") : history.retrying ? t("busy_retry_short") : null);
@@ -392,12 +397,36 @@ function Detail({
               </button>
             ))}
           </div>
+          {targets.length > 0 && !uBlock && !mineUndo && entry.side === "local" && (
+            <ul className="history-targets" aria-label={t("history_targets")}>
+              {targets.map((g) => (
+                <li key={g.target}>
+                  <span className="item-source" title={g.target}>
+                    <bdi>{g.target}</bdi>
+                  </span>
+                  <span className="count">{num(g.sources.length)}</span>
+                  <button
+                    type="button"
+                    className="btn quiet"
+                    aria-label={t("history_undo_target", { target: g.target })}
+                    onClick={() => setConfirm({ target: g.target, sources: g.sources })}
+                  >
+                    {t("history_undo")}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          )}
           {items.length === 0 ? (
             <p className="empty small">{t("history_no_files")}</p>
           ) : (
             <ul className="history-items" aria-label={t("history_run_files")}>
               {items.slice(0, shown).map((it) => (
-                <ItemRow key={it.source} item={it} />
+                <ItemRow
+                  key={it.source}
+                  item={it}
+                  onUndo={!uBlock && !mineUndo && entry.side === "local" ? () => setConfirm({ file: it }) : undefined}
+                />
               ))}
             </ul>
           )}
@@ -417,6 +446,28 @@ function Detail({
           onConfirm={() => {
             setConfirm(null);
             void history.startUndo(entry.path);
+          }}
+        />
+      )}
+      {confirm !== null && typeof confirm === "object" && "target" in confirm && (
+        <Confirm
+          {...partialUndoConfirmLines(confirm.target, targets.find((g) => g.target === confirm.target)!.preview)}
+          action={t("undo")}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            setConfirm(null);
+            void history.startUndoTarget(entry.path, confirm.target);
+          }}
+        />
+      )}
+      {confirm !== null && typeof confirm === "object" && "file" in confirm && (
+        <Confirm
+          {...partialUndoConfirmLines(null, confirm.file.undo)}
+          action={t("undo")}
+          onCancel={() => setConfirm(null)}
+          onConfirm={() => {
+            setConfirm(null);
+            void history.startUndoFiles(entry.path, [confirm.file.source]);
           }}
         />
       )}
@@ -464,7 +515,7 @@ function UndoProgressView({ history }: { history: HistoryState }) {
   );
 }
 
-function ItemRow({ item }: { item: ItemView }) {
+function ItemRow({ item, onUndo }: { item: ItemView; onUndo?: () => void }) {
   const { t } = useTranslation();
   const problem = item.status === "failed" || item.status === "stale" || item.status === "missing";
   const errors = item.outputs.filter((o) => o.error);
@@ -512,6 +563,13 @@ function ItemRow({ item }: { item: ItemView }) {
             <Copy text={item.source} />
             <Copy text={folderOf(item.source)} label={t("folder")} />
           </Line>
+          {onUndo && item.undo.items > 0 && (
+            <p className="item-line">
+              <button type="button" className="btn quiet" onClick={onUndo}>
+                {t("history_undo_file")}
+              </button>
+            </p>
+          )}
         </div>
       </details>
     </li>

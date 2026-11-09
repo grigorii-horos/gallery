@@ -944,5 +944,11 @@
   "decide_series_hint": "点击一张照片可改选另一张为最佳。最佳照片不再受系列规则约束；其余照片进入建议的目标。",
   "decide_series_suggested": "建议",
   "decide_series_best": "最佳",
-  "decide_series_confirm": "确认最佳，其余发送到“{{target}}”"
+  "decide_series_confirm": "确认最佳，其余发送到“{{target}}”",
+  "history_targets": "目标",
+  "history_undo_target": "撤销目标 {{target}}…",
+  "history_undo_file": "撤销此文件…",
+  "undo_file_title": "撤销此文件？",
+  "undo_target_title": "撤销目标“{{target}}”？",
+  "undo_partial_note": "只撤销这些文件：运行的其余部分保持原样，之后撤销整个运行时会跳过它们。"
 }

@@ -1016,5 +1016,11 @@
   "decide_series_hint": "Clique numa foto para escolher outra como melhor. A melhor foto fica fora das regras de série; as demais vão para o destino sugerido.",
   "decide_series_suggested": "sugerida",
   "decide_series_best": "melhor",
-  "decide_series_confirm": "Confirmar a melhor, enviar as demais para «{{target}}»"
+  "decide_series_confirm": "Confirmar a melhor, enviar as demais para «{{target}}»",
+  "history_targets": "Destinos",
+  "history_undo_target": "Desfazer o destino {{target}}…",
+  "history_undo_file": "Desfazer este arquivo…",
+  "undo_file_title": "Desfazer este arquivo?",
+  "undo_target_title": "Desfazer o destino \"{{target}}\"?",
+  "undo_partial_note": "Somente estes arquivos são desfeitos: o resto da execução fica como está, e um desfazer posterior de toda a execução os ignora."
 }

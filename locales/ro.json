@@ -411,7 +411,7 @@
   "cli.presets.about": "Arată presetările încorporate",
   "cli.presets.long": "Afișează presetările încorporate de nume și de conținut cu parametrii lor principali. Pot fi folosite în configurație după nume, fără definiție; o presetare a utilizatorului cu același nume este o eroare.",
   "cli.undo.about": "Anulează o rulare după raportul ei",
-  "cli.undo.long": "Restaurează sursele din coș și șterge ieșirile create de rulare. Ieșirile modificate după rulare rămân. Un raport poate fi anulat o singură dată.",
+  "cli.undo.long": "Restaurează sursele din coș și șterge ieșirile create de rulare. Ieșirile modificate după rulare rămân. Un raport poate fi anulat o singură dată. Cu --file sau --target se anulează doar acele fișiere (o anulare completă ulterioară le sare).",
   "cli.undo.report": "Fișierul raportului (<plan>.report.json)",
   "cli.h.usage": "Utilizare:",
   "cli.h.commands": "Comenzi:",
@@ -724,5 +724,11 @@
   "cli.check_config_ok": "configurația %{path}: în regulă (%{sources} surse, %{targets} ținte)",
   "cli.check.config": "Încarcă și validează și acest fișier de configurare (TOML)",
   "overrides.changed": "%{path}: fișierul s-a schimbat de la construirea planului; construiți planul din nou",
-  "overrides.best_not_member": "%{path}: nu este unul dintre fișierele seriei"
+  "overrides.best_not_member": "%{path}: nu este unul dintre fișierele seriei",
+  "undo.no_plan": "niciun plan lângă raport pentru a afla țintele",
+  "undo.no_such_target": "niciun fișier al țintei „%{target}” în raport",
+  "undo.no_such_file": "nu este un fișier al acestei rulări: %{path}",
+  "history.no_files_selected": "Alege cel puțin un fișier de anulat.",
+  "cli.undo.files": "Anulează doar acest fișier sursă al rulării (repetabil)",
+  "cli.undo.targets": "Anulează doar fișierele acestei ținte (repetabil)"
 }

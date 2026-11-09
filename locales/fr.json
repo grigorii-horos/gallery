@@ -411,7 +411,7 @@
   "cli.presets.about": "Afficher les préréglages intégrés",
   "cli.presets.long": "Affiche les préréglages de nom et de contenu intégrés avec leurs paramètres clés. Ils s’utilisent dans la configuration par leur nom sans définition ; un préréglage utilisateur du même nom est une erreur.",
   "cli.undo.about": "Annuler une exécution à partir de son rapport",
-  "cli.undo.long": "Restaure les sources depuis la corbeille et supprime les sorties créées par l’exécution. Les sorties modifiées après l’exécution restent. Un rapport ne peut être annulé qu’une fois.",
+  "cli.undo.long": "Restaure les sources depuis la corbeille et supprime les sorties créées par l’exécution. Les sorties modifiées après l’exécution restent. Un rapport ne peut être annulé qu’une fois. Avec --file ou --target, seuls ces fichiers sont annulés (une annulation complète ultérieure les ignore).",
   "cli.undo.report": "Fichier de rapport (<plan>.report.json)",
   "cli.h.usage": "Utilisation :",
   "cli.h.commands": "Commandes :",
@@ -724,5 +724,11 @@
   "cli.check_config_ok": "configuration %{path} : correcte (%{sources} sources, %{targets} cibles)",
   "cli.check.config": "Charger et valider aussi ce fichier de configuration (TOML)",
   "overrides.changed": "%{path} : le fichier a changé depuis la création du plan ; recréez le plan",
-  "overrides.best_not_member": "%{path} : ne fait pas partie des fichiers de la série"
+  "overrides.best_not_member": "%{path} : ne fait pas partie des fichiers de la série",
+  "undo.no_plan": "pas de plan à côté du rapport pour connaître les cibles",
+  "undo.no_such_target": "aucun fichier de la cible « %{target} » dans le rapport",
+  "undo.no_such_file": "pas un fichier de cette exécution : %{path}",
+  "history.no_files_selected": "Choisissez au moins un fichier à annuler.",
+  "cli.undo.files": "Annuler seulement ce fichier source de l'exécution (répétable)",
+  "cli.undo.targets": "Annuler seulement les fichiers de cette cible (répétable)"
 }

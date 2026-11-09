@@ -14,6 +14,10 @@ export interface HistoryState {
   undoResult: UndoDone | null;
   undoError: { reportPath: string; message: string } | null;
   startUndo: (reportPath: string) => Promise<void>;
+  /** Undo only these source files of the run. */
+  startUndoFiles: (reportPath: string, sources: string[]) => Promise<void>;
+  /** Undo only the files of one target of the run. */
+  startUndoTarget: (reportPath: string, target: string) => Promise<void>;
   cancelUndo: () => void;
   /** Report whose retry plan is being prepared. */
   retrying: string | null;
@@ -79,21 +83,30 @@ export function useHistory(): HistoryState {
     };
   }, [showUndo, refresh]);
 
-  const startUndo = useCallback(
-    async (reportPath: string) => {
+  const runUndo = useCallback(
+    async (reportPath: string, start: () => Promise<void>) => {
       if (undoRef.current) return;
       const u: UndoRun = { reportPath, progress: { done: 0, total: 0, current: null }, cancelling: false };
       setUndoError(null);
       setUndoResult(null);
       showUndo(u);
       try {
-        await historyApi.startUndo(reportPath);
+        await start();
       } catch (e) {
         if (undoRef.current === u) showUndo(null);
         setUndoError({ reportPath, message: errorText(e) });
       }
     },
     [showUndo],
+  );
+  const startUndo = useCallback((r: string) => runUndo(r, () => historyApi.startUndo(r)), [runUndo]);
+  const startUndoFiles = useCallback(
+    (r: string, sources: string[]) => runUndo(r, () => historyApi.undoFiles(r, sources)),
+    [runUndo],
+  );
+  const startUndoTarget = useCallback(
+    (r: string, target: string) => runUndo(r, () => historyApi.undoTarget(r, target)),
+    [runUndo],
   );
 
   const cancelUndo = useCallback(() => {
@@ -127,6 +140,8 @@ export function useHistory(): HistoryState {
     undoResult,
     undoError,
     startUndo,
+    startUndoFiles,
+    startUndoTarget,
     cancelUndo,
     retrying,
     retryResult,

@@ -724,6 +724,10 @@ export interface ItemView {
   trashed: string | null;
   renamed: boolean;
   undone: boolean;
+  /** The plan's target that routed the file; null when the plan is gone. */
+  target: string | null;
+  /** What undoing just this file would do (items 0: nothing to undo). */
+  undo: UndoPreview;
   error: string | null;
   outputs: OutputView[];
 }
@@ -781,6 +785,8 @@ export const historyApi = {
   listReports: (exportDir: string | null) => invoke<ReportEntry[]>("list_reports", { exportDir }),
   loadReport: (path: string, exportDir: string | null) => invoke<ReportDetail>("load_report", { path, exportDir }),
   startUndo: (reportPath: string) => invoke<void>("start_undo", { reportPath }),
+  undoFiles: (reportPath: string, sources: string[]) => invoke<void>("undo_files", { reportPath, sources }),
+  undoTarget: (reportPath: string, target: string) => invoke<void>("undo_target", { reportPath, target }),
   cancelUndo: () => invoke<boolean>("cancel_undo"),
   undoStatus: () => invoke<UndoStatus | null>("undo_status"),
   startRetry: (reportPath: string) => invoke<RetryDone>("start_retry", { reportPath }),

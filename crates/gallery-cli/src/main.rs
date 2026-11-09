@@ -244,11 +244,18 @@ same name is an error."
     /// Undo a run from its report
     #[command(
         long_about = "Restores the sources from the trash and deletes the outputs the run created. \
-Outputs changed after the run stay. A report can be undone once."
+Outputs changed after the run stay. A report can be undone once. With --file or --target only \
+those files are undone (a later full undo skips them)."
     )]
     Undo {
         /// Report file (<plan>.report.json)
         report: PathBuf,
+        /// Undo only this source file of the run (repeatable)
+        #[arg(long = "file", value_name = "PATH")]
+        files: Vec<PathBuf>,
+        /// Undo only the files of this target (repeatable)
+        #[arg(long = "target", value_name = "NAME")]
+        targets: Vec<String>,
     },
 }
 
@@ -536,7 +543,11 @@ fn run(cmd: Cmd) -> Result<u8> {
             print!("{}", presets_text());
             Ok(0)
         }
-        Cmd::Undo { report } => undo_cmd(&report).map(|()| 0),
+        Cmd::Undo {
+            report,
+            files,
+            targets,
+        } => undo_cmd(&report, &files, &targets).map(|()| 0),
     }
 }
 
@@ -1442,11 +1453,34 @@ fn failure_reason(it: &ItemResult) -> String {
         .unwrap_or_else(|| gallery_core::t!("cli.unknown_error"))
 }
 
-fn undo_cmd(report: &Path) -> Result<()> {
+/// The sources `--file` and `--target` select (empty: the whole run).
+fn undo_selection(report: &Path, files: &[PathBuf], targets: &[String]) -> Result<Vec<PathBuf>> {
+    let mut sources: Vec<PathBuf> = Vec::new();
+    undo::ensure_in_report(report, files)?;
+    sources.extend(files.iter().cloned());
+    for t in targets {
+        sources.extend(undo::target_sources(report, None, t)?);
+    }
+    sources.sort();
+    sources.dedup();
+    Ok(sources)
+}
+
+fn undo_cmd(report: &Path, files: &[PathBuf], targets: &[String]) -> Result<()> {
+    let partial = !files.is_empty() || !targets.is_empty();
+    let sources = if partial {
+        undo_selection(report, files, targets)?
+    } else {
+        Vec::new()
+    };
     let _global = gallery_core::lock::acquire_apply()?;
     let cancel = cancel_on_ctrl_c(false);
     let line = Line::new();
-    let s = undo::undo_with(report, &line, &cancel);
+    let s = if partial {
+        undo::undo_items_with(report, &sources, &line, &cancel)
+    } else {
+        undo::undo_with(report, &line, &cancel)
+    };
     line.clear();
     let s = s?;
     println!(

@@ -980,5 +980,11 @@
   "decide_series_hint": "Click a shot to pick another best. The best shot is set aside from the series rules; the others go to the suggested target.",
   "decide_series_suggested": "suggested",
   "decide_series_best": "best",
-  "decide_series_confirm": "Confirm best, send the others to “{{target}}”"
+  "decide_series_confirm": "Confirm best, send the others to “{{target}}”",
+  "history_targets": "Targets",
+  "history_undo_target": "Undo target {{target}}…",
+  "history_undo_file": "Undo this file…",
+  "undo_file_title": "Undo this file?",
+  "undo_target_title": "Undo target “{{target}}”?",
+  "undo_partial_note": "Only these files are undone: the rest of the run stays as it is, and a later undo of the whole run skips them."
 }

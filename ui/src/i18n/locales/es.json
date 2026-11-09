@@ -1016,5 +1016,11 @@
   "decide_series_hint": "Haz clic en una toma para elegir otra como mejor. La mejor toma queda fuera de las reglas de serie; las demás van al destino sugerido.",
   "decide_series_suggested": "sugerida",
   "decide_series_best": "mejor",
-  "decide_series_confirm": "Confirmar la mejor, enviar las demás a «{{target}}»"
+  "decide_series_confirm": "Confirmar la mejor, enviar las demás a «{{target}}»",
+  "history_targets": "Destinos",
+  "history_undo_target": "Deshacer el destino {{target}}…",
+  "history_undo_file": "Deshacer este archivo…",
+  "undo_file_title": "¿Deshacer este archivo?",
+  "undo_target_title": "¿Deshacer el destino «{{target}}»?",
+  "undo_partial_note": "Solo se deshacen estos archivos: el resto de la ejecución se queda como está y un deshacer posterior de toda la ejecución los omite."
 }

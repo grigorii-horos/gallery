@@ -1016,5 +1016,11 @@
   "decide_series_hint": "Apăsați pe un cadru ca să alegeți alt cel mai bun. Cel mai bun cadru iese de sub regulile seriei; ceilalți merg în ținta sugerată.",
   "decide_series_suggested": "sugerat",
   "decide_series_best": "cel mai bun",
-  "decide_series_confirm": "Confirmă cel mai bun, trimite restul în „{{target}}”"
+  "decide_series_confirm": "Confirmă cel mai bun, trimite restul în „{{target}}”",
+  "history_targets": "Ținte",
+  "history_undo_target": "Anulează ținta {{target}}…",
+  "history_undo_file": "Anulează acest fișier…",
+  "undo_file_title": "Anulezi acest fișier?",
+  "undo_target_title": "Anulezi ținta „{{target}}”?",
+  "undo_partial_note": "Se anulează doar aceste fișiere: restul rulării rămâne cum este, iar o anulare ulterioară a întregii rulări le sare."
 }

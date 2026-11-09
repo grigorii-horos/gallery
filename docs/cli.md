@@ -167,13 +167,23 @@ Exit code 2 if any file failed or the run stopped on discrepancies.
 ## `undo`
 
 ```
-gallery undo <REPORT>
+gallery undo <REPORT> [--file <PATH>]... [--target <NAME>]...
 ```
 
 Restores the sources from the trash to their places and deletes the outputs the run created. It
 overwrites nothing: an occupied original place keeps its occupant (the source then stays in the
 trash and is listed as a problem), and an output that was modified after the run is kept. A report can
 be undone once. Pass the report file by its actual name (`<plan>.report.json`).
+
+| Option | Meaning |
+|---|---|
+| `--file <PATH>` | Undo only this source file of the run (repeatable). The path must be an item of the report, else the command fails and nothing moves. |
+| `--target <NAME>` | Undo only the files the plan routed to this target (repeatable; `trash` targets restore their trashed sources, `keep` targets have nothing to undo). The plan is the one the report names, or the `<plan>.json` next to the report. |
+
+With `--file`/`--target`, only those files are undone, with the same guards as a full undo; the other files and the outputs they
+need are not touched. The undone files are recorded in the report, so a later full `undo` skips
+them; the report counts as undone once every file is. The GUI History screen offers the same per
+file and per target.
 
 ## `explain`
 

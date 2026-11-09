@@ -116,7 +116,7 @@ export function retryBlock(e: ReportEntry, busy: string | null): Block | null {
   return null;
 }
 
-export function undoConfirmLines(e: ReportEntry, u: UndoPreview): { title: string; lines: string[] } {
+function undoLines(u: UndoPreview): string[] {
   const lines: string[] = [];
   if (u.restore > 0) {
     lines.push(t("undo_restore", { count: u.restore }));
@@ -129,8 +129,41 @@ export function undoConfirmLines(e: ReportEntry, u: UndoPreview): { title: strin
   }
   if (lines.length === 0) lines.push(t("undo_nothing"));
   lines.push(t("undo_nothing_overwritten"));
+  return lines;
+}
+
+export function undoConfirmLines(e: ReportEntry, u: UndoPreview): { title: string; lines: string[] } {
+  const lines = undoLines(u);
   const when = runTime(e.started);
   return { title: when ? t("undo_title_when", { when }) : t("undo_title"), lines };
+}
+
+/** The confirm of undoing one file (`target` null) or one target of the run. */
+export function partialUndoConfirmLines(target: string | null, u: UndoPreview): { title: string; lines: string[] } {
+  return {
+    title: target === null ? t("undo_file_title") : t("undo_target_title", { target }),
+    lines: [...undoLines(u), t("undo_partial_note")],
+  };
+}
+
+/** The targets of a run with files still to undo, in plan order, with what undoing each would do. */
+export function undoTargets(items: ItemView[]): { target: string; sources: string[]; preview: UndoPreview }[] {
+  const by = new Map<string, { target: string; sources: string[]; preview: UndoPreview }>();
+  for (const it of items) {
+    if (it.target === null || it.undo.items === 0) continue;
+    const g = by.get(it.target) ?? {
+      target: it.target,
+      sources: [],
+      preview: { items: 0, restore: 0, rename_back: 0, remove_outputs: 0 },
+    };
+    g.sources.push(it.source);
+    g.preview.items += it.undo.items;
+    g.preview.restore += it.undo.restore;
+    g.preview.rename_back += it.undo.rename_back;
+    g.preview.remove_outputs += it.undo.remove_outputs;
+    by.set(it.target, g);
+  }
+  return [...by.values()];
 }
 
 export function retryConfirmLines(e: ReportEntry): string[] {

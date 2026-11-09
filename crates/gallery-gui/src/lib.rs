@@ -626,6 +626,41 @@ fn start_undo(
     state: State<'_, busy::Busy>,
     report_path: String,
 ) -> Result<(), String> {
+    spawn_undo(app, state, report_path, history::Selection::All)
+}
+
+/// Undo only the given files of a local report (they stay recorded as
+/// undone; a later full undo skips them). Same guards and events as
+/// `start_undo`.
+#[tauri::command]
+fn undo_files(
+    app: AppHandle,
+    state: State<'_, busy::Busy>,
+    report_path: String,
+    sources: Vec<String>,
+) -> Result<(), String> {
+    let files = sources.into_iter().map(PathBuf::from).collect();
+    spawn_undo(app, state, report_path, history::Selection::Files(files))
+}
+
+/// Undo every file of one target of a local report. Same guards and events
+/// as `start_undo`.
+#[tauri::command]
+fn undo_target(
+    app: AppHandle,
+    state: State<'_, busy::Busy>,
+    report_path: String,
+    target: String,
+) -> Result<(), String> {
+    spawn_undo(app, state, report_path, history::Selection::Target(target))
+}
+
+fn spawn_undo(
+    app: AppHandle,
+    state: State<'_, busy::Busy>,
+    report_path: String,
+    selection: history::Selection,
+) -> Result<(), String> {
     let plans = plans::default_dir();
     let path = PathBuf::from(&report_path);
     // Refuse before claiming the slot (the undo checks again).
@@ -656,7 +691,7 @@ fn start_undo(
                         let _ = app.emit(history::PROGRESS_EVENT, p);
                     }
                 };
-                history::undo(&path, plans.as_deref(), &sink, &cancel)
+                history::undo_selected(&path, plans.as_deref(), &selection, &sink, &cancel)
             },
             |what| history::UndoError {
                 message: gallery_core::t!("gui.internal_undo", error = what),
@@ -1255,6 +1290,8 @@ pub fn run() {
             list_reports,
             load_report,
             start_undo,
+            undo_files,
+            undo_target,
             undo_status,
             cancel_undo,
             start_retry,

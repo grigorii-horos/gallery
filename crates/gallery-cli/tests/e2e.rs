@@ -232,6 +232,112 @@ dir = "{out}/backup"
 }
 
 #[test]
+fn undo_one_file_or_one_target_then_the_rest() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let src = root.join("src");
+    std::fs::create_dir(&src).unwrap();
+    for f in ["a.txt", "b.txt", "c.dat", "d.tmp"] {
+        std::fs::write(src.join(f), f).unwrap();
+    }
+    let out = root.join("out");
+    let q = |p: &Path| p.to_string_lossy().replace('\\', "/");
+    let cfg = format!(
+        r#"
+[[sources]]
+id = "s"
+path = "{src}"
+
+[[targets]]
+name = "junk"
+kind = "trash"
+filters = [{{ sources = ["s"], match = "*.tmp" }}]
+
+[[targets]]
+name = "texts"
+filters = [{{ sources = ["s"], match = "*.txt" }}]
+outputs = [{{ dir = "{out}/texts" }}]
+
+[[targets]]
+name = "rest"
+filters = [{{ sources = ["s"], match = "*" }}]
+outputs = [{{ dir = "{out}/rest" }}]
+"#,
+        src = q(&src),
+        out = q(&out)
+    );
+    let cfg_path = root.join("gallery.toml");
+    std::fs::write(&cfg_path, cfg).unwrap();
+    let plan = root.join("plan.json");
+    gallery()
+        .args(["scan", "--no-ai", "-c"])
+        .arg(&cfg_path)
+        .arg("-o")
+        .arg(&plan)
+        .assert()
+        .success();
+    gallery().arg("apply").arg(&plan).assert().success();
+    let report = root.join("plan.report.json");
+    let live = |d: &Path| {
+        let mut v: Vec<String> = std::fs::read_dir(d)
+            .map(|r| {
+                r.flatten()
+                    .map(|e| e.file_name().to_string_lossy().into_owned())
+                    .filter(|n| !n.starts_with('.'))
+                    .collect()
+            })
+            .unwrap_or_default();
+        v.sort();
+        v
+    };
+    assert!(live(&src).is_empty());
+
+    // One file.
+    gallery()
+        .arg("undo")
+        .arg(&report)
+        .arg("--file")
+        .arg(src.join("c.dat"))
+        .assert()
+        .success();
+    assert_eq!(live(&src), ["c.dat"]);
+    assert!(live(&out.join("rest")).is_empty());
+    assert_eq!(live(&out.join("texts")), ["a.txt", "b.txt"]);
+
+    // A path that is not in the run, an unknown target: refused, nothing moves.
+    gallery()
+        .arg("undo")
+        .arg(&report)
+        .arg("--file")
+        .arg(src.join("nope.txt"))
+        .assert()
+        .failure();
+    gallery()
+        .arg("undo")
+        .arg(&report)
+        .args(["--target", "nope"])
+        .assert()
+        .failure();
+    assert_eq!(live(&src), ["c.dat"]);
+
+    // One target (trash kind).
+    gallery()
+        .arg("undo")
+        .arg(&report)
+        .args(["--target", "junk"])
+        .assert()
+        .success();
+    assert_eq!(live(&src), ["c.dat", "d.tmp"]);
+    assert_eq!(live(&out.join("texts")), ["a.txt", "b.txt"]);
+
+    // The full undo skips the done items and finishes the run.
+    gallery().arg("undo").arg(&report).assert().success();
+    assert_eq!(live(&src), ["a.txt", "b.txt", "c.dat", "d.tmp"]);
+    assert!(live(&out.join("texts")).is_empty());
+    gallery().arg("undo").arg(&report).assert().failure();
+}
+
+#[test]
 fn short_help_lists_only_usage_and_options() {
     let out = gallery()
         .arg("-h")
