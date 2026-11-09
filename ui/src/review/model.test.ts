@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { ReviewItem } from "../api";
 import {
+  groupEvents,
   groupSeries,
+  seriesReviews,
   groupState,
   initialSelection,
   decisionState,
@@ -166,5 +168,31 @@ describe("failureText", () => {
     expect(failureText([r(1, "e1"), r(2, "e2"), r(3, null)])).toBe("Not accepted 2 of 3: e1; e2");
     expect(failureText([r(1, "e1"), r(2, "e2"), r(3, "e3"), r(4, "e4")])).toBe("Not accepted 4 of 4: e1; e2 and 2 more");
     expect(failureText([r(1, null)])).toBeNull();
+  });
+});
+
+describe("events and series reviews", () => {
+  it("clusters by a 4 h gap across sources; undated files form a last event", () => {
+    const ev = groupEvents([
+      item("/phone/a", "2026-04-12T10:00:00", "/phone"),
+      item("/cam/b", "2026-04-12T13:59:00", "/cam"), // 3 h 59 min: same event
+      item("/phone/c", "2026-04-12T18:00:00"), // 4 h 1 min after b: new event
+      item("/phone/d", null),
+    ]);
+    expect(paths(ev)).toEqual([["/phone/a", "/cam/b"], ["/phone/c"], ["/phone/d"]]);
+    expect(ev[2].start).toBeNull();
+  });
+
+  it("groups review items by their series, members in the series' order", () => {
+    const s = { members: ["/p/1", "/p/2", "/p/3"], best: "/p/2" };
+    const g = seriesReviews([
+      { ...item("/p/3", null), series: s },
+      item("/p/other", null),
+      { ...item("/p/1", null), series: s },
+      { ...item("/p/2", null), series: s },
+    ]);
+    expect(g).toHaveLength(1);
+    expect(g[0].best).toBe("/p/2");
+    expect(g[0].items.map((i) => i.source)).toEqual(["/p/1", "/p/2", "/p/3"]);
   });
 });

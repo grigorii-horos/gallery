@@ -719,5 +719,7 @@
   "explain.last_copy_held": "Trattenuto per la revisione: la destinazione %{target} lo manderebbe nel cestino, ma anche tutte le altre copie finiscono nel cestino, quindi quest’ultima viene tenuta",
   "config.old_shape": "%{path}: usa le vecchie tre fasi di destinazioni (before_ai / ai / after_ai); vengono lette come un’unica lista ordinata [[targets]] e l’interfaccia salva il file nella forma nuova",
   "cli.check_config_ok": "configurazione %{path}: ok (%{sources} sorgenti, %{targets} destinazioni)",
-  "cli.check.config": "Carica e convalida anche questo file di configurazione (TOML)"
+  "cli.check.config": "Carica e convalida anche questo file di configurazione (TOML)",
+  "overrides.changed": "%{path}: il file è cambiato dopo la creazione del piano; ricrea il piano",
+  "overrides.best_not_member": "%{path}: non è uno dei file della serie"
 }

@@ -964,5 +964,16 @@
   "place_km": "Radius, km",
   "place_remove": "Remove place {{name}}",
   "place_remove_short": "Remove",
-  "explain_miss": "Not taken: {{condition}}: {{detail}}"
+  "explain_miss": "Not taken: {{condition}}: {{detail}}",
+  "decide_group_events": "Group by event",
+  "decide_event_aria": "Event {{start}}",
+  "decide_event_undated": "no capture time",
+  "decide_event_target": "Target for the whole event",
+  "decide_event_apply": "Apply to the whole event ({{n, number}})",
+  "decide_event_left_out": "{{n, number}} files with a name that cannot be built are left out of a target; only “keep in source” covers them.",
+  "decide_series_card_aria": "Best shot of the series {{name}}",
+  "decide_series_hint": "Click a shot to pick another best. The best shot is set aside from the series rules; the others go to the suggested target.",
+  "decide_series_suggested": "suggested",
+  "decide_series_best": "best",
+  "decide_series_confirm": "Confirm best, send the others to “{{target}}”"
 }

@@ -9,6 +9,7 @@ import {
   planApi,
   type CurrentView,
   type OverrideAction,
+  type ReviewMember,
   type OverrideResult,
   type OverrideView,
   type ScanDone,
@@ -55,6 +56,10 @@ export interface PlanState {
   setOverride: (source: string, action: OverrideAction) => Promise<void>;
   /** One decision for several files in one write; results per file, in order. */
   setOverrides: (sources: string[], action: OverrideAction) => Promise<OverrideResult[]>;
+  /** Series review: mark `best`, send the other members to `target`. */
+  confirmSeries: (members: ReviewMember[], best: string, target: string) => Promise<OverrideResult[]>;
+  /** One decision for all listed files of an event. */
+  decideEvent: (members: ReviewMember[], action: OverrideAction) => Promise<OverrideResult[]>;
   removeOverride: (source: string) => Promise<void>;
 }
 
@@ -244,15 +249,13 @@ export function usePlan(configPath: string | null = null): PlanState {
     [configPath, refresh],
   );
 
-  const setOverrides = useCallback(
-    async (sources: string[], action: OverrideAction) => {
-      const results = await planApi.setOverrides(
-        configPath,
-        sources.map((source_path) => ({ source_path, action })),
-      );
+  /** Keep the local list in step with the accepted decisions of a batch. */
+  const recordResults = useCallback(
+    (results: OverrideResult[], actionOf: (source: string) => OverrideAction) => {
       const accepted = new Map<string, OverrideView>();
       for (const r of results) {
-        if (r.key) accepted.set(r.key, { path: r.key, action, size: r.size ?? 0, mtime_ns: r.mtime_ns ?? 0 });
+        if (r.key)
+          accepted.set(r.key, { path: r.key, action: actionOf(r.source_path), size: r.size ?? 0, mtime_ns: r.mtime_ns ?? 0 });
       }
       if (accepted.size > 0) {
         setView(
@@ -269,7 +272,34 @@ export function usePlan(configPath: string | null = null): PlanState {
       }
       return results;
     },
-    [configPath, refresh],
+    [refresh],
+  );
+
+  const setOverrides = useCallback(
+    async (sources: string[], action: OverrideAction) =>
+      recordResults(
+        await planApi.setOverrides(
+          configPath,
+          sources.map((source_path) => ({ source_path, action })),
+        ),
+        () => action,
+      ),
+    [configPath, recordResults],
+  );
+
+  const confirmSeries = useCallback(
+    async (members: ReviewMember[], best: string, target: string) =>
+      recordResults(
+        await planApi.confirmSeries(configPath, members, best, target),
+        (p): OverrideAction => (p === best ? { kind: "series_best" } : { kind: "target", name: target }),
+      ),
+    [configPath, recordResults],
+  );
+
+  const decideEvent = useCallback(
+    async (members: ReviewMember[], action: OverrideAction) =>
+      recordResults(await planApi.decideEvent(configPath, members, action), () => action),
+    [configPath, recordResults],
   );
 
   const removeOverride = useCallback(
@@ -297,6 +327,8 @@ export function usePlan(configPath: string | null = null): PlanState {
     cancelScan,
     setOverride,
     setOverrides,
+    confirmSeries,
+    decideEvent,
     removeOverride,
   };
 }

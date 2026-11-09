@@ -256,7 +256,14 @@ export interface Plan {
   kept?: { source: string; target: string }[];
 }
 
-export type OverrideAction = { kind: "target"; name: string } | { kind: "keep" };
+export type OverrideAction = { kind: "target"; name: string } | { kind: "keep" } | { kind: "series_best" };
+
+/** A review file as the plan saw it: a decision is refused if the file changed since. */
+export interface ReviewMember {
+  source_path: string;
+  size: number;
+  mtime_ns: number;
+}
 
 /** A stored decision with the file state it was made for; the core ignores it once the file differs. */
 export interface OverrideView {
@@ -450,6 +457,12 @@ export const planApi = {
   /** Several decisions in one write; one result per item, in order. */
   setOverrides: (path: string | null, items: { source_path: string; action: OverrideAction }[]) =>
     invoke<OverrideResult[]>("set_overrides", { path: path ?? null, items }),
+  /** Series review: `best` is marked, the other members go to `target`; one result per member. */
+  confirmSeries: (path: string | null, members: ReviewMember[], best: string, target: string) =>
+    invoke<OverrideResult[]>("confirm_series", { path: path ?? null, members, best, target }),
+  /** One decision for every listed file of an event; one result per member. */
+  decideEvent: (path: string | null, members: ReviewMember[], action: OverrideAction) =>
+    invoke<OverrideResult[]>("decide_event", { path: path ?? null, members, action }),
   removeOverride: (sourcePath: string) => invoke<boolean>("remove_override", { sourcePath }),
 };
 

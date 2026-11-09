@@ -964,5 +964,16 @@
   "place_km": "Radius, km",
   "place_remove": "Ort {{name}} entfernen",
   "place_remove_short": "Entfernen",
-  "explain_miss": "Nicht genommen: {{condition}}: {{detail}}"
+  "explain_miss": "Nicht genommen: {{condition}}: {{detail}}",
+  "decide_group_events": "Nach Ereignis gruppieren",
+  "decide_event_aria": "Ereignis {{start}}",
+  "decide_event_undated": "keine Aufnahmezeit",
+  "decide_event_target": "Ziel für das ganze Ereignis",
+  "decide_event_apply": "Auf das ganze Ereignis anwenden ({{n, number}})",
+  "decide_event_left_out": "Dateien, deren Name sich nicht bilden lässt ({{n, number}}), kommen in kein Ziel; nur „In der Quelle lassen“ gilt für sie.",
+  "decide_series_card_aria": "Bestes Foto der Serie {{name}}",
+  "decide_series_hint": "Auf ein Foto klicken, um ein anderes als bestes zu wählen. Das beste Foto bleibt außerhalb der Serienregeln; die übrigen gehen ins vorgeschlagene Ziel.",
+  "decide_series_suggested": "vorgeschlagen",
+  "decide_series_best": "bestes",
+  "decide_series_confirm": "Bestes bestätigen, übrige nach „{{target}}“ senden"
 }

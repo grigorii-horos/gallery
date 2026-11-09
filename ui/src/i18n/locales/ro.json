@@ -1000,5 +1000,16 @@
   "place_km": "Rază, km",
   "place_remove": "Elimină locul {{name}}",
   "place_remove_short": "Elimină",
-  "explain_miss": "Neluat: {{condition}}: {{detail}}"
+  "explain_miss": "Neluat: {{condition}}: {{detail}}",
+  "decide_group_events": "Grupează după eveniment",
+  "decide_event_aria": "Evenimentul {{start}}",
+  "decide_event_undated": "fără data capturii",
+  "decide_event_target": "Țintă pentru tot evenimentul",
+  "decide_event_apply": "Aplică întregului eveniment ({{n, number}})",
+  "decide_event_left_out": "Fișierele al căror nume nu poate fi construit ({{n, number}}) nu merg într-o țintă; doar „păstrează în sursă” le acoperă.",
+  "decide_series_card_aria": "Cel mai bun cadru al seriei {{name}}",
+  "decide_series_hint": "Apăsați pe un cadru ca să alegeți alt cel mai bun. Cel mai bun cadru iese de sub regulile seriei; ceilalți merg în ținta sugerată.",
+  "decide_series_suggested": "sugerat",
+  "decide_series_best": "cel mai bun",
+  "decide_series_confirm": "Confirmă cel mai bun, trimite restul în „{{target}}”"
 }

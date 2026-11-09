@@ -1036,5 +1036,16 @@
   "place_km": "Радіус, км",
   "place_remove": "Видалити місце {{name}}",
   "place_remove_short": "Видалити",
-  "explain_miss": "Не взято: {{condition}}: {{detail}}"
+  "explain_miss": "Не взято: {{condition}}: {{detail}}",
+  "decide_group_events": "Групувати за подіями",
+  "decide_event_aria": "Подія {{start}}",
+  "decide_event_undated": "немає часу зйомки",
+  "decide_event_target": "Ціль для всієї події",
+  "decide_event_apply": "Застосувати до всієї події ({{n, number}})",
+  "decide_event_left_out": "Файли, для яких не можна побудувати ім’я ({{n, number}}), до цілі не потрапляють: їх покриває лише «залишити в джерелі».",
+  "decide_series_card_aria": "Найкращий кадр серії {{name}}",
+  "decide_series_hint": "Натисніть на кадр, щоб вибрати інший найкращий. Найкращий кадр виводиться з-під правил серії, решта йде в запропоновану ціль.",
+  "decide_series_suggested": "запропоновано",
+  "decide_series_best": "найкращий",
+  "decide_series_confirm": "Підтвердити найкращий, решту надіслати до «{{target}}»"
 }

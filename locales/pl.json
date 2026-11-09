@@ -726,5 +726,7 @@
   "explain.last_copy_held": "Zatrzymany do przejrzenia: cel %{target} wysłałby go do kosza, ale wszystkie pozostałe kopie też trafiają do kosza, więc ta ostatnia zostaje",
   "config.old_shape": "%{path}: używa starych trzech etapów celów (before_ai / ai / after_ai); są czytane jako jedna uporządkowana lista [[targets]], a GUI zapisze plik w nowej postaci",
   "cli.check_config_ok": "konfiguracja %{path}: w porządku (źródeł: %{sources}, celów: %{targets})",
-  "cli.check.config": "Wczytaj i sprawdź także ten plik konfiguracji (TOML)"
+  "cli.check.config": "Wczytaj i sprawdź także ten plik konfiguracji (TOML)",
+  "overrides.changed": "%{path}: plik zmienił się od utworzenia planu; utwórz plan ponownie",
+  "overrides.best_not_member": "%{path}: nie jest plikiem tej serii"
 }

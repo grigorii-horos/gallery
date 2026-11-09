@@ -712,5 +712,7 @@
   "explain.last_copy_held": "Zur Prüfung zurückgehalten: Das Ziel %{target} würde sie in den Papierkorb legen, aber alle anderen Kopien landen ebenfalls im Papierkorb, daher bleibt diese letzte erhalten",
   "config.old_shape": "%{path}: nutzt die alten drei Ziel-Stufen (before_ai / ai / after_ai); sie werden als eine geordnete [[targets]]-Liste gelesen, die GUI speichert die Datei in der neuen Form",
   "cli.check_config_ok": "Konfiguration %{path}: in Ordnung (%{sources} Quellen, %{targets} Ziele)",
-  "cli.check.config": "Zusätzlich diese Konfigurationsdatei laden und prüfen (TOML)"
+  "cli.check.config": "Zusätzlich diese Konfigurationsdatei laden und prüfen (TOML)",
+  "overrides.changed": "%{path}: Die Datei hat sich seit dem Erstellen des Plans geändert; Plan neu erstellen",
+  "overrides.best_not_member": "%{path}: gehört nicht zu den Dateien der Serie"
 }

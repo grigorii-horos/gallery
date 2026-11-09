@@ -1000,5 +1000,16 @@
   "place_km": "Raggio, km",
   "place_remove": "Rimuovi il luogo {{name}}",
   "place_remove_short": "Rimuovi",
-  "explain_miss": "Non preso: {{condition}}: {{detail}}"
+  "explain_miss": "Non preso: {{condition}}: {{detail}}",
+  "decide_group_events": "Raggruppa per evento",
+  "decide_event_aria": "Evento {{start}}",
+  "decide_event_undated": "nessuna ora di scatto",
+  "decide_event_target": "Destinazione per l’intero evento",
+  "decide_event_apply": "Applica all’intero evento ({{n, number}})",
+  "decide_event_left_out": "I file il cui nome non può essere costruito ({{n, number}}) non vanno in nessuna destinazione; solo «lascia nell’origine» li copre.",
+  "decide_series_card_aria": "Scatto migliore della serie {{name}}",
+  "decide_series_hint": "Fai clic su uno scatto per sceglierne un altro come migliore. Lo scatto migliore resta fuori dalle regole di serie; gli altri vanno alla destinazione suggerita.",
+  "decide_series_suggested": "suggerito",
+  "decide_series_best": "migliore",
+  "decide_series_confirm": "Conferma il migliore, invia gli altri a «{{target}}»"
 }

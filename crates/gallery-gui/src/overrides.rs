@@ -115,6 +115,105 @@ pub fn set_in(
     }
 }
 
+/// A file of a review item as the plan saw it: the decision is made for
+/// this version of the file only.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Member {
+    pub source_path: String,
+    pub size: u64,
+    /// As the UI holds it (a JSON number, so a double): compared as one.
+    pub mtime_ns: f64,
+}
+
+impl Member {
+    /// Why the file on disk is not the version the plan saw, if it is not.
+    fn stale(&self) -> Option<String> {
+        let path = Path::new(&self.source_path);
+        let meta = match std::fs::symlink_metadata(path) {
+            Ok(m) => m,
+            Err(e) => return Some(format!("{}: {e}", self.source_path)),
+        };
+        let same = meta.len() == self.size
+            && gallery_core::scan::mtime_ns(&meta).is_ok_and(|m| m as f64 == self.mtime_ns);
+        (!same).then(|| gallery_core::t!("overrides.changed", path = self.source_path))
+    }
+}
+
+/// Record `action` for each member through `set` (the batch recorder), but
+/// refuse a member whose file changed since the plan: its result carries the
+/// error and nothing is written for it. One result per member, in order.
+pub fn decide_members(
+    members: Vec<(Member, Action)>,
+    set: impl FnOnce(Vec<OverrideRequest>) -> Result<Vec<OverrideResult>, String>,
+) -> Result<Vec<OverrideResult>, String> {
+    let refusal: Vec<Option<String>> = members.iter().map(|(m, _)| m.stale()).collect();
+    let requests: Vec<OverrideRequest> = members
+        .iter()
+        .zip(&refusal)
+        .filter(|(_, r)| r.is_none())
+        .map(|((m, a), _)| OverrideRequest {
+            source_path: m.source_path.clone(),
+            action: a.clone(),
+        })
+        .collect();
+    let mut done = set(requests)?.into_iter();
+    Ok(members
+        .into_iter()
+        .zip(refusal)
+        .map(|((m, _), r)| match r {
+            Some(error) => OverrideResult {
+                source_path: m.source_path,
+                key: None,
+                size: None,
+                mtime_ns: None,
+                error: Some(error),
+            },
+            None => done.next().expect("one result per request"),
+        })
+        .collect())
+}
+
+/// The user's pick in a series review: `best` is marked `SeriesBest` and
+/// every other member goes to `target`. Only the listed members are
+/// written. If the best shot's file changed, nothing is written.
+pub fn confirm_series_in(
+    members: Vec<Member>,
+    best: &str,
+    target: &str,
+    set: impl FnOnce(Vec<OverrideRequest>) -> Result<Vec<OverrideResult>, String>,
+) -> Result<Vec<OverrideResult>, String> {
+    let Some(b) = members.iter().find(|m| m.source_path == best) else {
+        return Err(gallery_core::t!("overrides.best_not_member", path = best));
+    };
+    if let Some(e) = b.stale() {
+        return Err(e);
+    }
+    let items = members
+        .into_iter()
+        .map(|m| {
+            let action = if m.source_path == best {
+                Action::SeriesBest
+            } else {
+                Action::Target {
+                    name: target.to_string(),
+                }
+            };
+            (m, action)
+        })
+        .collect();
+    decide_members(items, set)
+}
+
+/// One decision for every file of an event.
+pub fn decide_event_in(
+    members: Vec<Member>,
+    action: Action,
+    set: impl FnOnce(Vec<OverrideRequest>) -> Result<Vec<OverrideResult>, String>,
+) -> Result<Vec<OverrideResult>, String> {
+    let items = members.into_iter().map(|m| (m, action.clone())).collect();
+    decide_members(items, set)
+}
+
 /// Drop the decision for `source`; whether there was one. The file is
 /// rewritten only when something changed.
 pub fn remove_in(file: &Path, source: &Path) -> Result<bool, String> {
@@ -379,5 +478,118 @@ mod tests {
         assert!(set_in(&file, &cfg, &src, Action::Keep).is_err());
         // The broken file is left for the user, never replaced.
         assert_eq!(std::fs::read_to_string(&file).unwrap(), "{");
+    }
+
+    fn member(p: &Path) -> Member {
+        let e = entry(p);
+        Member {
+            source_path: p.display().to_string(),
+            size: e.size,
+            mtime_ns: e.mtime_ns as f64,
+        }
+    }
+
+    #[test]
+    fn confirm_series_marks_best_and_sends_the_others_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("overrides.json");
+        let root = dir.path().join("src");
+        std::fs::create_dir_all(&root).unwrap();
+        let cfg = config(dir.path(), &root);
+        let (a, b, c, other) = (
+            root.join("a.jpg"),
+            root.join("b.jpg"),
+            root.join("c.jpg"),
+            root.join("other.jpg"),
+        );
+        for (p, body) in [(&a, "1"), (&b, "22"), (&c, "333"), (&other, "4444")] {
+            std::fs::write(p, body).unwrap();
+        }
+        let set = |r| set_many_in(&file, &cfg, r);
+        let res = confirm_series_in(
+            vec![member(&a), member(&b), member(&c)],
+            &b.display().to_string(),
+            "Photos",
+            set,
+        )
+        .unwrap();
+        assert!(res.iter().all(|r| r.error.is_none()));
+        let ov = Overrides::load(&file).unwrap();
+        assert_eq!(ov.len(), 3);
+        assert_eq!(ov.get(&entry(&b)), Some(&Action::SeriesBest));
+        let photos = Action::Target {
+            name: "Photos".into(),
+        };
+        assert_eq!(ov.get(&entry(&a)), Some(&photos));
+        assert_eq!(ov.get(&entry(&c)), Some(&photos));
+        assert_eq!(ov.get(&entry(&other)), None);
+    }
+
+    #[test]
+    fn confirm_series_refuses_changed_files() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("overrides.json");
+        let root = dir.path().join("src");
+        std::fs::create_dir_all(&root).unwrap();
+        let cfg = config(dir.path(), &root);
+        let (a, b, c) = (root.join("a.jpg"), root.join("b.jpg"), root.join("c.jpg"));
+        for (p, body) in [(&a, "1"), (&b, "22"), (&c, "333")] {
+            std::fs::write(p, body).unwrap();
+        }
+        let (ma, mb, mc) = (member(&a), member(&b), member(&c));
+        // A non-best member changed: only it is refused.
+        std::fs::write(&a, "changed").unwrap();
+        let res = confirm_series_in(
+            vec![ma.clone(), mb.clone(), mc.clone()],
+            &b.display().to_string(),
+            "Photos",
+            |r| set_many_in(&file, &cfg, r),
+        )
+        .unwrap();
+        assert!(res[0].error.is_some() && res[0].key.is_none());
+        assert!(res[1].error.is_none() && res[2].error.is_none());
+        let ov = Overrides::load(&file).unwrap();
+        assert_eq!(ov.len(), 2);
+        assert_eq!(ov.get(&entry(&a)), None);
+        // The best shot changed: nothing is written at all.
+        let file2 = dir.path().join("o2.json");
+        std::fs::write(&b, "changed too").unwrap();
+        let err = confirm_series_in(
+            vec![mb.clone(), mc.clone()],
+            &b.display().to_string(),
+            "Photos",
+            |r| set_many_in(&file2, &cfg, r),
+        );
+        assert!(err.is_err());
+        assert!(!file2.exists());
+        // A best that is no member is an error too.
+        let err = confirm_series_in(vec![mc], &a.display().to_string(), "Photos", |r| {
+            set_many_in(&file2, &cfg, r)
+        });
+        assert!(err.is_err());
+        assert!(!file2.exists());
+    }
+
+    #[test]
+    fn decide_event_writes_one_override_per_member() {
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join("overrides.json");
+        let root = dir.path().join("src");
+        std::fs::create_dir_all(&root).unwrap();
+        let cfg = config(dir.path(), &root);
+        let (a, b, other) = (root.join("a.jpg"), root.join("b.jpg"), root.join("o.jpg"));
+        for (p, body) in [(&a, "1"), (&b, "22"), (&other, "333")] {
+            std::fs::write(p, body).unwrap();
+        }
+        let res = decide_event_in(vec![member(&a), member(&b)], Action::Keep, |r| {
+            set_many_in(&file, &cfg, r)
+        })
+        .unwrap();
+        assert_eq!(res.len(), 2);
+        let ov = Overrides::load(&file).unwrap();
+        assert_eq!(ov.len(), 2);
+        assert_eq!(ov.get(&entry(&a)), Some(&Action::Keep));
+        assert_eq!(ov.get(&entry(&b)), Some(&Action::Keep));
+        assert_eq!(ov.get(&entry(&other)), None);
     }
 }
