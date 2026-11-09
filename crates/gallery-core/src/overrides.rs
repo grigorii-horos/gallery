@@ -137,21 +137,13 @@ impl Overrides {
     /// form the scan produces (the configured root joined with the relative
     /// path), which is returned; nothing is recorded on error.
     pub fn set_checked(&mut self, cfg: &Config, path: &Path, action: Action) -> Result<PathBuf> {
-        if let Action::Target { name } = &action {
-            let t = &cfg.targets;
-            let known = t
-                .before_ai
-                .iter()
-                .map(|m| &m.name)
-                .chain(t.ai.iter().map(|a| &a.name))
-                .chain(t.after_ai.iter().map(|m| &m.name))
-                .any(|n| n == name);
-            if !known {
-                return Err(Error::Config(crate::t!(
-                    "overrides.unknown_target",
-                    name = name
-                )));
-            }
+        if let Action::Target { name } = &action
+            && cfg.target(name).is_none()
+        {
+            return Err(Error::Config(crate::t!(
+                "overrides.unknown_target",
+                name = name
+            )));
         }
         let shown = || path.display().to_string();
         let meta = std::fs::symlink_metadata(path)

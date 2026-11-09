@@ -3,7 +3,7 @@
 
 use std::path::Path;
 
-use gallery_core::config::{Config, Output};
+use gallery_core::config::{Config, Filter, Output};
 use gallery_core::mask::{MaskExpr, MaskItem};
 use serde::Serialize;
 
@@ -374,47 +374,32 @@ struct TargetView<'a> {
 }
 
 fn views(cfg: &Config) -> Vec<TargetView<'_>> {
-    let t = &cfg.targets;
-    let mut out = Vec::new();
-    for (stage, list) in [
-        (Stage::BeforeAi, &t.before_ai),
-        (Stage::AfterAi, &t.after_ai),
-    ] {
-        for (index, m) in list.iter().enumerate() {
-            out.push(TargetView {
+    super::model::staged(cfg)
+        .map(|(stage, index, t)| {
+            // A mask target's filters, or an AI target's AI filters (its
+            // sources and prefilter in the stage shape).
+            let filters: Vec<&Filter> = t
+                .filters
+                .iter()
+                .filter(|f| stage.is_mask() || f.ai.is_some())
+                .collect();
+            TargetView {
                 stage,
                 index,
-                sources: m
-                    .filters
+                sources: filters
                     .iter()
                     .flat_map(|f| f.sources.iter().map(String::as_str))
                     .collect(),
                 accepts: Box::new(move |name| {
-                    m.filters.iter().any(|f| {
+                    filters.iter().any(|f| {
                         matches_opt(&f.matches, name, cfg)
                             && (f.exclude.is_empty() || !f.exclude.matches(name, cfg))
                     })
                 }),
-                outputs: &m.outputs,
-            });
-        }
-    }
-    for (index, a) in t.ai.iter().enumerate() {
-        out.push(TargetView {
-            stage: Stage::Ai,
-            index,
-            sources: a.sources.iter().map(String::as_str).collect(),
-            accepts: Box::new(move |name| match &a.prefilter {
-                None => true,
-                Some(p) => {
-                    matches_opt(&p.matches, name, cfg)
-                        && (p.exclude.is_empty() || !p.exclude.matches(name, cfg))
-                }
-            }),
-            outputs: &a.outputs,
-        });
-    }
-    out
+                outputs: &t.outputs,
+            }
+        })
+        .collect()
 }
 
 /// Warnings of a valid config: the core's, and per target a missing

@@ -144,15 +144,7 @@ pub fn retarget_in(
         return Err(gallery_core::t!("overrides.config_changed"));
     }
     let cfg = Config::load(config).map_err(|e| e.to_string())?;
-    let t = &cfg.targets;
-    let known = |name: &str| {
-        t.before_ai
-            .iter()
-            .map(|m| &m.name)
-            .chain(t.ai.iter().map(|a| &a.name))
-            .chain(t.after_ai.iter().map(|m| &m.name))
-            .any(|n| n == name)
-    };
+    let known = |name: &str| cfg.target(name).is_some();
     if let Some((_, to)) = renames.iter().find(|(_, to)| !known(to)) {
         return Err(gallery_core::t!("overrides.no_target", target = to));
     }

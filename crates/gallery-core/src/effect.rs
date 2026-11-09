@@ -342,16 +342,7 @@ pub fn diff(
             }
         }
     }
-    let order = |c: &Config| -> Vec<String> {
-        let t = &c.targets;
-        t.before_ai
-            .iter()
-            .map(|m| &m.name)
-            .chain(t.ai.iter().map(|a| &a.name))
-            .chain(t.after_ai.iter().map(|m| &m.name))
-            .cloned()
-            .collect()
-    };
+    let order = |c: &Config| -> Vec<String> { c.targets.iter().map(|t| t.name.clone()).collect() };
     let mut targets = Vec::new();
     for n in order(new).into_iter().chain(order(old)) {
         if let Some(d) = per.remove(&n) {

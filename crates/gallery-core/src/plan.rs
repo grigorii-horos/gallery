@@ -141,17 +141,7 @@ fn read_dir_names(dir: &Path) -> HashSet<String> {
 }
 
 fn target_outputs<'a>(cfg: &'a Config, name: &str) -> Option<&'a [Output]> {
-    let t = &cfg.targets;
-    t.before_ai
-        .iter()
-        .chain(&t.after_ai)
-        .find(|m| m.name == name)
-        .map(|m| m.outputs.as_slice())
-        .or_else(|| {
-            t.ai.iter()
-                .find(|a| a.name == name)
-                .map(|a| a.outputs.as_slice())
-        })
+    cfg.target(name).map(|t| t.outputs.as_slice())
 }
 
 /// Render `{YYYY} {MM} {DD} {source}`; without a capture date the date tokens
@@ -859,8 +849,8 @@ impl Plan {
 mod tests {
     use super::*;
     use crate::config::{
-        AudioPreset, DateSource, MaskTarget, MetadataPreset, NamePreset, Output, PhotoPreset,
-        PipeStep, Source, VideoPreset,
+        AudioPreset, DateSource, MetadataPreset, NamePreset, Output, PhotoPreset, PipeStep, Source,
+        Target, VideoPreset,
     };
     use crate::mask::MaskExpr;
 
@@ -946,8 +936,9 @@ mod tests {
                 normalize_ext: true,
             },
         );
-        c.targets.after_ai.push(MaskTarget {
+        c.targets.push(Target {
             name: "t".into(),
+            kind: Default::default(),
             filters: vec![],
             outputs,
         });
@@ -1166,7 +1157,7 @@ mod tests {
     fn plan_dir_expands_tilde() {
         let tmp = tempfile::tempdir().unwrap();
         let mut c = cfg(tmp.path(), vec![]);
-        c.targets.after_ai[0].outputs.push(Output {
+        c.targets[0].outputs.push(Output {
             dir: "~/gallery-plan-test-{YYYY}".into(),
             server_dir: None,
             content: vec![],
@@ -1958,9 +1949,9 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let out = tmp.path().join("out");
         let mut c = cfg(tmp.path(), vec![output(&out, vec![], vec![])]);
-        let mut u = c.targets.after_ai[0].clone();
+        let mut u = c.targets[0].clone();
         u.name = "u".into();
-        c.targets.after_ai.push(u);
+        c.targets.push(u);
         let a = entry(tmp.path(), "phone", "IMG_20260412_103314.jpg");
         let b = entry(tmp.path(), "phone", "IMG_20260412_103400.jpg");
         let far = entry(tmp.path(), "phone", "IMG_20260412_120000.jpg");

@@ -858,7 +858,7 @@ fn scan_estimate_cmd(config: &Path, overrides: &Overrides) -> Result<()> {
     use gallery_core::ai::{AiClassifier, usage_log};
     let cfg = load_config(config)?;
     cfg.validate()?;
-    if cfg.targets.ai.is_empty() {
+    if !cfg.has_ai() {
         println!("{}", gallery_core::t!("cli.no_ai_targets"));
         return Ok(());
     }

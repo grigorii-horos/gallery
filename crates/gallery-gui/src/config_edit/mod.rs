@@ -452,10 +452,16 @@ pub fn preview_prompt(
         .ok_or_else(|| gallery_core::t!("edit.no_source", id = source_id))?;
     let categories: Vec<(String, String)> = cfg
         .targets
-        .ai
         .iter()
-        .filter(|t| t.sources.iter().any(|s| s == source_id))
-        .map(|t| (t.name.clone(), t.description.clone()))
+        .filter_map(|t| {
+            let descs: Vec<&str> = t
+                .filters
+                .iter()
+                .filter(|f| f.sources.iter().any(|s| s == source_id))
+                .filter_map(|f| f.ai.as_deref())
+                .collect();
+            (!descs.is_empty()).then(|| (t.name.clone(), descs.join("; ")))
+        })
         .collect();
     // The user's corrections go into the prompt after the source's own texts.
     let examples = examples
