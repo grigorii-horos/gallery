@@ -653,5 +653,9 @@
   "edit.rename_decisions_other": "%{count} décisions manuelles utilisent la cible « %{from} ». Après le renommage : %{after} ; après l’enregistrement, vous pouvez les reporter sur « %{to} ».",
   "edit.no_preset_named": "il n’y a aucun préréglage nommé « %{name} »",
   "edit.preset_unparsed": "le préréglage n’a pas pu être analysé",
-  "edit.bad_preview_date": "la date « %{value} » n’est pas valide : forme attendue 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "la date « %{value} » n’est pas valide : forme attendue 2026-11-05 10:15:00",
+  "filter.bad_range": "« %{value} » n’est pas une plage valide : utilisez des formes comme 10..20, ..500KB, >=60 ou <40",
+  "filter.bad_duration": "« %{value} » n’est pas une durée valide : un nombre et s, m, h, d, w ou y (par exemple 2h)",
+  "filter.bad_time": "« %{value} » n’est pas une plage horaire valide : utilisez la forme 22:00..05:00",
+  "filter.bad_date": "« %{value} » n’est pas une plage de dates valide : utilisez la forme 2026-08-12..2026-08-18 (une borne peut être vide)"
 }

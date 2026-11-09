@@ -653,5 +653,9 @@
   "edit.rename_decisions_other": "%{count} decisiones manuales usan el destino «%{from}». Tras el renombrado: %{after}; tras guardar puedes pasarlas a «%{to}».",
   "edit.no_preset_named": "no hay ningún preajuste llamado «%{name}»",
   "edit.preset_unparsed": "no se pudo interpretar el preajuste",
-  "edit.bad_preview_date": "la fecha «%{value}» no es válida: se espera la forma 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "la fecha «%{value}» no es válida: se espera la forma 2026-11-05 10:15:00",
+  "filter.bad_range": "«%{value}» no es un rango válido: use formas como 10..20, ..500KB, >=60 o <40",
+  "filter.bad_duration": "«%{value}» no es una duración válida: un número y s, m, h, d, w o y (por ejemplo 2h)",
+  "filter.bad_time": "«%{value}» no es una franja horaria válida: use la forma 22:00..05:00",
+  "filter.bad_date": "«%{value}» no es un rango de fechas válido: use la forma 2026-08-12..2026-08-18 (cualquier extremo puede quedar vacío)"
 }

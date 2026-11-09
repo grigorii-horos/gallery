@@ -653,5 +653,9 @@
   "edit.rename_decisions_other": "%{count} decisioni manuali usano la destinazione «%{from}». Dopo la ridenominazione: %{after}; dopo il salvataggio puoi spostarle su «%{to}».",
   "edit.no_preset_named": "non esiste alcun preset chiamato «%{name}»",
   "edit.preset_unparsed": "impossibile interpretare il preset",
-  "edit.bad_preview_date": "la data «%{value}» non è valida: forma attesa 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "la data «%{value}» non è valida: forma attesa 2026-11-05 10:15:00",
+  "filter.bad_range": "«%{value}» non è un intervallo valido: usa forme come 10..20, ..500KB, >=60 o <40",
+  "filter.bad_duration": "«%{value}» non è una durata valida: un numero e s, m, h, d, w o y (ad esempio 2h)",
+  "filter.bad_time": "«%{value}» non è una fascia oraria valida: usa la forma 22:00..05:00",
+  "filter.bad_date": "«%{value}» non è un intervallo di date valido: usa la forma 2026-08-12..2026-08-18 (un estremo può essere vuoto)"
 }

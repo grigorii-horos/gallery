@@ -653,5 +653,9 @@
   "edit.rename_decisions_other": "%{count} de decizii manuale folosesc ținta „%{from}”. După redenumire %{after}; după salvare le poți muta la „%{to}”.",
   "edit.no_preset_named": "nu există nicio presetare numită „%{name}”",
   "edit.preset_unparsed": "presetarea nu a putut fi interpretată",
-  "edit.bad_preview_date": "data „%{value}” nu este validă: se aștepta forma 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "data „%{value}” nu este validă: se aștepta forma 2026-11-05 10:15:00",
+  "filter.bad_range": "„%{value}” nu este un interval valid: folosiți forme precum 10..20, ..500KB, >=60 sau <40",
+  "filter.bad_duration": "„%{value}” nu este o durată validă: un număr și s, m, h, d, w sau y (de exemplu 2h)",
+  "filter.bad_time": "„%{value}” nu este o fereastră de timp validă: folosiți forma 22:00..05:00",
+  "filter.bad_date": "„%{value}” nu este un interval de date valid: folosiți forma 2026-08-12..2026-08-18 (oricare capăt poate lipsi)"
 }

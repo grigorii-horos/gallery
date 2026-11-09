@@ -639,5 +639,9 @@
   "edit.rename_decisions_other": "有 %{count} 个手动决定使用目标“%{from}”。重命名后：%{after}；保存后可以把它们移到“%{to}”。",
   "edit.no_preset_named": "没有名为“%{name}”的预设",
   "edit.preset_unparsed": "无法解析该预设",
-  "edit.bad_preview_date": "日期“%{value}”无效：应为 2026-11-05 10:15:00 这样的形式"
+  "edit.bad_preview_date": "日期“%{value}”无效：应为 2026-11-05 10:15:00 这样的形式",
+  "filter.bad_range": "“%{value}”不是有效的范围：请使用 10..20、..500KB、>=60 或 <40 这样的形式",
+  "filter.bad_duration": "“%{value}”不是有效的时长：请使用数字加 s、m、h、d、w 或 y（例如 2h）",
+  "filter.bad_time": "“%{value}”不是有效的时间段：请使用 22:00..05:00 的形式",
+  "filter.bad_date": "“%{value}”不是有效的日期范围：请使用 2026-08-12..2026-08-18 的形式（任一端可留空）"
 }
