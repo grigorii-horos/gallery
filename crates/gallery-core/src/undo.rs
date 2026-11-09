@@ -82,11 +82,6 @@ pub fn undo_items_with(
     undo_selected(report_path, Some(&only), progress, cancel)
 }
 
-/// An error naming the first of `sources` that is not an item of the report.
-pub fn ensure_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<()> {
-    resolve_in_report(report_path, sources).map(|_| ())
-}
-
 /// The spelling of a path that stands for the file itself: its longest
 /// existing ancestor canonical (`/var` and `/private/var` are one place on
 /// macOS, a symlinked folder is its target) and the rest appended, so a file
