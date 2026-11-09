@@ -110,6 +110,50 @@ fn local_naive(ns: i128, tz: Option<Tz>) -> NaiveDateTime {
     }
 }
 
+/// Largest positive value of the tag `name` across all groups.
+fn max_f64(exif: &Value, name: &str) -> Option<f64> {
+    exif.as_object()?
+        .iter()
+        .filter(|(k, _)| k.rsplit_once(':').map_or(k.as_str(), |(_, n)| n) == name)
+        .filter_map(|(_, v)| v.as_f64().or_else(|| v.as_str()?.trim().parse().ok()))
+        .filter(|v| *v > 0.0)
+        .reduce(f64::max)
+}
+
+/// Pixel size of the main image, before orientation. RAW and DNG files
+/// carry a small preview in `IFD0` next to the full image in a `SubIFD`, so
+/// the size exiftool works out (`File:` or `Composite:ImageSize`) wins, else
+/// the largest size any group reports.
+fn dimensions(exif: &Value) -> Option<(u32, u32)> {
+    let pos = |v: Option<&Value>| {
+        v.and_then(|v| v.as_f64().or_else(|| v.as_str()?.trim().parse().ok()))
+            .filter(|v| *v > 0.0)
+    };
+    if let (Some(w), Some(h)) = (
+        pos(exif.get("File:ImageWidth")),
+        pos(exif.get("File:ImageHeight")),
+    ) {
+        return Some((w as u32, h as u32));
+    }
+    if let Some(size) = exif.get("Composite:ImageSize").and_then(|v| v.as_str()) {
+        // `-n` writes "6000 4000"; without it, "6000x4000".
+        let mut it = size
+            .split(|c: char| c == 'x' || c.is_whitespace())
+            .filter(|p| !p.is_empty())
+            .map(|p| p.parse::<f64>().ok().filter(|v| *v > 0.0));
+        if let (Some(Some(w)), Some(Some(h)), None) = (it.next(), it.next(), it.next()) {
+            return Some((w as u32, h as u32));
+        }
+    }
+    [
+        ("ImageWidth", "ImageHeight"),
+        ("ExifImageWidth", "ExifImageHeight"),
+        ("SourceImageWidth", "SourceImageHeight"),
+    ]
+    .iter()
+    .find_map(|(w, h)| Some((max_f64(exif, w)? as u32, max_f64(exif, h)? as u32)))
+}
+
 /// Collect the facts of one file. `tz` is the plan's zone.
 pub fn facts_of(entry: &FileEntry, exif: &Value, tz: Option<Tz>) -> Facts {
     let name = entry
@@ -120,20 +164,17 @@ pub fn facts_of(entry: &FileEntry, exif: &Value, tz: Option<Tz>) -> Facts {
     let kind = kind_of(&entry.path);
     let (stem, _) = split_name(name);
 
+    // Some phones write exactly (0, 0) when they have no fix.
     let gps = match (tag_f64(exif, "GPSLatitude"), tag_f64(exif, "GPSLongitude")) {
+        (Some(a), Some(o)) if a == 0.0 && o == 0.0 => None,
         (Some(a), Some(o)) if a.abs() <= 90.0 && o.abs() <= 180.0 => Some((a, o)),
         _ => None,
     };
 
-    let w = first_f64(exif, &["ImageWidth", "ExifImageWidth", "SourceImageWidth"]);
-    let h = first_f64(
-        exif,
-        &["ImageHeight", "ExifImageHeight", "SourceImageHeight"],
-    );
-    let (mut width, mut height) = (
-        w.filter(|v| *v > 0.0).map(|v| v as u32),
-        h.filter(|v| *v > 0.0).map(|v| v as u32),
-    );
+    let (mut width, mut height) = match dimensions(exif) {
+        Some((w, h)) => (Some(w), Some(h)),
+        None => (None, None),
+    };
     // EXIF orientation 5..8: the picture is shown rotated by a quarter turn.
     if tag_f64(exif, "Orientation").is_some_and(|o| (5.0..=8.0).contains(&o)) {
         std::mem::swap(&mut width, &mut height);
@@ -1131,6 +1172,48 @@ home = { lat = 47.0245, lon = 28.8323, km = 2 }
             missed("props = { missing_tag = [\"GPSLatitude\"] }", "a.jpg", &p).condition,
             "props"
         );
+    }
+
+    #[test]
+    fn raw_dimensions_are_the_main_image_not_the_preview() {
+        // A DNG: IFD0 holds the 256 px preview, the SubIFD the real image.
+        let dng = json!({
+            "IFD0:ImageWidth": 256, "IFD0:ImageHeight": 171,
+            "SubIFD:ImageWidth": 6000, "SubIFD:ImageHeight": 4000,
+        });
+        let f = facts_of(&entry("a.dng"), &dng, None);
+        assert_eq!((f.width, f.height), (Some(6000), Some(4000)));
+        hit(
+            "props = { width = \">=6000\", megapixels = \">=20\" }",
+            "a.dng",
+            &dng,
+        );
+
+        // The size exiftool works out wins over any group.
+        let mut c = dng.clone();
+        c["Composite:ImageSize"] = json!("5000 3000");
+        let f = facts_of(&entry("a.dng"), &c, None);
+        assert_eq!((f.width, f.height), (Some(5000), Some(3000)));
+        c["Composite:ImageSize"] = json!("5000x3000");
+        assert_eq!(facts_of(&entry("a.dng"), &c, None).width, Some(5000));
+        c["File:ImageWidth"] = json!(4000);
+        c["File:ImageHeight"] = json!(2000);
+        let f = facts_of(&entry("a.dng"), &c, None);
+        assert_eq!((f.width, f.height), (Some(4000), Some(2000)));
+    }
+
+    #[test]
+    fn gps_zero_zero_is_no_fix() {
+        let mut p = pixel();
+        p["GPS:GPSLatitude"] = json!(0.0);
+        p["GPS:GPSLongitude"] = json!(0.0);
+        assert_eq!(facts_of(&entry("a.jpg"), &p, None).gps, None);
+        let m = missed("geo = { lat = 0.0, lon = 0.0, km = 10 }", "a.jpg", &p);
+        assert_eq!(m.detail, crate::t!("filter.miss.no_gps"));
+        hit("geo = { has_gps = false }", "a.jpg", &p);
+        // Only exactly (0, 0): a real point on the equator still counts.
+        p["GPS:GPSLongitude"] = json!(9.5);
+        assert_eq!(facts_of(&entry("a.jpg"), &p, None).gps, Some((0.0, 9.5)));
     }
 
     #[test]
