@@ -10,7 +10,7 @@ each target's filter is built from general conditions and the list order alone
 decides which target takes a file. The AI becomes just one more condition.
 
 The concrete use case behind it: two people (two phone sources, e.g. `camera`
-and `olga`) shoot a lot together. Photos taken together (trips, walks — also
+and `partner`) shoot a lot together. Photos taken together (trips, walks — also
 frames where neither person is visible) must go to a shared place, while each
 person's private photos stay with their owner. The user explicitly rejected a
 special "shared"/"together" concept: the case must be expressible with
@@ -65,7 +65,7 @@ dacha = { lat = 46.98, lon = 28.70, km = 1 }
 name = "Duplicates"
 kind = "trash"                     # "folders" (default) | "trash" | "keep"
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 duplicate = { of = ["sources", "outputs"] }
 
 [[targets]]
@@ -73,7 +73,7 @@ name = "Together (mine)"
 [[targets.filters]]
 sources = ["camera"]
 match = "@media"
-near = { sources = ["olga"], time = "2h", km = 1 }
+near = { sources = ["partner"], time = "2h", km = 1 }
 expand = "event"
 [[targets.outputs]]
 dir = "~/Sync/Shared/{YYYY}"
@@ -104,7 +104,7 @@ date = { time = "22:00..05:00" }
   every file of those sources. `match`/`exclude` keep today's mask syntax
   (`@name`, `!`, lists = OR).
 - Negation: every condition table accepts `not = true` (e.g. "not near
-  Olga"); `geo` also accepts `"!@home"`.
+  partner"); `geo` also accepts `"!@home"`.
 
 ### Conditions
 
@@ -133,7 +133,7 @@ files sorted by capture time; a gap longer than `gap` (default `"4h"`) starts a
 new event. Optional `km` splits also on a jump in place between consecutive
 GPS-tagged files. Conditions on the event a file belongs to:
 ```toml
-event = { sources = ["camera", "olga"],  # which files form events (default: the filter's sources)
+event = { sources = ["camera", "partner"],  # which files form events (default: the filter's sources)
           gap = "4h", km = 30,
           min_files = 10, min_duration = "1d", max_duration = "30d",
           away_from = "@home" }           # at least one file of the event is outside the place
@@ -147,7 +147,7 @@ and still only files not taken by an earlier target). Event parameters for
 **near** — the file has at least one "neighbour" among files of the given
 sources in the frozen input list (not only unmatched ones — the whole scan):
 ```toml
-near = { sources = ["olga"], time = "2h", km = 1, min = 1 }
+near = { sources = ["partner"], time = "2h", km = 1, min = 1 }
 ```
 `km` is checked only when both files have GPS; if either lacks GPS, time
 alone decides (`require_gps = true` makes such pairs not count).
@@ -256,7 +256,7 @@ to targets by name, so they stay valid.
 - Settings → Places: list of named points (name, lat/lon, radius); paste
   "lat, lon" or pick from a photo's GPS.
 - Explain panel: shows per target which condition failed for a file
-  ("near: no olga file within 2h/1 km").
+  ("near: no partner file within 2h/1 km").
 - Review/Decide: grouping by event is available; a manual decision can be
   applied to a whole event.
 - All new strings in 11 locales (UI + Rust catalogs).

@@ -200,7 +200,7 @@ nothing.
 When the config uses conditions on groups (`event`, `expand`, `near`, `duplicate`, `series`,
 `props.sharpness`), explain scans all the sources as a real scan does, so those conditions see the
 same files, and it applies the last-copy guard to the plan it shows: a file a scan holds for review
-is never explained as "goes to the trash". A miss reads like `near: 0 files of olga within 2h / 1.0 km,
+is never explained as "goes to the trash". A miss reads like `near: 0 files of partner within 2h / 1.0 km,
 at least 1 needed`, `duplicate: no identical copy` or `date: no capture date`.
 
 ```

@@ -25,7 +25,7 @@ pub const CONDITION_KEYS: [&str; 9] = [
 ];
 
 /// One condition of a filter, as the core reads it: `{ "key": "near",
-/// "value": { "sources": ["olga"], "time": "2h", "km": 1 } }`. The value has
+/// "value": { "sources": ["partner"], "time": "2h", "km": 1 } }`. The value has
 /// the shape of the TOML value.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "key", content = "value", rename_all = "snake_case")]
@@ -137,7 +137,7 @@ impl ConditionValue {
     }
 
     /// The condition as an inline TOML value, keys in the core's order:
-    /// `{ sources = ["olga"], time = "2h", km = 1.0 }`.
+    /// `{ sources = ["partner"], time = "2h", km = 1.0 }`.
     pub fn to_toml(&self) -> Result<Value, String> {
         match self {
             ConditionValue::Date(c) => to_toml(c),
@@ -275,12 +275,12 @@ mod tests {
     fn near_is_written_inline_in_the_core_order() {
         let c: ConditionValue = serde_json::from_value(serde_json::json!({
             "key": "near",
-            "value": { "km": 1.0, "time": "2h", "sources": ["olga"] }
+            "value": { "km": 1.0, "time": "2h", "sources": ["partner"] }
         }))
         .unwrap();
         assert_eq!(
             c.to_toml().unwrap().to_string(),
-            r#"{ sources = ["olga"], time = "2h", km = 1.0 }"#
+            r#"{ sources = ["partner"], time = "2h", km = 1.0 }"#
         );
     }
 

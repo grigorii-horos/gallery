@@ -198,14 +198,14 @@ Targets are an ordered list: the first target whose filter matches takes the fil
 name = "Duplicates"
 kind = "trash"
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 duplicate = { of = ["sources", "outputs"] }
 
-[[targets]]                       # photos taken together with Olga's phone (and the rest of that event)
+[[targets]]                       # photos taken together with the partner's phone (and the rest of that event)
 name = "Together"
 [[targets.filters]]
 sources = ["camera"]
-near = { sources = ["olga"], time = "2h", km = 1 }
+near = { sources = ["partner"], time = "2h", km = 1 }
 expand = "event"
 [[targets.outputs]]
 dir = "~/Sync/Shared/{YYYY}"

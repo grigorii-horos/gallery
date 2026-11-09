@@ -98,7 +98,7 @@ pub struct TargetCheck {
     /// The decision names this target.
     pub taken: bool,
     /// Why no filter of the target takes the file (the first miss, e.g.
-    /// "near: no olga file within 2h / 1 km"); absent when one does.
+    /// "near: no partner file within 2h / 1 km"); absent when one does.
     pub miss: Option<TargetMiss>,
 }
 

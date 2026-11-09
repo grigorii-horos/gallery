@@ -85,14 +85,14 @@ fn explain_prints_the_first_miss_per_target() {
     let d = tempfile::tempdir().unwrap();
     let r = d.path().to_string_lossy().replace('\\', "/");
     write(&d.path().join("cam/20260101_120000.jpg"), "1");
-    write(&d.path().join("olga/20260101_200000.jpg"), "2");
+    write(&d.path().join("partner/20260101_200000.jpg"), "2");
     let cfg = d.path().join("g.toml");
     write(
         &cfg,
         &format!(
-            "[[sources]]\nid = \"cam\"\npath = \"{r}/cam\"\n[[sources]]\nid = \"olga\"\npath = \"{r}/olga\"\n\
+            "[[sources]]\nid = \"cam\"\npath = \"{r}/cam\"\n[[sources]]\nid = \"partner\"\npath = \"{r}/partner\"\n\
              [[targets]]\nname = \"Together\"\n[[targets.filters]]\nsources = [\"cam\"]\n\
-             near = {{ sources = [\"olga\"], time = \"2h\", km = 1 }}\n\
+             near = {{ sources = [\"partner\"], time = \"2h\", km = 1 }}\n\
              [[targets.outputs]]\ndir = \"{r}/out\"\n"
         ),
     );
@@ -105,7 +105,7 @@ fn explain_prints_the_first_miss_per_target() {
             .success(),
     );
     assert!(
-        out.contains("near: 0 files of olga within 2h / 1.0 km"),
+        out.contains("near: 0 files of partner within 2h / 1.0 km"),
         "{out}"
     );
 }

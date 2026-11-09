@@ -507,16 +507,16 @@ dir = "{out}/rest"
     fn conditions_and_event_expansion_see_the_whole_scan() {
         // Capture times come from the file names (the files have no EXIF).
         let dir = tempfile::tempdir().unwrap();
-        let (cam, olga, out) = (
+        let (cam, partner, out) = (
             dir.path().join("cam"),
-            dir.path().join("olga"),
+            dir.path().join("partner"),
             dir.path().join("out"),
         );
         for (d, n) in [
             (&cam, "IMG_20260801_100000.jpg"),
             (&cam, "IMG_20260801_103000.jpg"),
             (&cam, "IMG_20260805_100000.jpg"),
-            (&olga, "IMG_20260801_100500.jpg"),
+            (&partner, "IMG_20260801_100500.jpg"),
         ] {
             std::fs::create_dir_all(d).unwrap();
             std::fs::write(d.join(n), n.as_bytes()).unwrap();
@@ -529,14 +529,14 @@ id = "cam"
 path = "{cam}"
 
 [[sources]]
-id = "olga"
-path = "{olga}"
+id = "partner"
+path = "{partner}"
 
 [[targets]]
 name = "together"
 [[targets.filters]]
 sources = ["cam"]
-near = {{ sources = ["olga"], time = "20m" }}
+near = {{ sources = ["partner"], time = "20m" }}
 expand = "event"
 [[targets.outputs]]
 dir = "{out}/together"
@@ -544,12 +544,12 @@ dir = "{out}/together"
 [[targets]]
 name = "rest"
 [[targets.filters]]
-sources = ["cam", "olga"]
+sources = ["cam", "partner"]
 [[targets.outputs]]
 dir = "{out}/rest"
 "#,
             cam = p(&cam),
-            olga = p(&olga),
+            partner = p(&partner),
             out = p(&out)
         );
         let path = dir.path().join("gallery.toml");
@@ -567,12 +567,12 @@ dir = "{out}/rest"
         )
         .unwrap();
         let at = |d: &Path, n: &str| target_of(&out.plan, &d.join(n));
-        // Near Olga's shot (5 min).
+        // Near the partner's shot (5 min).
         assert_eq!(at(&cam, "IMG_20260801_100000.jpg"), Some("together"));
         // 25 min from it, but the same outing.
         assert_eq!(at(&cam, "IMG_20260801_103000.jpg"), Some("together"));
         assert_eq!(at(&cam, "IMG_20260805_100000.jpg"), Some("rest"));
-        assert_eq!(at(&olga, "IMG_20260801_100500.jpg"), Some("rest"));
+        assert_eq!(at(&partner, "IMG_20260801_100500.jpg"), Some("rest"));
     }
 
     #[test]

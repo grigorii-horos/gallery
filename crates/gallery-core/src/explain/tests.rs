@@ -629,32 +629,32 @@ fn near_misses_read_like_the_condition() {
     let fx = fixture_with(
         &[
             ("cam/20260101_120000.jpg", b"1"),
-            ("olga/20260101_200000.jpg", b"2"),
-            ("olga/20260101_130000.jpg", b"3"),
+            ("partner/20260101_200000.jpg", b"2"),
+            ("partner/20260101_130000.jpg", b"3"),
         ],
         r#"
 [[sources]]
 id = "cam"
 path = "{r}/cam"
 [[sources]]
-id = "olga"
-path = "{r}/olga"
+id = "partner"
+path = "{r}/partner"
 
 [[targets]]
 name = "Together"
 [[targets.filters]]
 sources = ["cam"]
-near = { sources = ["olga"], time = "30m", km = 1 }
+near = { sources = ["partner"], time = "30m", km = 1 }
 [[targets.outputs]]
 dir = "{r}/out"
 "#,
     );
-    // The only olga file within 30 minutes is none: 13:00 is an hour away.
+    // The only partner file within 30 minutes is none: 13:00 is an hour away.
     let ex = fx.explain("cam/20260101_120000.jpg");
     let miss = ex.targets[0].miss.as_ref().expect("near misses");
     assert_eq!(miss.condition, "near");
     assert!(
-        miss.detail.contains("olga")
+        miss.detail.contains("partner")
             && miss.detail.contains("30m")
             && miss.detail.contains("1.0 km"),
         "{}",

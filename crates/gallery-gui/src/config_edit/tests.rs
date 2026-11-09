@@ -475,10 +475,10 @@ id = "camera"
 path = "/tmp/gallery-edit-test/camera"
 
 [[sources]]
-id = "olga"
-path = "/tmp/gallery-edit-test/olga"
+id = "partner"
+path = "/tmp/gallery-edit-test/partner"
 
-# Shared with Olga.
+# Shared with the partner.
 [[targets]]
 name = "Together"
 [[targets.filters]]
@@ -490,7 +490,7 @@ dir = "/tmp/gallery-edit-test/shared"
 [[targets]]
 name = "Timeline"
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 [[targets.outputs]]
 dir = "/tmp/gallery-edit-test/timeline"
 "#;
@@ -500,7 +500,7 @@ fn set_condition_writes_an_inline_table_in_place() {
     let fx = fixture(TWO_SOURCES);
     let near = condition(
         "near",
-        serde_json::json!({ "km": 1.0, "time": "2h", "sources": ["olga"] }),
+        serde_json::json!({ "km": 1.0, "time": "2h", "sources": ["partner"] }),
     );
     save_ok(
         &fx,
@@ -514,7 +514,7 @@ fn set_condition_writes_an_inline_table_in_place() {
     assert!(old.is_empty(), "{old:?}");
     assert_eq!(
         new,
-        vec![r#"near = { sources = ["olga"], time = "2h", km = 1.0 }"#]
+        vec![r#"near = { sources = ["partner"], time = "2h", km = 1.0 }"#]
     );
     let cfg = Config::load(&fx.path).unwrap();
     cfg.validate().unwrap();
@@ -523,7 +523,7 @@ fn set_condition_writes_an_inline_table_in_place() {
     // Replaced in place, its line kept.
     let near = condition(
         "near",
-        serde_json::json!({ "sources": ["olga"], "time": "30m", "not": true }),
+        serde_json::json!({ "sources": ["partner"], "time": "30m", "not": true }),
     );
     save_ok(
         &fx,
@@ -535,20 +535,20 @@ fn set_condition_writes_an_inline_table_in_place() {
     );
     assert!(
         read(&fx.path).contains(
-            "match = \"@media\"\nnear = { sources = [\"olga\"], time = \"30m\", not = true }\n"
+            "match = \"@media\"\nnear = { sources = [\"partner\"], time = \"30m\", not = true }\n"
         ),
         "{}",
         read(&fx.path)
     );
 
     // A source renamed or removed follows into `near`.
-    let mut olga = draft(&fx.path, None, &[]).unwrap().draft.sources[1].clone();
-    olga.id = "wife".into();
+    let mut partner = draft(&fx.path, None, &[]).unwrap().draft.sources[1].clone();
+    partner.id = "wife".into();
     save_ok(
         &fx,
         &[EditOp::UpdateSource {
-            id: "olga".into(),
-            source: olga,
+            id: "partner".into(),
+            source: partner,
         }],
     );
     assert!(read(&fx.path).contains("near = { sources = [\"wife\"], time = \"30m\", not = true }"));
@@ -641,7 +641,7 @@ fn set_place_writes_places_after_the_sources() {
     let after = read(&fx.path);
     assert!(
         after.contains(
-            "path = \"/tmp/gallery-edit-test/olga\"\n\n[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 2.0 }\n\n# Shared with Olga.\n[[targets]]"
+            "path = \"/tmp/gallery-edit-test/partner\"\n\n[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 2.0 }\n\n# Shared with the partner.\n[[targets]]"
         ),
         "{after}"
     );

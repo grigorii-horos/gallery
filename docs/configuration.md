@@ -253,7 +253,7 @@ than `gap` starts a new event. Optionally a jump in place (`km`) between two con
 files splits an event too. `event` is a condition on the event a file belongs to:
 
 ```toml
-event = { sources = ["camera", "olga"],    # which files form events (default: the filter's sources)
+event = { sources = ["camera", "partner"],    # which files form events (default: the filter's sources)
           gap = "4h", km = 30,             # split on a pause over 4 h or a jump over 30 km
           min_files = 10,                  # the event has at least 10 files
           min_duration = "1d", max_duration = "30d",
@@ -291,7 +291,7 @@ respected. `expand` and `ai` in one filter is a config error.
 The file has at least `min` neighbours among the files of the given sources, in the whole scan:
 
 ```toml
-near = { sources = ["olga"], time = "2h", km = 1, min = 1 }
+near = { sources = ["partner"], time = "2h", km = 1, min = 1 }
 ```
 
 | Key | Meaning |
@@ -306,9 +306,9 @@ Capture times are compared as naive local wall-clock times in the plan's time zo
 the name presets: a photo's time is the EXIF `DateTimeOriginal` as the phone wrote it; QuickTime
 dates (stored in UTC) and Unix-time file names are converted to the plan's zone first.
 `OffsetTimeOriginal` is not used, so two phones set to different zones differ by whole hours (the
-difference between their clocks), not by the real moment. Explain shows a miss as `near: 0 files of olga within 2h / 1.0 km, at least 1 needed`.
+difference between their clocks), not by the real moment. Explain shows a miss as `near: 0 files of partner within 2h / 1.0 km, at least 1 needed`.
 
-**Photos taken together** (two phones, `camera` and `olga`): both people's photos go to a shared
+**Photos taken together** (two phones, `camera` and `partner`): both people's photos go to a shared
 folder, frames with neither person in them included, and the private ones stay with their owner.
 
 ```toml
@@ -318,16 +318,16 @@ name = "Together"
 [[targets.filters]]
 sources = ["camera"]
 match = "@media"
-near = { sources = ["olga"], time = "2h", km = 1 }
+near = { sources = ["partner"], time = "2h", km = 1 }
 expand = "event"
-event = { sources = ["camera", "olga"], gap = "4h" }
+event = { sources = ["camera", "partner"], gap = "4h" }
 
 [[targets.filters]]
-sources = ["olga"]
+sources = ["partner"]
 match = "@media"
 near = { sources = ["camera"], time = "2h", km = 1 }
 expand = "event"
-event = { sources = ["camera", "olga"], gap = "4h" }
+event = { sources = ["camera", "partner"], gap = "4h" }
 
 [[targets.outputs]]
 dir = "~/Sync/Shared/{YYYY}"
@@ -441,7 +441,7 @@ dir = "~/Documents/Receipts"
 ### Negation: `not`
 
 Every condition **table** accepts `not = true`, which negates the whole table (an AND of its
-sub-options): `near = { sources = ["olga"], time = "2h", not = true }` means "no olga file within two
+sub-options): `near = { sources = ["partner"], time = "2h", not = true }` means "no partner file within two
 hours". A condition with missing data is false, so with `not = true` it is true. `geo` also accepts
 `"!@home"`.
 

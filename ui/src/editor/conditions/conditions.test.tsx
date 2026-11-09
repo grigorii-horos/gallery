@@ -14,7 +14,7 @@ import { PropsCondition } from "./PropsCondition";
 import { SeriesCondition } from "./SeriesCondition";
 import type { CondContext, CondFormProps } from "./shared";
 
-const ctx: CondContext = { sources: ["camera", "olga"], places: ["home", "dacha"], suggestions: ["@photo"] };
+const ctx: CondContext = { sources: ["camera", "partner"], places: ["home", "dacha"], suggestions: ["@photo"] };
 
 /** Renders a form on `start` and keeps what it reports, as the filter editor does. */
 function Harness({ Form, start, seen }: { Form: ComponentType<CondFormProps>; start: unknown; seen: (v: unknown) => void }) {
@@ -102,26 +102,26 @@ describe("geo circle", () => {
 describe("event", () => {
   it("edits its options", async () => {
     const { last, user } = setup(EventCondition, {});
-    await user.click(screen.getByRole("button", { name: "olga" }));
+    await user.click(screen.getByRole("button", { name: "partner" }));
     await user.type(screen.getByLabelText("Pause that starts a new event"), "6h");
     await user.type(screen.getByLabelText("At least this many files"), "10");
     await user.selectOptions(screen.getByLabelText("Away from place"), "home");
     await user.click(screen.getByLabelText("Not (invert)"));
-    expect(last()).toEqual({ sources: ["olga"], gap: "6h", min_files: 10, away_from: "@home", not: true });
+    expect(last()).toEqual({ sources: ["partner"], gap: "6h", min_files: 10, away_from: "@home", not: true });
   });
 });
 
 describe("near", () => {
   it("keeps sources in the table and edits time, km, min, require_gps", async () => {
-    const { last, user } = setup(NearCondition, { sources: ["olga"], time: "2h" });
-    await user.click(screen.getByRole("button", { name: "olga" }));
+    const { last, user } = setup(NearCondition, { sources: ["partner"], time: "2h" });
+    await user.click(screen.getByRole("button", { name: "partner" }));
     expect(last()).toEqual({ sources: [], time: "2h" });
-    await user.click(screen.getByRole("button", { name: "olga" }));
+    await user.click(screen.getByRole("button", { name: "partner" }));
     await user.type(screen.getByLabelText("Within, km"), "1");
     await user.type(screen.getByLabelText("Neighbours needed"), "2");
     await user.click(screen.getByLabelText("Both files need GPS"));
     await user.click(screen.getByLabelText("Not (invert)"));
-    expect(last()).toEqual({ sources: ["olga"], time: "2h", km: 1, min: 2, require_gps: true, not: true });
+    expect(last()).toEqual({ sources: ["partner"], time: "2h", km: 1, min: 2, require_gps: true, not: true });
   });
 });
 

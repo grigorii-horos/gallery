@@ -13,8 +13,8 @@ ai_suffix_file = "ai/camera-suffix.md"
 
 # A second phone: its photos are neighbours of the camera's in `near` and `event`.
 [[sources]]
-id = "olga"
-path = "~/Sync/Olga-Photo"
+id = "partner"
+path = "~/Sync/Partner-Photo"
 
 # Screenshots stay in their own folder: they are only renamed there.
 [[sources]]
@@ -112,7 +112,7 @@ name = "Duplicates"
 kind = "trash"
 
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 duplicate = { of = ["sources", "outputs"] }
 
 # Burst shots and re-takes: near-identical frames seconds apart. Every shot
@@ -151,7 +151,7 @@ name = "Screenshots and screen recordings"
 
 # A list is OR: screenshots and screen recordings.
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 match = ["@screenshot", "@screen-recording"]
 
 [[targets.outputs]]
@@ -188,7 +188,7 @@ date = { time = "22:00..05:00" }
 # other phone shot something within 2 hours and 1 km (a file without GPS is
 # compared by time alone), and `expand = "event"` then takes every file of
 # the same event, also frames where the other person is not around. An event
-# is a run of camera and olga files with no gap over 4 hours. Both phones
+# is a run of camera and partner files with no gap over 4 hours. Both phones
 # put their files into one shared folder.
 [[targets]]
 name = "Together"
@@ -196,16 +196,16 @@ name = "Together"
 [[targets.filters]]
 sources = ["camera"]
 match = "@phone-media"
-near = { sources = ["olga"], time = "2h", km = 1 }
+near = { sources = ["partner"], time = "2h", km = 1 }
 expand = "event"
-event = { sources = ["camera", "olga"], gap = "4h" }
+event = { sources = ["camera", "partner"], gap = "4h" }
 
 [[targets.filters]]
-sources = ["olga"]
+sources = ["partner"]
 match = "@phone-media"
 near = { sources = ["camera"], time = "2h", km = 1 }
 expand = "event"
-event = { sources = ["camera", "olga"], gap = "4h" }
+event = { sources = ["camera", "partner"], gap = "4h" }
 
 [[targets.outputs]]
 dir = "~/Sync/Shared/{YYYY}"
@@ -249,7 +249,7 @@ name = "Timeline"
 # Only photos and videos (@phone-media) are taken: PNG, RAW and audio files
 # stay where they are.
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 match = "@phone-media"
 
 # Processed copy: metadata, then compress-all (AVIF for photos, PNG and WebP,

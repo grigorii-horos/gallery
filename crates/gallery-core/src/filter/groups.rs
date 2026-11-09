@@ -1374,8 +1374,8 @@ id = "camera"
 path = "/nonexistent/camera"
 
 [[sources]]
-id = "olga"
-path = "/nonexistent/olga"
+id = "partner"
+path = "/nonexistent/partner"
 
 {targets}
 "#
@@ -1484,14 +1484,14 @@ event = { min_files = 2 }
 name = "Together"
 [[targets.filters]]
 sources = ["camera"]
-near = { sources = ["olga"], time = "2h", km = 1 }
+near = { sources = ["partner"], time = "2h", km = 1 }
 "#;
 
-    fn near_case(cfg: &Config, olga_gps: Option<(f64, f64)>) -> bool {
-        let files = vec![virt("camera", "c.jpg"), virt("olga", "o.jpg")];
+    fn near_case(cfg: &Config, partner_gps: Option<(f64, f64)>) -> bool {
+        let files = vec![virt("camera", "c.jpg"), virt("partner", "o.jpg")];
         let facts = vec![
             fact(Some("2026-08-01 12:00:00"), Some((47.02, 28.83))),
-            fact(Some("2026-08-01 13:30:00"), olga_gps),
+            fact(Some("2026-08-01 13:30:00"), partner_gps),
         ];
         let g = run(cfg, &files, &facts, &no_thumbs);
         holds(cfg, 0, &facts, &g).is_ok()
@@ -1512,7 +1512,7 @@ near = { sources = ["olga"], time = "2h", km = 1 }
     #[test]
     fn mixed_zones_quicktime_utc_video_and_other_phone_photo_are_close() {
         // The plan zone is Chisinau (+03:00 in August). The camera's video
-        // stores its QuickTime date in UTC (09:20Z = 12:20 local); Olga's
+        // stores its QuickTime date in UTC (09:20Z = 12:20 local); the partner's
         // phone writes its local wall clock, 12:50, in EXIF (its
         // OffsetTimeOriginal is not read). Compared as plan-zone wall clock
         // they are 30 minutes apart, not 3 hours 30.
@@ -1537,7 +1537,7 @@ near = { sources = ["olga"], time = "2h", km = 1 }
             "ExifIFD:DateTimeOriginal": "2026:08:01 12:50:00",
             "ExifIFD:OffsetTimeOriginal": "+03:00",
         });
-        let files = vec![virt("camera", "clip.mp4"), virt("olga", "o.jpg")];
+        let files = vec![virt("camera", "clip.mp4"), virt("partner", "o.jpg")];
         let facts: Vec<Facts> = vec![
             crate::filter::facts::facts_of(&files[0], &video, Some(tz)),
             crate::filter::facts::facts_of(&files[1], &photo, Some(tz)),
@@ -1554,7 +1554,7 @@ near = { sources = ["olga"], time = "2h", km = 1 }
 [[targets]]
 name = "Trips"
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 event = { gap = "45m", min_files = 2 }
 "#,
         );
@@ -1571,9 +1571,9 @@ event = { gap = "45m", min_files = 2 }
         let cfg = config(NEAR);
         let files = vec![
             virt("camera", "c.jpg"),
-            virt("olga", "o1.jpg"),
-            virt("olga", "o2.jpg"),
-            virt("olga", "o3.jpg"),
+            virt("partner", "o1.jpg"),
+            virt("partner", "o2.jpg"),
+            virt("partner", "o3.jpg"),
         ];
         let facts = vec![fact(Some("2026-08-01 12:00:00"), None); 4];
         let g = run(&cfg, &files, &facts, &no_thumbs);
@@ -1588,7 +1588,7 @@ event = { gap = "45m", min_files = 2 }
     #[test]
     fn near_without_capture_date_misses() {
         let cfg = config(NEAR);
-        let files = vec![virt("camera", "c.jpg"), virt("olga", "o.jpg")];
+        let files = vec![virt("camera", "c.jpg"), virt("partner", "o.jpg")];
         let facts = vec![fact(None, None), fact(Some("2026-08-01 13:30:00"), None)];
         let g = run(&cfg, &files, &facts, &no_thumbs);
         assert_eq!(
@@ -1610,7 +1610,7 @@ event = { gap = "45m", min_files = 2 }
             p
         };
         let cam_a = write("camera/a.jpg", b"same picture");
-        let olga_a = write("olga/a.jpg", b"same picture");
+        let partner_a = write("partner/a.jpg", b"same picture");
         let cam_b = write("camera/b.jpg", b"placed before");
         let out_b = write("out/2026/b.jpg", b"placed before");
         write("out/2026/.stversions/a.jpg", b"same picture");
@@ -1622,8 +1622,8 @@ id = "camera"
 path = "{r}/camera"
 
 [[sources]]
-id = "olga"
-path = "{r}/olga"
+id = "partner"
+path = "{r}/partner"
 
 [[sources]]
 id = "outsrc"
@@ -1633,7 +1633,7 @@ path = "{out}"
 name = "Duplicates"
 kind = "trash"
 [[targets.filters]]
-sources = ["camera", "olga", "outsrc"]
+sources = ["camera", "partner", "outsrc"]
 duplicate = {{ of = ["sources", "outputs"] }}
 
 [[targets]]
@@ -1645,7 +1645,7 @@ dir = "{out}/{{YYYY}}"
         );
         let cfg: Config = toml::from_str(&text).unwrap();
         let files = vec![
-            entry("olga", &olga_a),
+            entry("partner", &partner_a),
             entry("camera", &cam_a),
             entry("camera", &cam_b),
             entry("outsrc", &out_b),
@@ -1795,7 +1795,7 @@ dir = "{r}/out/{{YYYY}}"
         };
         // Same size, different bytes; the cache claims they are equal.
         let cam = write("camera/a.jpg", b"picture one");
-        let olga = write("olga/a.jpg", b"picture two");
+        let partner = write("partner/a.jpg", b"picture two");
         let out = write("out/2026/a.jpg", b"picture 3!!");
         let outdir = root.join("out").display().to_string().replace('\\', "/");
         let text = format!(
@@ -1805,14 +1805,14 @@ id = "camera"
 path = "{r}/camera"
 
 [[sources]]
-id = "olga"
-path = "{r}/olga"
+id = "partner"
+path = "{r}/partner"
 
 [[targets]]
 name = "Duplicates"
 kind = "trash"
 [[targets.filters]]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 duplicate = {{ of = ["sources", "outputs"] }}
 
 [[targets]]
@@ -1823,7 +1823,7 @@ dir = "{outdir}/{{YYYY}}"
             r = root.display().to_string().replace('\\', "/"),
         );
         let cfg: Config = toml::from_str(&text).unwrap();
-        let files = vec![entry("camera", &cam), entry("olga", &olga)];
+        let files = vec![entry("camera", &cam), entry("partner", &partner)];
         let facts = vec![fact(None, None); 2];
         let cache = tempfile::tempdir().unwrap();
         let forge = |paths: &[&PathBuf]| {
@@ -1848,7 +1848,7 @@ dir = "{outdir}/{{YYYY}}"
             )
             .unwrap()
         };
-        forge(&[&cam, &olga, &out]);
+        forge(&[&cam, &partner, &out]);
         let g = groups(&files);
         assert!(g.dup_original.is_empty());
         assert!(g.dup_in_outputs.is_empty());
@@ -1857,10 +1857,10 @@ dir = "{outdir}/{{YYYY}}"
         assert_eq!(m.condition, "duplicate");
 
         // Real copies under the same forged hash still count.
-        std::fs::write(&olga, b"picture one").unwrap();
+        std::fs::write(&partner, b"picture one").unwrap();
         std::fs::write(&out, b"picture one").unwrap();
-        forge(&[&olga, &out]);
-        let files = vec![entry("camera", &cam), entry("olga", &olga)];
+        forge(&[&partner, &out]);
+        let files = vec![entry("camera", &cam), entry("partner", &partner)];
         let g = groups(&files);
         assert_eq!(g.dup_original.get(&1), Some(&0));
         assert!(g.dup_in_outputs.contains(&0));
@@ -2002,7 +2002,7 @@ series = {}
         let files = vec![
             entry("camera", &photo),
             virt("camera", "clip.mp4"),
-            virt("olga", "b.jpg"),
+            virt("partner", "b.jpg"),
         ];
         let facts = vec![fact(None, None); 3];
         let cfg = config(
@@ -2018,7 +2018,7 @@ props = { sharpness = "<40" }
         assert!(n.sharpness && n.exif_all && !n.series);
         let identity = |p: &Path| {
             assert!(p.extension().is_some_and(|e| e == "jpg"), "{}", p.display());
-            assert!(!p.starts_with("/nonexistent/olga"));
+            assert!(!p.starts_with("/nonexistent/partner"));
             Ok(p.to_path_buf())
         };
         let g = run(&cfg, &files, &facts, &identity);
@@ -2081,7 +2081,7 @@ match = "*.jpg"
 expand = "event"
 
 [event]
-sources = ["camera", "olga"]
+sources = ["camera", "partner"]
 gap = "6h"
 km = 30.0
 min_files = 10
@@ -2089,7 +2089,7 @@ min_duration = "1d"
 away_from = "@home"
 
 [near]
-sources = ["olga"]
+sources = ["partner"]
 time = "2h"
 km = 1.0
 min = 2
@@ -2107,7 +2107,7 @@ by = "resolution"
         let f: Filter = toml::from_str(text).unwrap();
         assert_eq!(toml::to_string(&f).unwrap(), text);
         let key = EventKey::of(&f).unwrap();
-        assert_eq!(key.sources, vec!["camera", "olga"]);
+        assert_eq!(key.sources, vec!["camera", "partner"]);
         assert_eq!((key.gap_s, key.km_milli), (6 * 3600, Some(30_000)));
         let plain: Filter = toml::from_str("sources = [\"b\", \"a\"]\nexpand = \"event\"").unwrap();
         let key = EventKey::of(&plain).unwrap();

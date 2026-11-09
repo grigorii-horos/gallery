@@ -147,8 +147,8 @@ describe("explain view: first miss of a target", () => {
   });
 
   it("says which condition kept the file out", () => {
-    render(<ExplainView ex={target({ condition: "near", detail: "no olga file within 2h / 1 km" })} />);
-    expect(screen.getByText("Not taken: near: no olga file within 2h / 1 km")).toBeInTheDocument();
+    render(<ExplainView ex={target({ condition: "near", detail: "no partner file within 2h / 1 km" })} />);
+    expect(screen.getByText("Not taken: near: no partner file within 2h / 1 km")).toBeInTheDocument();
   });
 
   it("shows nothing when the target has no miss", () => {

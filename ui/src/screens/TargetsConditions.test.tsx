@@ -22,7 +22,7 @@ const base: EditOutcome = {
   draft: {
     sources: [
       { id: "camera", path: "~/Cam", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
-      { id: "olga", path: "~/Olga", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
+      { id: "partner", path: "~/partner", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
     ],
     places: [{ name: "home", lat: 47.0245, lon: 28.8323, km: 2 }],
     targets: [
@@ -179,11 +179,11 @@ describe("condition menu and forms", () => {
     await user.click(screen.getByRole("button", { name: "+ condition" }));
     await user.click(screen.getByRole("menuitem", { name: "Near" }));
     const near = screen.getByRole("group", { name: "Near" });
-    await user.click(within(near).getByRole("button", { name: "olga" }));
+    await user.click(within(near).getByRole("button", { name: "partner" }));
     await user.clear(within(near).getByLabelText("Within, km"));
     await user.type(within(near).getByLabelText("Within, km"), "1.5");
     await user.click(within(near).getByLabelText("Not (invert)"));
-    await waitFor(() => expect(updated().filters[0].conditions.near).toEqual({ sources: ["olga"], time: "2h", km: 1.5, not: true }));
+    await waitFor(() => expect(updated().filters[0].conditions.near).toEqual({ sources: ["partner"], time: "2h", km: 1.5, not: true }));
     await user.click(within(near).getByRole("button", { name: "Remove Near" }));
     await waitFor(() => expect(updated().filters[0].conditions).toEqual({ duplicate: { of: ["sources"] } }));
   });
