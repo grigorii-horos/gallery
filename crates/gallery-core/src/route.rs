@@ -207,7 +207,8 @@ impl<'a> RouteCtx<'a> {
     /// Facts of every file from `exif` (in the plan zone) and the groups the
     /// config's conditions need, computed over `files`. Thumbnails are made
     /// with `tools` (`None`: none, so no sharpness and no similar series);
-    /// scores and hashes are cached in the user cache dir.
+    /// scores and hashes are cached in the user cache dir (without one,
+    /// nothing is written and no thumbnails are made).
     pub fn build(
         cfg: &Config,
         files: &[FileEntry],
@@ -222,10 +223,18 @@ impl<'a> RouteCtx<'a> {
             .map(|e| facts_of(e, exif.get(&e.path).unwrap_or(&Value::Null), tz))
             .collect();
         let needs = crate::filter::needs(cfg);
-        let cache =
-            crate::paths::cache_dir().unwrap_or_else(|| std::env::temp_dir().join("gallery-cache"));
-        let groups =
-            crate::filter::compute(cfg, files, &facts, &needs, tools, &cache, progress, cancel)?;
+        // No cache dir: computed without persisting anything.
+        let cache = crate::paths::cache_dir();
+        let groups = crate::filter::compute(
+            cfg,
+            files,
+            &facts,
+            &needs,
+            tools,
+            cache.as_deref(),
+            progress,
+            cancel,
+        )?;
         Ok(RouteCtx {
             facts: Cow::Owned(facts),
             exif: Cow::Borrowed(exif),
@@ -437,6 +446,7 @@ struct Router<'a> {
     cfg: &'a Config,
     files: &'a [FileEntry],
     ctx: &'a RouteCtx<'a>,
+    accept_low: bool,
     /// Targets whose `expand` filters know their files (true for targets
     /// without them).
     resolved: Vec<bool>,
@@ -481,6 +491,16 @@ impl Router<'_> {
             if f.series.as_ref().is_some_and(|c| !c.not) && self.ctx.groups.series_of(i).is_some() {
                 series = true;
                 continue;
+            }
+            // A doubtful answer that would take the file: the user decides.
+            if let Via::Ai { reason, low: true } = &via
+                && !self.accept_low
+            {
+                return Step::Take(Decision::Review {
+                    suggested: target.name.clone(),
+                    reason: reason.clone(),
+                    series: None,
+                });
             }
             return Step::Take(Decision::Target {
                 name: target.name.clone(),
@@ -534,6 +554,49 @@ impl Router<'_> {
                     .collect(),
                 best: self.files[s.best].path.clone(),
             }),
+        }
+    }
+
+    /// Limit every series review to the shots held in it (same target):
+    /// shots decided otherwise (a manual decision, an earlier target) are
+    /// not offered again. The best is kept when held, else the first held.
+    fn narrow_series(&self, decisions: &mut [Option<Decision>]) {
+        let held_for = |i: usize| match &decisions[i] {
+            Some(Decision::Review {
+                suggested,
+                series: Some(_),
+                ..
+            }) => Some(suggested.clone()),
+            _ => None,
+        };
+        let mut narrowed = Vec::new();
+        for i in 0..decisions.len() {
+            let (Some(target), Some(s)) = (held_for(i), self.ctx.groups.series_of(i)) else {
+                continue;
+            };
+            let held: Vec<usize> = s
+                .members
+                .iter()
+                .copied()
+                .filter(|&m| held_for(m).as_ref() == Some(&target))
+                .collect();
+            let best = if held.contains(&s.best) {
+                s.best
+            } else {
+                held[0]
+            };
+            narrowed.push((
+                i,
+                SeriesReview {
+                    members: held.iter().map(|&m| self.files[m].path.clone()).collect(),
+                    best: self.files[best].path.clone(),
+                },
+            ));
+        }
+        for (i, sr) in narrowed {
+            if let Some(Decision::Review { series, .. }) = &mut decisions[i] {
+                *series = Some(sr);
+            }
         }
     }
 
@@ -620,8 +683,9 @@ impl Router<'_> {
 ///   before it has an answer pauses; when no file can move on, the paused
 ///   ones go to the AI as one batch, each with every category it could
 ///   still reach (this and later targets), and their walks resume. A file
-///   is asked at most once; a low-confidence answer sends it to review
-///   unless `accept_low`.
+///   is asked at most once. Unless `accept_low`, a low-confidence "none"
+///   sends it to review at once, and a low-confidence category does when
+///   an AI filter would take the file through it (strict order first).
 /// - `expand = "event"`: once every undecided file stands at the target,
 ///   the files its other conditions hold for seed their events, and every
 ///   undecided file of those events in its sources and masks matches.
@@ -682,6 +746,7 @@ pub fn route_with_overrides(
         cfg,
         files,
         ctx,
+        accept_low,
         resolved: cfg
             .targets
             .iter()
@@ -744,9 +809,13 @@ pub fn route_with_overrides(
                 let w = &mut walks[i];
                 w.paused = false;
                 w.asked = true;
-                if answer.confidence == Confidence::Low && !accept_low {
+                // A doubtful "none" goes to review at once; a doubtful
+                // category only when the walk reaches a filter it would take
+                // the file through (an earlier target may take it first).
+                if answer.confidence == Confidence::Low && !accept_low && answer.category.is_none()
+                {
                     decisions[i] = Some(Decision::Review {
-                        suggested: answer.category.unwrap_or_else(|| "—".to_string()),
+                        suggested: "—".to_string(),
                         reason: answer.reason,
                         series: None,
                     });
@@ -767,6 +836,8 @@ pub fn route_with_overrides(
             None => break,
         }
     }
+
+    router.narrow_series(&mut decisions);
 
     let decisions = files
         .iter()
@@ -1552,19 +1623,51 @@ ai = "docs"
     }
 
     #[test]
-    fn a_low_answer_goes_to_review_at_the_pause() {
+    fn a_low_answer_goes_to_review_only_where_it_would_take_the_file() {
         let c = ordered();
+        let files = [
+            file("a", "y.heic"),
+            file("a", "p.jpg"),
+            file("a", "q.jpg"),
+            file("a", "n.heic"),
+        ];
         let mut ai = ByName::new(&[]);
-        ai.answers.insert("p.jpg", (Some("4"), Confidence::Low));
-        let r = run(&c, &[file("a", "p.jpg")], &ai, false).unwrap();
-        assert_eq!(
-            r[0].1,
-            Decision::Review {
-                suggested: "4".into(),
-                reason: "why".into(),
-                series: None,
-            }
-        );
+        for (f, cat) in [
+            ("y.heic", Some("4")),
+            ("p.jpg", Some("4")),
+            ("q.jpg", Some("2")),
+            ("n.heic", None),
+        ] {
+            ai.answers.insert(f, (cat, Confidence::Low));
+        }
+        let r = run(&c, &files, &ai, false).unwrap();
+        let review = |s: &str| Decision::Review {
+            suggested: s.into(),
+            reason: "why".into(),
+            series: None,
+        };
+        assert_eq!(r[0].1, review("4"));
+        // Strict order: the jpg target comes before "4" and takes the file,
+        // whatever the doubtful answer.
+        assert_eq!(r[1].1, target("3", Via::Mask));
+        assert_eq!(r[2].1, review("2"));
+        // A doubtful "none" is reviewed at once.
+        assert_eq!(r[3].1, review("—"));
+        // Accepted, the answers decide like confident ones.
+        let r = run(&c, &files, &ai, true).unwrap();
+        let low = |n: &str| {
+            target(
+                n,
+                Via::Ai {
+                    reason: "why".into(),
+                    low: true,
+                },
+            )
+        };
+        assert_eq!(r[0].1, low("4"));
+        assert_eq!(r[1].1, target("3", Via::Mask));
+        assert_eq!(r[2].1, low("2"));
+        assert_eq!(r[3].1, Decision::Unmatched);
     }
 
     #[test]
@@ -1624,7 +1727,7 @@ ai = "docs"
             &facts,
             &needs(c),
             None,
-            cache,
+            Some(cache),
             &NoProgress,
             &Cancel::new(),
         )
@@ -1850,6 +1953,66 @@ sources = ["a"]
         assert_eq!(r.decisions[0].1, target("Retakes", Via::Manual));
         assert_eq!(r.decisions[1].1, target("All", Via::Mask));
         assert_eq!(r.decisions[2].1, target("Retakes", Via::Manual));
+    }
+
+    #[test]
+    fn a_series_review_offers_only_the_shots_it_holds() {
+        let c = toml_cfg(&format!(
+            r#"{SOURCES}
+[[targets]]
+name = "Retakes"
+kind = "trash"
+[[targets.filters]]
+sources = ["a"]
+series = {{ keep = "best" }}
+
+[[targets]]
+name = "All"
+[[targets.filters]]
+sources = ["a"]
+"#
+        ));
+        let files = [
+            file("a", "s1.jpg"),
+            file("a", "s2.jpg"),
+            file("a", "s3.jpg"),
+        ];
+        let ctx = series_ctx(&files);
+        let held = |o: &Overrides| {
+            route_with_overrides(
+                &c,
+                &files,
+                &ctx,
+                &Panics,
+                false,
+                o,
+                &NoProgress,
+                &Cancel::new(),
+            )
+            .unwrap()
+            .decisions
+            .into_iter()
+            .map(|(_, d)| match d {
+                Decision::Review { series, .. } => series,
+                _ => None,
+            })
+            .collect::<Vec<_>>()
+        };
+        let all = Action::Target { name: "All".into() };
+        let review = |m: &[usize], best: usize| {
+            Some(SeriesReview {
+                members: m.iter().map(|&i| files[i].path.clone()).collect(),
+                best: files[best].path.clone(),
+            })
+        };
+        // s1 was routed elsewhere by hand: only s2 and s3 are offered.
+        let mut o = Overrides::default();
+        o.set(files[0].path.clone(), 1, 0, all.clone());
+        assert_eq!(held(&o), [None, review(&[1, 2], 1), review(&[1, 2], 1)]);
+        // The suggested best was routed elsewhere: the first held one leads.
+        let mut o = Overrides::default();
+        o.set(files[1].path.clone(), 1, 0, all);
+        assert_eq!(held(&o), [review(&[0, 2], 0), None, review(&[0, 2], 0)]);
     }
 
     #[test]

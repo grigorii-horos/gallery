@@ -113,7 +113,8 @@ pub struct Metric {
 /// The `metrics.json` cache; safe to share between worker threads.
 #[derive(Debug)]
 pub struct MetricsCache {
-    path: PathBuf,
+    /// `None`: kept in memory only, never written.
+    path: Option<PathBuf>,
     map: Mutex<HashMap<String, Metric>>,
     dirty: Mutex<bool>,
 }
@@ -128,8 +129,17 @@ impl MetricsCache {
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
         MetricsCache {
-            path,
+            path: Some(path),
             map: Mutex::new(map),
+            dirty: Mutex::new(false),
+        }
+    }
+
+    /// An empty cache that is never written (no cache dir).
+    pub fn in_memory() -> MetricsCache {
+        MetricsCache {
+            path: None,
+            map: Mutex::new(HashMap::new()),
             dirty: Mutex::new(false),
         }
     }
@@ -151,15 +161,18 @@ impl MetricsCache {
 
     /// Write the file back when something changed.
     pub fn save(&self) -> Result<()> {
+        let Some(path) = &self.path else {
+            return Ok(());
+        };
         if !*self.dirty.lock().unwrap() {
             return Ok(());
         }
         let bytes = serde_json::to_vec(&*self.map.lock().unwrap())
             .map_err(|e| Error::Io(std::io::Error::other(e)))?;
-        if let Some(dir) = self.path.parent() {
+        if let Some(dir) = path.parent() {
             std::fs::create_dir_all(dir)?;
         }
-        crate::paths::write_atomic(&self.path, &bytes)?;
+        crate::paths::write_atomic(path, &bytes)?;
         *self.dirty.lock().unwrap() = false;
         Ok(())
     }

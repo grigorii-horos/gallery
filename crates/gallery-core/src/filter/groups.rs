@@ -438,6 +438,8 @@ type ThumbFn<'a> = dyn Fn(&Path) -> Result<PathBuf> + Sync + 'a;
 /// Compute what `needs` asks for over `files` (with `facts[i]` of
 /// `files[i]`). Thumbnails (via `tools`, `None`: none can be made) go to
 /// `cache_dir/thumbs`, scores and content hashes to `cache_dir/metrics.json`.
+/// Without a `cache_dir` nothing is written: no thumbnails are made (so no
+/// sharpness and no similar series) and hashes live in memory only.
 #[allow(clippy::too_many_arguments)]
 pub fn compute(
     cfg: &Config,
@@ -445,15 +447,15 @@ pub fn compute(
     facts: &[Facts],
     needs: &Needs,
     tools: Option<&Tools>,
-    cache_dir: &Path,
+    cache_dir: Option<&Path>,
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<Groups> {
-    let thumb_dir = cache_dir.join("thumbs");
-    let thumb = |p: &Path| match tools {
-        Some(t) => thumbs::thumb_for_in(t, p, &thumb_dir),
+    let thumb_dir = cache_dir.map(|d| d.join("thumbs"));
+    let thumb = |p: &Path| match (tools, &thumb_dir) {
+        (Some(t), Some(dir)) => thumbs::thumb_for_in(t, p, dir),
         // Never shown: a file without a thumbnail just has no measure.
-        None => Err(crate::Error::Tool(p.display().to_string())),
+        _ => Err(crate::Error::Tool(p.display().to_string())),
     };
     compute_with(
         cfg, files, facts, needs, &thumb, cache_dir, progress, cancel,
@@ -468,7 +470,7 @@ fn compute_with(
     facts: &[Facts],
     needs: &Needs,
     thumb: &ThumbFn,
-    cache_dir: &Path,
+    cache_dir: Option<&Path>,
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<Groups> {
@@ -490,7 +492,7 @@ fn compute_with(
         return Ok(g);
     }
 
-    let metrics = MetricsCache::load(cache_dir);
+    let metrics = cache_dir.map_or_else(MetricsCache::in_memory, MetricsCache::load);
     let work = Work {
         files,
         metrics: &metrics,
@@ -1226,7 +1228,7 @@ path = "/nonexistent/olga"
             facts,
             &needs(cfg),
             thumb,
-            cache.path(),
+            Some(cache.path()),
             &NoProgress,
             &Cancel::new(),
         )
@@ -1413,7 +1415,7 @@ dir = "{out}/{{YYYY}}"
             &facts,
             &n,
             &no_thumbs,
-            cache.path(),
+            Some(cache.path()),
             &NoProgress,
             &Cancel::new(),
         )
@@ -1432,6 +1434,34 @@ dir = "{out}/{{YYYY}}"
         // Hashes are cached.
         let cached = std::fs::read_to_string(cache.path().join("metrics.json")).unwrap();
         assert!(cached.contains("blake3"));
+
+        // Without a cache dir: the same groups, nothing written anywhere
+        // (the thumbnail maker is never even asked for a folder).
+        let tools = crate::tools::Tools::discover().ok();
+        let before: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        let g2 = compute(
+            &cfg,
+            &files,
+            &facts,
+            &n,
+            tools.as_ref(),
+            None,
+            &NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!(g2.dup_original, g.dup_original);
+        assert_eq!(g2.dup_in_outputs, g.dup_in_outputs);
+        let after: Vec<_> = std::fs::read_dir(tmp.path())
+            .unwrap()
+            .flatten()
+            .map(|e| e.path())
+            .collect();
+        assert_eq!(before, after);
     }
 
     #[test]
@@ -1615,7 +1645,7 @@ match = "*.jpg"
             &facts,
             &n,
             &no_thumbs,
-            cache.path(),
+            Some(cache.path()),
             &NoProgress,
             &Cancel::new(),
         )
@@ -1635,7 +1665,7 @@ match = "*.jpg"
             &[],
             &needs(&cfg),
             &no_thumbs,
-            Path::new("/nonexistent"),
+            Some(Path::new("/nonexistent")),
             &NoProgress,
             &c,
         );
@@ -1754,7 +1784,7 @@ path = "/nonexistent/camera"
             &facts,
             &needs(&cfg),
             Some(&tools),
-            cache.path(),
+            Some(cache.path()),
             &NoProgress,
             &Cancel::new(),
         )

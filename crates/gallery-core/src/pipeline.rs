@@ -110,10 +110,11 @@ impl Classifier for Counting {
 }
 
 /// Scan and route like a scan with AI would (manual decisions and the
-/// targets before the AI ones first), then count the AI candidates and how
-/// many the cache at `cache_path` already answers. Reads only: no EXIF, no
-/// thumbnails, no API call, nothing written; so conditions on metadata or
-/// groups of files do not hold here and the count is an estimate for them.
+/// targets before the AI ones first, conditions on real metadata and
+/// groups), then count the AI candidates and how many the cache at
+/// `cache_path` already answers. EXIF is read only when some condition needs
+/// it; groups are computed as a scan does (their hashes and thumbnails are
+/// cached like a scan's). No API call.
 pub fn ai_dry_run(
     cfg: &Config,
     overrides: &Overrides,
@@ -126,8 +127,22 @@ pub fn ai_dry_run(
     }
     cancel.check()?;
     let files = scan::scan_sources_with(&cfg.sources, progress, cancel)?;
+    let needs = crate::filter::needs(cfg);
+    // Without the tools the metadata stays unknown: an estimate still.
+    let tools = if needs.exif_all || !needs.is_empty() {
+        Tools::discover().ok()
+    } else {
+        None
+    };
+    let exif = match &tools {
+        Some(t) if needs.exif_all => {
+            let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+            exif::read_with(t, &paths, progress, cancel)?
+        }
+        _ => Default::default(),
+    };
+    let ctx = RouteCtx::build(cfg, &files, &exif, tools.as_ref(), progress, cancel)?;
     let counting = Counting(RefCell::new(Vec::new()));
-    let ctx = RouteCtx::empty(&files);
     route_with_overrides(
         cfg, &files, &ctx, &counting, false, overrides, progress, cancel,
     )?;
@@ -553,5 +568,83 @@ dir = "{out}/rest"
         assert_eq!(at(&cam, "IMG_20260801_103000.jpg"), Some("together"));
         assert_eq!(at(&cam, "IMG_20260805_100000.jpg"), Some("rest"));
         assert_eq!(at(&olga, "IMG_20260801_100500.jpg"), Some("rest"));
+    }
+
+    #[test]
+    fn ai_dry_run_counts_files_gated_by_conditions() {
+        // EXIF dates written into real JPEGs; the file names carry none.
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("src");
+        std::fs::create_dir(&src).unwrap();
+        let t = tools();
+        for (n, when) in [
+            ("a.jpg", "2026:08:01 10:00:00"),
+            ("b.jpg", "2026:08:01 11:00:00"),
+            ("c.jpg", "2026:03:01 10:00:00"),
+        ] {
+            let p = src.join(n);
+            crate::filter::image_metrics::testing::save(
+                &crate::filter::image_metrics::testing::sharp(32),
+                &p,
+            );
+            let ok = std::process::Command::new(&t.exiftool)
+                .arg("-q")
+                .arg("-overwrite_original")
+                .arg(format!("-DateTimeOriginal={when}"))
+                .arg(&p)
+                .status()
+                .unwrap()
+                .success();
+            assert!(ok);
+        }
+        let toml = format!(
+            r#"
+[[sources]]
+id = "s"
+path = "{src}"
+
+[[targets]]
+name = "summer"
+[[targets.filters]]
+sources = ["s"]
+date = {{ months = [8] }}
+ai = "summer things"
+
+[[targets]]
+name = "outings"
+[[targets.filters]]
+sources = ["s"]
+event = {{ min_files = 2 }}
+ai = "outings"
+"#,
+            src = src.to_string_lossy().replace('\\', "/")
+        );
+        let path = dir.path().join("gallery.toml");
+        std::fs::write(&path, toml).unwrap();
+        let cfg = Config::load(&path).unwrap();
+        cfg.validate().unwrap();
+        let d = ai_dry_run(
+            &cfg,
+            &Overrides::default(),
+            &dir.path().join("cache.jsonl"),
+            &crate::progress::NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        // a and b (August, one outing of two); c is neither.
+        assert_eq!((d.candidates, d.to_send), (2, 2));
+
+        // The event alone gates it too.
+        let mut only_event = cfg.clone();
+        only_event.targets.remove(0);
+        let d = ai_dry_run(
+            &only_event,
+            &Overrides::default(),
+            &dir.path().join("cache.jsonl"),
+            &crate::progress::NoProgress,
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!(d.candidates, 2);
     }
 }
