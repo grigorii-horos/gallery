@@ -550,6 +550,7 @@
   "gui.internal_scan": "eroare internă la scanare: %{error}",
   "gui.internal_check": "eroare internă la verificare: %{error}",
   "gui.place_no_gps": "acest fișier nu conține o poziție GPS",
+  "gui.place_not_a_file": "nu este o cale absolută către un fișier: %{path}",
   "gui.no_config_dir": "nu există dosar de setări al utilizatorului",
   "desktop.linux_only": "intrarea din meniu și pornirea la autentificare există doar pe Linux; aici folosiți setările sistemului de operare",
   "current.no_files": "Planul nu are fișiere de rulat.",

@@ -550,6 +550,7 @@
   "gui.internal_scan": "erro interno de verificação: %{error}",
   "gui.internal_check": "erro interno de conferência: %{error}",
   "gui.place_no_gps": "este arquivo não tem posição GPS",
+  "gui.place_not_a_file": "não é um caminho absoluto para um arquivo: %{path}",
   "gui.no_config_dir": "sem diretório de configurações do usuário",
   "desktop.linux_only": "a entrada de menu e o início no login existem só no Linux; neste sistema use as configurações do sistema operacional",
   "current.no_files": "O plano não tem arquivos para executar.",
