@@ -6,7 +6,7 @@
 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use chrono::NaiveDateTime;
 use serde::{Deserialize, Serialize};
@@ -236,24 +236,29 @@ impl<'a> RouteCtx<'a> {
         progress: &dyn Progress,
         cancel: &Cancel,
     ) -> Result<RouteCtx<'a>> {
+        let cache = crate::paths::cache_dir();
+        Self::build_in(cfg, files, exif, tools, cache.as_deref(), progress, cancel)
+    }
+
+    /// [`RouteCtx::build`] with thumbnails, scores and hashes kept in
+    /// `cache` (`None`: computed without persisting anything).
+    pub(crate) fn build_in(
+        cfg: &Config,
+        files: &[FileEntry],
+        exif: &'a HashMap<PathBuf, Value>,
+        tools: Option<&Tools>,
+        cache: Option<&Path>,
+        progress: &dyn Progress,
+        cancel: &Cancel,
+    ) -> Result<RouteCtx<'a>> {
         let tz = plan_tz();
         let facts: Vec<Facts> = files
             .iter()
             .map(|e| facts_of(e, exif.get(&e.path).unwrap_or(&Value::Null), tz))
             .collect();
         let needs = crate::filter::needs(cfg);
-        // No cache dir: computed without persisting anything.
-        let cache = crate::paths::cache_dir();
-        let groups = crate::filter::compute(
-            cfg,
-            files,
-            &facts,
-            &needs,
-            tools,
-            cache.as_deref(),
-            progress,
-            cancel,
-        )?;
+        let groups =
+            crate::filter::compute(cfg, files, &facts, &needs, tools, cache, progress, cancel)?;
         Ok(RouteCtx {
             facts: Cow::Owned(facts),
             exif: Cow::Borrowed(exif),
@@ -474,6 +479,8 @@ struct Router<'a> {
     resolved: Vec<bool>,
     /// `(target, filter)` → files the event expansion matched.
     expanded: HashMap<(usize, usize), HashSet<usize>>,
+    /// `(target, filter)` → indices of the events seeded there.
+    seeded: HashMap<(usize, usize), HashSet<usize>>,
 }
 
 impl Router<'_> {
@@ -665,24 +672,29 @@ impl Router<'_> {
                 continue;
             };
             let mut set = HashSet::new();
-            // Events taken in whole already: another seed in one adds nothing.
-            let mut seeded = HashSet::new();
+            // Events seeded here, in this and any earlier settling: a file
+            // walking up later (a best shot held alone, then let go) joins
+            // an event its seed took before, as it would have at once.
+            let mut seeded = self.seeded.remove(&(t, k)).unwrap_or_default();
+            let events = self.ctx.groups.event_of.get(&key);
             for i in (0..self.files.len()).filter(|&i| waiting(i)) {
                 if !self.holds(f, i, &walks[i]) {
                     continue;
                 }
                 set.insert(i);
-                let Some(ev) = self.ctx.groups.event(&key, i) else {
-                    continue;
-                };
-                if !seeded.insert(std::ptr::from_ref(ev)) {
-                    continue;
+                if let Some(&e) = events.and_then(|m| m.get(&i)) {
+                    seeded.insert(e);
                 }
+            }
+            let all = self.ctx.groups.events.get(&key);
+            for ev in seeded.iter().filter_map(|&e| all.and_then(|v| v.get(e))) {
                 set.extend(ev.members.iter().copied().filter(|&m| {
                     waiting(m) && filter_fit(self.cfg, f, &self.files[m]) == Fit::Match
                 }));
             }
-            self.expanded.insert((t, k), set);
+            self.seeded.insert((t, k), seeded);
+            // Never replaced: files the earlier settling took stay taken.
+            self.expanded.entry((t, k)).or_default().extend(set);
         }
         self.resolved[t] = true;
     }
@@ -907,6 +919,7 @@ pub fn route_with_overrides(
             .map(|t| t.filters.iter().all(|f| f.expand.is_none()))
             .collect(),
         expanded: HashMap::new(),
+        seeded: HashMap::new(),
     };
     loop {
         walk(
@@ -2171,11 +2184,109 @@ sources = ["a"]
             file("a", "s3.jpg"),
         ];
         let ctx = series_ctx(&files);
-        // The mask takes no other shot: the best is not held alone.
+        // The mask takes no other shot, so the best would be held alone:
+        // it walks on to the next target instead.
         let r = route(&c, &files, &ctx, &Panics, false).unwrap();
         for d in &r {
             assert_eq!(d.1, target("All", Via::Mask), "{}", d.0.path.display());
         }
+    }
+
+    #[test]
+    fn a_lone_best_joins_an_event_another_shot_seeded_later_on() {
+        let c = toml_cfg(&format!(
+            r#"{SOURCES}
+[[targets]]
+name = "Retakes"
+kind = "trash"
+[[targets.filters]]
+sources = ["a"]
+match = "s2*"
+series = {{ keep = "best" }}
+
+[[targets]]
+name = "Trip"
+[[targets.filters]]
+sources = ["a"]
+path = "s1*"
+expand = "event"
+
+[[targets]]
+name = "All"
+[[targets.filters]]
+sources = ["a"]
+"#
+        ));
+        let files = [
+            file("a", "s1.jpg"),
+            file("a", "s2.jpg"),
+            file("a", "s3.jpg"),
+        ];
+        let mut ctx = series_ctx(&files);
+        let key = EventKey::of(&c.targets[1].filters[0]).unwrap();
+        let g = ctx.groups.to_mut();
+        g.events.insert(
+            key.clone(),
+            vec![crate::filter::Event {
+                members: vec![0, 1, 2],
+                start: Default::default(),
+                end: Default::default(),
+            }],
+        );
+        g.event_of.insert(key, (0..3).map(|i| (i, 0)).collect());
+        // s1 seeds the event; s2, let go by Retakes, joins it as s3 did.
+        let r = route(&c, &files, &ctx, &Panics, false).unwrap();
+        for d in &r {
+            assert_eq!(d.1, target("Trip", Via::Mask), "{}", d.0.path.display());
+        }
+    }
+
+    #[test]
+    fn a_lone_best_is_asked_by_the_ai_at_most_once() {
+        let c = toml_cfg(&format!(
+            r#"{SOURCES}
+[[targets]]
+name = "Docs"
+[[targets.filters]]
+sources = ["a"]
+ai = "documents"
+
+[[targets]]
+name = "Retakes"
+kind = "trash"
+[[targets.filters]]
+sources = ["a"]
+match = "s2*"
+series = {{ keep = "best" }}
+
+[[targets]]
+name = "Later"
+[[targets.filters]]
+sources = ["a"]
+ai = "later"
+"#
+        ));
+        let files = [
+            file("a", "s1.jpg"),
+            file("a", "s2.jpg"),
+            file("a", "s3.jpg"),
+        ];
+        let ctx = series_ctx(&files);
+        let ai = ByName::new(&[
+            ("s1.jpg", None),
+            ("s2.jpg", Some("Later")),
+            ("s3.jpg", None),
+        ]);
+        let r = route(&c, &files, &ctx, &ai, false).unwrap();
+        assert_eq!(r[1].1, ai_ok("Later"));
+        let asked = ai
+            .batches
+            .borrow()
+            .iter()
+            .flatten()
+            .filter(|q| q.entry.rel == Path::new("s2.jpg"))
+            .count();
+        assert_eq!(asked, 1);
     }
 
     #[test]
