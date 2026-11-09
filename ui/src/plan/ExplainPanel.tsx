@@ -137,11 +137,11 @@ export function ExplainView({ ex }: { ex: Explanation }) {
         <p>{scopeText(ex)}</p>
       </section>
 
-      {ex.stages.length > 0 && (
+      {ex.targets.length > 0 && (
         <section>
           <h3>{t("explain_targets")}</h3>
           <ol className="explain-targets">
-            {ex.stages.map((tg, i) => (
+            {ex.targets.map((tg, i) => (
               <li key={i} className={tg.taken ? "taken" : tg.candidate ? "cand" : "no"}>
                 <p>
                   <strong>{tg.name}</strong> {tg.ai && <span className="muted small">{t("stage_ai")}</span>}{" "}

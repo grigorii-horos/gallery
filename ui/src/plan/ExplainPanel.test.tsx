@@ -7,7 +7,7 @@ import { suggestFiles } from "./model";
 const base: Explanation = {
   path: "/media/cam/clip.mp4",
   scope: { kind: "scanned", source: "cam" },
-  stages: [],
+  targets: [],
   other_targets: [],
   ai: { kind: "no_candidates" },
   decision: { kind: "unmatched", target: null, via: null, detail: null },
@@ -22,7 +22,7 @@ describe("explain view", () => {
       <ExplainView
         ex={{
           ...base,
-          stages: [
+          targets: [
             {
               kind: "folders",
               ai: false,
@@ -143,7 +143,7 @@ describe("file search", () => {
 describe("explain view: first miss of a target", () => {
   const target = (miss: { condition: string; detail: string } | null) => ({
     ...base,
-    stages: [{ kind: "folders" as const, ai: false, name: "Together", candidate: false, taken: false, filters: [], miss }],
+    targets: [{ kind: "folders" as const, ai: false, name: "Together", candidate: false, taken: false, filters: [], miss }],
   });
 
   it("says which condition kept the file out", () => {

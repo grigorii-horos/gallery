@@ -381,7 +381,7 @@ export interface OutputCheck {
 export interface Explanation {
   path: string;
   scope: ExplainScope;
-  stages: TargetCheck[];
+  targets: TargetCheck[];
   /** Names of targets that do not list the file's source. */
   other_targets: string[];
   ai: ExplainAi;
