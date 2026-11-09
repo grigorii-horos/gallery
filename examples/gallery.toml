@@ -11,6 +11,7 @@ path = "~/Sync/Camera"
 ai_prefix_file = "ai/camera-prefix.md"
 ai_suffix_file = "ai/camera-suffix.md"
 
+# A second phone: its photos are neighbours of the camera's in `near` and `event`.
 [[sources]]
 id = "partner"
 path = "~/Sync/Partner-Photo"
@@ -27,6 +28,12 @@ jobs = 8
 # Language the model writes each answer's `reason` in: a name or a code
 # ("en", "ru", "Ukrainian"). Category names and descriptions are sent as written.
 language = "en"
+
+# Named points for the `geo` condition (`geo = "@home"`). Also edited in the
+# GUI under Settings. `km` is the radius.
+[places]
+home = { lat = 47.0245, lon = 28.8323, km = 2 }
+dacha = { lat = 46.98, lon = 28.70, km = 1 }
 
 # ---- presets ----
 
@@ -87,87 +94,161 @@ phone-media = ["@photo", "@video"]
 template = "tiktok_{date}_{stem}.{ext}"
 date = "file_created"
 
-# ---- stage 1: before AI ----
+# ---- targets ----
+#
+# One ordered list. Each file walks it from the top and the first target
+# whose filter matches takes the file; later targets never see it. A filter
+# is `sources` plus conditions, and all of its conditions must hold; a target
+# with several filters takes a file that any one of them matches. `kind` is
+# "folders" (default: place the file into `outputs`), "trash" (move it to the
+# trash, no outputs) or "keep" (take it and do nothing: protects it from the
+# targets below). Files no target takes stay where they are.
+
+# Copies of the same file. Exactly one copy of a group never matches, and a
+# scan never trashes the last copy of a group: if every copy would be trashed
+# one is held for review instead.
+[[targets]]
+name = "Duplicates"
+kind = "trash"
+
+[[targets.filters]]
+sources = ["camera", "partner"]
+duplicate = { of = ["sources", "outputs"] }
+
+# Burst shots and re-takes: near-identical frames seconds apart. Every shot
+# of a series but the sharpest matches, and a series match goes to review
+# first: you see the whole series, confirm (or change) the best shot, and
+# only then are the others trashed.
+[[targets]]
+name = "Blurry re-takes"
+kind = "trash"
+
+[[targets.filters]]
+sources = ["camera"]
+match = "@photo"
+series = { gap = "5s", similar = true, keep = "best", by = "sharpness" }
 
 # In-place sorting: the output folder is the source folder and no content
 # preset runs, so each file is moved into <year>/<month> of its own folder and
 # renamed by date (not copied, not trashed). The source is non-recursive, so
 # a moved file is not scanned again; a file already at its path is left alone
 # and not even planned; one without a date stays where it is.
-[[targets.before_ai]]
+[[targets]]
 name = "Screenshots"
 
-[[targets.before_ai.filters]]
+[[targets.filters]]
 sources = ["screenshots"]
 match = "*"
 
-[[targets.before_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Sync/Camera/Screenshots"
 rename = ["capture-date-dirs"]
 
 # Screenshots and screen recordings that land among camera photos: a
 # processed copy by year plus a byte-for-byte backup.
-[[targets.before_ai]]
+[[targets]]
 name = "Screenshots and screen recordings"
 
 # A list is OR: screenshots and screen recordings.
-[[targets.before_ai.filters]]
+[[targets.filters]]
 sources = ["camera", "partner"]
 match = ["@screenshot", "@screen-recording"]
 
-[[targets.before_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Media/Screenshots/{YYYY}"
 content = ["meta-full"]
 rename = ["capture-date"]
 
-[[targets.before_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Backup/Screenshots"
 
-[[targets.before_ai]]
+[[targets]]
 name = "TikTok"
 
-[[targets.before_ai.filters]]
+[[targets.filters]]
 sources = ["camera"]
 match = "@tiktok"
 
-[[targets.before_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Media/TikTok"
 rename = ["TikTok"]
 
-# ---- stage 2: AI ----
+# Keep: takes the file and leaves it where it is, so no target below touches
+# it. Here: camera photos shot at home between 22:00 and 05:00.
+[[targets]]
+name = "Night shots at home"
+kind = "keep"
 
-[[targets.ai]]
-name = "Documents"
+[[targets.filters]]
 sources = ["camera"]
-description = "Photos of documents: passports, contracts, forms, printed pages."
+geo = "@home"
+date = { time = "22:00..05:00" }
 
-[targets.ai.prefilter]
+# Photos taken together. Each filter takes a file of its source when the
+# other phone shot something within 2 hours and 1 km (a file without GPS is
+# compared by time alone), and `expand = "event"` then takes every file of
+# the same event, also frames where the other person is not around. An event
+# is a run of camera and partner files with no gap over 4 hours. Both phones
+# put their files into one shared folder.
+[[targets]]
+name = "Together"
+
+[[targets.filters]]
+sources = ["camera"]
+match = "@phone-media"
+near = { sources = ["partner"], time = "2h", km = 1 }
+expand = "event"
+event = { sources = ["camera", "partner"], gap = "4h" }
+
+[[targets.filters]]
+sources = ["partner"]
+match = "@phone-media"
+near = { sources = ["camera"], time = "2h", km = 1 }
+expand = "event"
+event = { sources = ["camera", "partner"], gap = "4h" }
+
+[[targets.outputs]]
+dir = "~/Sync/Shared/{YYYY}"
+rename = ["capture-date"]
+
+# ---- AI targets ----
+#
+# `ai` is a condition like any other: a file reaches the AI only when it gets
+# to this filter in list order and its other conditions hold. The category is
+# the target name; the model picks one category or none.
+
+[[targets]]
+name = "Documents"
+
+[[targets.filters]]
+sources = ["camera"]
 match = "@photo"
+ai = "Photos of documents: passports, contracts, forms, printed pages."
 
-[[targets.ai.outputs]]
+[[targets.outputs]]
 dir = "~/Documents/Scans"
 rename = ["capture-date"]
 
-[[targets.ai]]
+[[targets]]
 name = "Receipts"
+
+[[targets.filters]]
 sources = ["camera"]
-description = "Photos of receipts, invoices and price tags."
-
-[targets.ai.prefilter]
 match = "@photo"
+ai = "Photos of receipts, invoices and price tags."
 
-[[targets.ai.outputs]]
+[[targets.outputs]]
 dir = "~/Documents/Receipts"
 rename = ["capture-date"]
 
-# ---- stage 3: after AI ----
+# ---- everything else ----
 
-[[targets.after_ai]]
+[[targets]]
 name = "Timeline"
 
 # Only photos and videos (@phone-media) are taken: PNG, RAW and audio files
 # stay where they are.
-[[targets.after_ai.filters]]
+[[targets.filters]]
 sources = ["camera", "partner"]
 match = "@phone-media"
 
@@ -176,11 +257,11 @@ match = "@phone-media"
 # preset name uses the preset's own mask (`gallery presets` shows it: photos
 # for avif-*, videos for av1-*, everything for meta-* and name presets); write
 # `{ mask = "*.png", preset = "avif-high" }` to override it.
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Media/Timeline/{YYYY}/{MM}"
 content = ["meta-full", "compress-all"]
 rename = ["capture-date"]
 
 # Backup: byte-for-byte copy.
-[[targets.after_ai.outputs]]
+[[targets.outputs]]
 dir = "~/Backup/Timeline/{YYYY}/{MM}"

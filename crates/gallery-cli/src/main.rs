@@ -28,7 +28,7 @@ use gallery_core::{Error, Result, undo};
     disable_help_subcommand = true,
     disable_version_flag = true,
     long_about = "Media organizer. Files from the config's sources are sorted into targets \
-(masks, then AI, then masks), land in a plan and are processed only after that.\n\n\
+(in list order; the AI is one more condition), land in a plan and are processed only after that.\n\n\
 Workflow: `gallery scan -c gallery.toml -o plan.json`, review the summary and the plan, \
 `gallery apply plan.json`; `gallery undo plan.report.json` undoes a run.\n\n\
 Working through a server: `scan --server` builds a plan with server paths; the plan is copied to \
@@ -83,9 +83,15 @@ enum Cmd {
     #[command(
         long_about = "Shows the external tools (ffmpeg, ffprobe, exiftool, avifenc, magick, \
 optipng), their versions and ffmpeg's capabilities. Exit code 1 if a required \
-tool or capability is missing. Tools are looked up in GALLERY_TOOLS_DIR, then in PATH."
+tool or capability is missing. Tools are looked up in GALLERY_TOOLS_DIR, then in PATH. \
+With --config the config file is loaded and validated first (a one-line notice if it \
+still uses the old before_ai / ai / after_ai shape); an invalid config is an error."
     )]
-    Check,
+    Check {
+        /// Also load and validate this config file (TOML)
+        #[arg(short, long)]
+        config: Option<PathBuf>,
+    },
     /// Scan the sources and write a plan
     #[command(
         long_about = "Scans the sources, reads EXIF, sorts files into targets and writes the \
@@ -109,7 +115,7 @@ review unless --accept-low is given."
         /// Accept unsure AI answers
         #[arg(long)]
         accept_low: bool,
-        /// Skip the AI stage; files go to after_ai
+        /// Skip the AI: no `ai` condition holds, files go on to the later targets
         #[arg(long)]
         no_ai: bool,
         /// Manual decisions file (default ~/.local/share/gallery/overrides.json, if present)
@@ -173,7 +179,7 @@ one-line verdict with a hint. Changes nothing and never calls the AI: a cached a
     #[command(
         long_about = "Groups the plan's unmatched files by source, folder and extension and \
 prints for each group the file count, size and reason (as `explain` does). Without --plan \
-the plan is built on the fly without AI and EXIF: enough for the unmatched list. Changes \
+the plan is built on the fly without AI, but with the metadata and groups a scan reads, so conditions on dates, places, duplicates and so on hold. Changes \
 nothing."
     )]
     Unmatched {
@@ -478,7 +484,7 @@ fn cancel_on_ctrl_c(read_only: bool) -> Cancel {
 
 fn run(cmd: Cmd) -> Result<u8> {
     match cmd {
-        Cmd::Check => check(),
+        Cmd::Check { config } => check(config.as_deref()),
         Cmd::Scan {
             config,
             output,
@@ -550,11 +556,19 @@ fn pending_text(p: &gallery_core::pending::Pending) -> String {
     out
 }
 
+/// The one-line notice for a config in the old three-stage shape.
+fn old_shape_notice(config: &Path) -> String {
+    gallery_core::t!("config.old_shape", path = config.display())
+}
+
 /// The config with the user's AI examples attached: every command that asks
 /// the AI or reads its cached answers needs them, as they are part of the
 /// prompt and so of the cache key.
 fn load_config(config: &Path) -> Result<Config> {
     let mut cfg = Config::load(config)?;
+    if cfg.was_staged {
+        eprintln!("{}", old_shape_notice(config));
+    }
     if let Some(p) = gallery_core::learn::Store::default_path() {
         cfg.attach_examples(&gallery_core::learn::Store::new(p));
     }
@@ -720,7 +734,23 @@ fn presets_text() -> String {
     out
 }
 
-fn check() -> Result<u8> {
+fn check(config: Option<&Path>) -> Result<u8> {
+    if let Some(config) = config {
+        let cfg = Config::load(config)?;
+        cfg.validate()?;
+        if cfg.was_staged {
+            println!("{}", old_shape_notice(config));
+        }
+        println!(
+            "{}",
+            gallery_core::t!(
+                "cli.check_config_ok",
+                path = config.display(),
+                sources = cfg.sources.len(),
+                targets = cfg.targets.len()
+            )
+        );
+    }
     let mut ok = true;
     for name in [
         "ffmpeg", "ffprobe", "exiftool", "avifenc", "magick", "optipng",
@@ -819,19 +849,32 @@ fn unmatched_cmd(config: &Path, plan: Option<&Path>, overrides: Option<&Path>) -
         None => {
             let o = overrides_for_scan(overrides, Overrides::default_path())?;
             let files = gallery_core::scan::scan_sources(&cfg.sources)?;
-            // TODO(T7): no metadata is read here, so conditions on it do
-            // not hold; a scan's plan (`--plan`) has the real decisions.
+            // Facts and groups as a scan reads them (no AI: its targets take
+            // nothing here, as in a scan without an answer).
+            let cancel = Cancel::new();
+            let needs = gallery_core::filter::needs(&cfg);
+            let tools = Tools::discover().ok();
+            let exif = match &tools {
+                Some(t) if needs.exif_all => {
+                    let paths: Vec<PathBuf> = files.iter().map(|f| f.path.clone()).collect();
+                    gallery_core::exif::read_with(t, &paths, &NoProgress, &cancel)?
+                }
+                _ => HashMap::new(),
+            };
+            let ctx = RouteCtx::build(&cfg, &files, &exif, tools.as_ref(), &NoProgress, &cancel)?;
             let routed = route_with_overrides(
                 &cfg,
                 &files,
-                &RouteCtx::empty(&files),
+                &ctx,
                 &pipeline::NoAi,
                 false,
                 &o,
                 &NoProgress,
-                &Cancel::new(),
+                &cancel,
             )?;
-            build_plan(&cfg, routed.decisions, &HashMap::new(), Side::Local)?
+            let mut plan = build_plan(&cfg, routed.decisions, &exif, Side::Local)?;
+            gallery_core::plan::guard_last_copies(&mut plan, &ctx.groups, &files);
+            plan
         }
     };
     let groups = group_unmatched(&plan, &cfg);

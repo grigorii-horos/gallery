@@ -21,13 +21,15 @@ use crate::mask::{ItemCheck, MaskCheck, MaskExpr};
 use crate::media::{kind_of, split_name};
 use crate::name::{NameCtx, NameSkip, name_skip};
 use crate::overrides::Overrides;
-use crate::plan::{OutputOp, Plan, Side, build_plan, local_zone, run_content_pipe};
+use crate::plan::{
+    OutputOp, Plan, Side, build_plan_with, guard_last_copies, local_zone, run_content_pipe,
+};
 use crate::progress::{Cancel, NoProgress};
 use crate::route::{
     AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, RouteCtx, Via, filter_fit,
-    route_with_overrides,
+    first_miss, route_with_overrides,
 };
-use crate::scan::{FileEntry, Rejection, mtime_ns, rejection};
+use crate::scan::{FileEntry, Rejection, mtime_ns, rejection, scan_sources_with};
 use crate::tools::Tools;
 
 /// Inputs of [`explain`] besides the config and the file.
@@ -95,6 +97,17 @@ pub struct TargetCheck {
     pub candidate: bool,
     /// The decision names this target.
     pub taken: bool,
+    /// Why no filter of the target takes the file (the first miss, e.g.
+    /// "near: no partner file within 2h / 1 km"); absent when one does.
+    pub miss: Option<TargetMiss>,
+}
+
+/// The condition of a filter the file fails, and why.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TargetMiss {
+    /// `sources`, `match`, `exclude`, `date`, `near`, ...
+    pub condition: String,
+    pub detail: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -196,7 +209,8 @@ pub struct Explanation {
 struct CachedAi {
     model: String,
     cache: Cache,
-    seen: RefCell<Vec<Option<AiAnswer>>>,
+    /// Per asked file: its path and the cached answer, if any.
+    seen: RefCell<Vec<(PathBuf, Option<AiAnswer>)>>,
 }
 
 impl Classifier for CachedAi {
@@ -210,7 +224,9 @@ impl Classifier for CachedAi {
                     .cache
                     .get(&key)
                     .and_then(|s| to_answer(s, &r.categories).ok());
-                self.seen.borrow_mut().push(hit.clone());
+                self.seen
+                    .borrow_mut()
+                    .push((r.entry.path.clone(), hit.clone()));
                 hit.unwrap_or(AiAnswer {
                     category: None,
                     reason: String::new(),
@@ -284,6 +300,7 @@ fn stages(cfg: &Config, e: &FileEntry) -> Vec<TargetCheck> {
                 candidate: filters.iter().any(|f| f.fit == Fit::Match),
                 filters,
                 taken: false,
+                miss: None,
             }
         })
         .collect()
@@ -531,25 +548,54 @@ pub fn explain(
         cache: cache_path.map_or_else(|| Cache::load(Path::new("")), |p| Cache::load(&p)),
         seen: RefCell::new(Vec::new()),
     };
-    // TODO(T7): groups (events, neighbours, duplicates, series) are not
-    // computed for one file, so their conditions do not hold here.
+    // The scan this file belongs to. Group conditions (events, neighbours,
+    // duplicates, series) look at every file, so such a config scans all the
+    // sources as a real scan does; otherwise the file alone is enough.
+    let needs = crate::filter::needs(cfg);
+    let cancel = Cancel::new();
+    let mut files = if needs.is_empty() {
+        Vec::new()
+    } else {
+        scan_sources_with(&cfg.sources, &NoProgress, &cancel)?
+    };
+    let idx = match files
+        .iter()
+        .position(|f| f.path == entry.path && f.source_id == entry.source_id)
+    {
+        Some(i) => i,
+        None => {
+            files.push(entry.clone());
+            files.len() - 1
+        }
+    };
     let exif: HashMap<PathBuf, Value> = match opts.tools {
-        Some(t) => crate::exif::read(t, std::slice::from_ref(&entry.path)).unwrap_or_default(),
+        Some(t) => {
+            let paths: Vec<PathBuf> = if needs.exif_all {
+                files.iter().map(|f| f.path.clone()).collect()
+            } else {
+                vec![entry.path.clone()]
+            };
+            crate::exif::read_with(t, &paths, &NoProgress, &cancel).unwrap_or_default()
+        }
         None => HashMap::new(),
     };
-    let route_ctx = RouteCtx::without_groups(std::slice::from_ref(&entry), &exif);
+    let route_ctx = RouteCtx::build(cfg, &files, &exif, opts.tools, &NoProgress, &cancel)?;
     let routed = route_with_overrides(
         cfg,
-        std::slice::from_ref(&entry),
+        &files,
         &route_ctx,
         &ai,
         false,
         overrides,
         &NoProgress,
-        &Cancel::new(),
+        &cancel,
     )?;
-    let decision = routed.decisions.into_iter().next().map(|(_, d)| d);
-    let decision = decision.expect("one file routed gives one decision");
+    let decision = routed
+        .decisions
+        .iter()
+        .find(|(e, _)| e.path == entry.path && e.source_id == entry.source_id)
+        .map(|(_, d)| d.clone());
+    let decision = decision.expect("a routed file gives one decision");
 
     let mut stages = stages(cfg, &entry);
     let candidates: Vec<String> = stages
@@ -561,7 +607,7 @@ pub fn explain(
     let ai_state = if candidates.is_empty() {
         AiState::NoCandidates
     } else {
-        match seen.first() {
+        match seen.iter().find(|(p, _)| *p == entry.path).map(|(_, a)| a) {
             None => AiState::NotReached { candidates },
             Some(None) => AiState::NotAsked { candidates },
             Some(Some(a)) => AiState::Cached {
@@ -599,6 +645,16 @@ pub fn explain(
             c.taken = true;
         }
     }
+    // Per target: the first condition the file fails (what the real walk
+    // saw, groups included).
+    for (c, t) in stages.iter_mut().zip(&cfg.targets) {
+        if !c.taken {
+            c.miss = first_miss(cfg, t, &entry, idx, &route_ctx).map(|m| TargetMiss {
+                condition: m.condition.to_string(),
+                detail: m.detail,
+            });
+        }
+    }
 
     // Targets for other sources are noise: name them once.
     let mut other_targets = Vec::new();
@@ -616,14 +672,18 @@ pub fn explain(
         .collect();
     stages.shrink_to_fit();
 
-    // Plan this one file as a scan would.
+    // Plan as a scan does (the last copy of a duplicate group or a series is
+    // held back from the trash), then read this file's part of it.
     let file_name = file_name_of(&entry.path).to_string();
-    let plan: Plan = build_plan(
+    let mut plan: Plan = build_plan_with(
         cfg,
-        vec![(entry.clone(), decision.clone())],
+        routed.decisions.clone(),
         &exif,
         Side::Local,
+        &NoProgress,
+        &cancel,
     )?;
+    guard_last_copies(&mut plan, &route_ctx.groups, &files);
     let zone = local_zone();
     let tz = zone
         .as_deref()
@@ -639,19 +699,19 @@ pub fn explain(
         created: file_created(&entry.path),
         source_id,
     };
-    let item = plan.items.first();
+    let item = plan.items.iter().find(|it| it.source == entry.path);
     let (outcome, outputs) = if item.is_some_and(|it| it.kind == TargetKind::Trash) {
         (Outcome::Trash, Vec::new())
-    } else if !plan.kept.is_empty() {
+    } else if plan.kept.iter().any(|k| k.source == entry.path) {
         (Outcome::Kept, Vec::new())
     } else if let Some(it) = item {
         (
             Outcome::Process,
             output_checks(cfg, &it.target, &it.outputs, &file_name, &ctx),
         )
-    } else if !plan.review.is_empty() {
+    } else if plan.review.iter().any(|r| r.source == entry.path) {
         (Outcome::Review, Vec::new())
-    } else if !plan.unmatched.is_empty() {
+    } else if plan.unmatched.contains(&entry.path) {
         (Outcome::Unmatched, Vec::new())
     } else {
         (Outcome::Unchanged, Vec::new())
@@ -920,6 +980,14 @@ fn verdict(
     let name = file_name_of(&entry.path);
     let d = ex.decision.as_ref().expect("scanned file has a decision");
     let target = d.target.clone().unwrap_or_default();
+    if let Some(it) = plan.review.iter().find(|r| r.source == entry.path) {
+        if it.series.is_some() {
+            return crate::t!("explain.series_held", target = target);
+        }
+        if d.kind == DecisionKind::Target {
+            return crate::t!("explain.last_copy_held", target = target);
+        }
+    }
     match d.kind {
         DecisionKind::Kept => {
             return crate::t!("explain.kept");
@@ -1069,6 +1137,17 @@ impl Explanation {
                 t.name.clone()
             };
             let _ = writeln!(o, "│  ├─ {name} — {mark}");
+            if let Some(m) = &t.miss {
+                let _ = writeln!(
+                    o,
+                    "│  │  ├─ {}",
+                    crate::t!(
+                        "explain.tree.miss",
+                        condition = m.condition,
+                        detail = m.detail
+                    )
+                );
+            }
             for f in &t.filters {
                 let _ = writeln!(o, "│  │  ├─ {}", filter_text(f));
                 for m in [&f.matches, &f.exclude].into_iter().flatten() {

@@ -1,0 +1,186 @@
+# Fixture: the old three-stage shape (targets.before_ai / ai / after_ai), the migration and GUI round-trip tests read it.
+
+# ai_prefix / ai_suffix frame the AI category list in the system prompt for
+# this source's files: the prefix goes before the list, the suffix after it
+# and before the answer format. Each is inline text (ai_prefix = """...""")
+# or a file (not both), relative to this config, `~` expanded; changing them
+# re-asks the AI for the source's files.
+[[sources]]
+id = "camera"
+path = "~/Sync/Camera"
+ai_prefix_file = "../../../../examples/ai/camera-prefix.md"
+ai_suffix_file = "../../../../examples/ai/camera-suffix.md"
+
+[[sources]]
+id = "partner"
+path = "~/Sync/Partner-Photo"
+
+# Screenshots stay in their own folder: they are only renamed there.
+[[sources]]
+id = "screenshots"
+path = "~/Sync/Camera/Screenshots"
+
+[ai]
+model = "claude-sonnet-5-5"
+effort = "low"
+jobs = 8
+# Language the model writes each answer's `reason` in: a name or a code
+# ("en", "ru", "Ukrainian"). Category names and descriptions are sent as written.
+language = "en"
+
+# ---- presets ----
+
+# Built-in presets need no definition here: "capture-date", "file-date",
+# "capture-date-dirs", "capture-date-name", "ext-lower" (name) and "meta-full",
+# "meta-dates", "avif-high", "av1-high", ... (content); `gallery presets`
+# lists them. A preset of your own must have another name: redefining a
+# built-in one is an error. A preset may carry a default `mask = "..."`;
+# without one it gets the default of its kind:
+#   photo presets (avif-*, webp-*)  @photo-original = jpg jpeg heic heif
+#   video presets (av1-*)           @video-original = mp4 m4v mov mkv, not *.av1.mp4
+#   audio presets (opus-*, ...)     @audio = mp3 m4a aac flac wav ogg opus wma ape alac
+#   png-optipng                     @png = png
+#   meta-*, name presets            *
+#
+# A bundle is one name for an ordered list of presets, each on its own mask:
+# "compress-all" = avif-high, png-avif, webp-avif, av1-high (every file type
+# gets exactly one encoder), "compress-photos" (the first three) and
+# "compress-fast". Make your own:
+#   [content_presets.my-pack]
+#   kind = "bundle"
+#   steps = ["avif-high", { mask = "*.png", preset = "png-avif" }]
+# A bundle has no mask of its own; a step that uses a bundle takes no mask.
+#
+# Masks are written as `*.{jpg,png}` globs or `^regex`. `@name` refers to a
+# named mask; an item starting with `!` excludes (`["*.mp4", "!*.av1.mp4"]`,
+# `"!@raw"`): a name must match one plain item and no `!` item, and a list of
+# only `!` items means "everything except". Any mask slot (filter `match`,
+# `exclude`, a step's `mask`, a preset's `mask`) also takes a list, which means OR: ["@photo", "@video"].
+# Built-in masks (`gallery presets` prints them):
+#   @photo          jpg jpeg heic heif webp avif tif tiff bmp gif
+#   @photo-original jpg jpeg heic heif
+#   @video          mp4 m4v mov mkv webm avi 3gp
+#   @video-original mp4 m4v mov mkv, not *.av1.mp4
+#   @raw            cr2 cr3 nef arw dng raf orf rw2
+#   @audio          mp3 m4a aac flac wav ogg opus wma ape alac
+#   @png            png
+#   @media          @photo + @video + @png
+# Built-in name patterns:
+#   @screenshot       *screenshot*.{png,jpg,jpeg,webp}, "Знімок екрана*", "Снимок экрана*"
+#   @screen-recording screen-*, *screenrecord*, *screen_record*, *screencast*  (mp4 webm mkv mov)
+#   @tiktok           32 hex digits [_n] .mp4 .png .webp .jpg .jpeg
+#   @dated            already named YYYYMMDD_HHMMSS...
+#   @whatsapp         IMG|VID|AUD|PTT-YYYYMMDD-WA<n>
+#   @epoch-name       13 or 10 digit epoch timestamp names
+#   @camera-phone     IMG|VID|PXL|MVIMG_YYYYMMDD_HHMMSS
+#   @edited           names with -edited or _edited
+#   @copy             duplicate markers: (1) (2) (3) _copy -copy "- copy"
+# Your own masks go to [masks]; a name taken by a built-in one is an error.
+[masks]
+phone-media = ["@photo", "@video"]
+
+# A name template may hold `/`: the parts before the last one are folders
+# below the output directory, the last one is the file name (see the
+# built-in "capture-date-dirs": year/month). Add a skip_if only to a template
+# without `/`.
+[name_presets."TikTok"]
+template = "tiktok_{date}_{stem}.{ext}"
+date = "file_created"
+
+# ---- stage 1: before AI ----
+
+# In-place sorting: the output folder is the source folder and no content
+# preset runs, so each file is moved into <year>/<month> of its own folder and
+# renamed by date (not copied, not trashed). The source is non-recursive, so
+# a moved file is not scanned again; a file already at its path is left alone
+# and not even planned; one without a date stays where it is.
+[[targets.before_ai]]
+name = "Screenshots"
+
+[[targets.before_ai.filters]]
+sources = ["screenshots"]
+match = "*"
+
+[[targets.before_ai.outputs]]
+dir = "~/Sync/Camera/Screenshots"
+rename = ["capture-date-dirs"]
+
+# Screenshots and screen recordings that land among camera photos: a
+# processed copy by year plus a byte-for-byte backup.
+[[targets.before_ai]]
+name = "Screenshots and screen recordings"
+
+# A list is OR: screenshots and screen recordings.
+[[targets.before_ai.filters]]
+sources = ["camera", "partner"]
+match = ["@screenshot", "@screen-recording"]
+
+[[targets.before_ai.outputs]]
+dir = "~/Media/Screenshots/{YYYY}"
+content = ["meta-full"]
+rename = ["capture-date"]
+
+[[targets.before_ai.outputs]]
+dir = "~/Backup/Screenshots"
+
+[[targets.before_ai]]
+name = "TikTok"
+
+[[targets.before_ai.filters]]
+sources = ["camera"]
+match = "@tiktok"
+
+[[targets.before_ai.outputs]]
+dir = "~/Media/TikTok"
+rename = ["TikTok"]
+
+# ---- stage 2: AI ----
+
+[[targets.ai]]
+name = "Documents"
+sources = ["camera"]
+description = "Photos of documents: passports, contracts, forms, printed pages."
+
+[targets.ai.prefilter]
+match = "@photo"
+
+[[targets.ai.outputs]]
+dir = "~/Documents/Scans"
+rename = ["capture-date"]
+
+[[targets.ai]]
+name = "Receipts"
+sources = ["camera"]
+description = "Photos of receipts, invoices and price tags."
+
+[targets.ai.prefilter]
+match = "@photo"
+
+[[targets.ai.outputs]]
+dir = "~/Documents/Receipts"
+rename = ["capture-date"]
+
+# ---- stage 3: after AI ----
+
+[[targets.after_ai]]
+name = "Timeline"
+
+# Only photos and videos (@phone-media) are taken: PNG, RAW and audio files
+# stay where they are.
+[[targets.after_ai.filters]]
+sources = ["camera", "partner"]
+match = "@phone-media"
+
+# Processed copy: metadata, then compress-all (AVIF for photos, PNG and WebP,
+# AV1 for videos; the filter above only lets photos and videos in). A bare
+# preset name uses the preset's own mask (`gallery presets` shows it: photos
+# for avif-*, videos for av1-*, everything for meta-* and name presets); write
+# `{ mask = "*.png", preset = "avif-high" }` to override it.
+[[targets.after_ai.outputs]]
+dir = "~/Media/Timeline/{YYYY}/{MM}"
+content = ["meta-full", "compress-all"]
+rename = ["capture-date"]
+
+# Backup: byte-for-byte copy.
+[[targets.after_ai.outputs]]
+dir = "~/Backup/Timeline/{YYYY}/{MM}"

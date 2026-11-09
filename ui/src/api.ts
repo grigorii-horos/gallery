@@ -327,6 +327,8 @@ export interface TargetCheck {
   filters: FilterCheck[];
   candidate: boolean;
   taken: boolean;
+  /** Why no filter takes the file (first miss); absent when one does. */
+  miss?: { condition: string; detail: string } | null;
 }
 
 export interface ExplainDecision {

@@ -7,7 +7,7 @@ Rust core, so they share plans, reports, history, locks and caches.
 
 | Path | What it is |
 |---|---|
-| `crates/gallery-core` | Everything that matters: config, masks, scanning, routing, the AI client, plan building, apply, verify, undo, explain, estimates, Syncthing pause, triage, learning. No UI. |
+| `crates/gallery-core` | Everything that matters: config, masks, scanning, conditions (`filter`), routing, the AI client, plan building, apply, verify, undo, explain, estimates, Syncthing pause, triage, learning. No UI. |
 | `crates/gallery-cli` | The `gallery` binary (clap): `check`, `scan`, `apply`, `undo`, `explain`, … See [cli.md](cli.md). |
 | `crates/gallery-gui` | The Tauri v2 app (`gallery-gui`): Rust commands that call the core, a background "pending" watcher, the tray, notifications, the single-instance guard. |
 | `ui/` | The React + TypeScript front end (Vite, Vitest). Talks to the Rust side only through Tauri commands and events. |
@@ -18,37 +18,93 @@ External tools do the media work and are found in `GALLERY_TOOLS_DIR`, then `PAT
 ## Data flow
 
 ```
-sources ──scan──▶ file list ──EXIF──▶ route ──▶ plan ──▶ apply ──▶ report ──▶ undo
-                                       │          │         │
-                       before_ai masks │          │         ├─ stage outputs (.gallery-tmp-*)
-                       AI (cached)     │          │         ├─ verify each result against its source
-                       after_ai masks  │          │         ├─ place outputs (never overwrite)
-                       manual decisions┘          │         └─ move the source to the trash
-                                      plan.json: items, review, unmatched, warnings
+sources ──scan──▶ file list ──EXIF──▶ groups ──▶ route ──▶ plan ──▶ apply ──▶ report ──▶ undo
+                  (frozen)    facts    events      │          │         │
+                                       near        │          │         ├─ stage outputs (.gallery-tmp-*)
+                       manual decisions first      │          │         ├─ verify each result against its source
+                       targets walked in order     │          │         ├─ place outputs (never overwrite)
+                       AI: pause, ask once, resume │          │         └─ move the source to the trash
+                                                   ┘   plan.json: items (folders / trash), kept, review,
+                                                       unmatched, warnings; last-copy guard
 ```
 
-1. **Scan.** Walk each source (`recursive`, `skip`), collecting path, size, mtime. EXIF is read in
-   batches with `exiftool`.
-2. **Route.** Three first-match-wins stages: `before_ai` name masks, then one Claude request per
-   still-unrouted file that fits an AI target (a 512 px preview, or 3 frames for video), then
-   `after_ai` masks. Answers come from the cache when the same file (path, size, mtime), model and
-   prompt were seen before. Unsure answers become *review* items; your manual decisions override
-   everything. Nothing is written.
-3. **Plan.** Routing results become a JSON plan: for each file its target, how it was decided, and
+1. **Scan.** Walk each source (`recursive`, `skip`), collecting path, size, mtime. The list is
+   *frozen* for the run. EXIF is read in batches with `exiftool` when some condition needs it, and
+   cached by path, size and mtime.
+2. **Facts and groups.** From the metadata `filter::facts` builds per-file facts (capture date in
+   the plan's time zone, GPS, device, properties). `filter::groups` then computes, only for the
+   conditions the config uses and on the whole frozen list: *events* (files of some sources sorted
+   by capture time, split by a gap or a jump in place), *neighbours* for `near` (per-source time
+   index, a time window search), *duplicate groups* (size, then a hash; the original is chosen by
+   source order, capture date, path; hashes and also the output folders' files are cached), and
+   *series* (consecutive shots of one source within a gap and visually similar by a perceptual hash
+   of a thumbnail; the best shot by sharpness, size or resolution). Sharpness (variance of the
+   Laplacian on a downscaled decode) and hashes are cached in the user cache dir. All of this is
+   independent of the routing order.
+3. **Route.** Manual decisions apply first. Then every file walks `[[targets]]` top-down: the first
+   target with a filter that matches (all the filter's conditions hold, `first_miss` reports the
+   first one that does not) takes it, and later targets never see it. A `keep` target takes it and
+   does nothing; a `trash` target marks it for the trash; a `folders` target plans its outputs.
+   `expand = "event"` filters are barriers (below). Nothing is written.
+
+   **The AI is a condition, walked in strict order with pause/resume.** A file walks until it
+   reaches a target whose matching filter has `ai`. It then pauses. All paused files are collected
+   and one batch of requests is sent (a 512 px preview, or 3 frames for video, per file), each
+   with every AI category the file can still reach: the AI filters of this and later targets whose
+   non-AI conditions hold for it. Requests are grouped by identical category set; answers come from
+   the cache when the same file (path, size, mtime), model, prompt and category set were seen
+   before. Then each file resumes its walk: an `ai` condition holds only for the category the model
+   chose, and a non-AI target between two AI targets still gets the file first if it matches. This
+   gives the same result as a plain strict walk. An unsure answer becomes a *review* item where the
+   file would be taken through it.
+
+   **`expand`.** A target with an `expand = "event"` filter resolves only when every undecided file
+   stands at it. The seeds are undecided files for which the filter's other conditions hold, and
+   the filter then also takes every undecided file of their events that is in its `sources`
+   (still subject to `match` / `exclude`).
+
+   **Series review.** A file matched through `series` is not sent to the target: it is held for
+   review together with its series and a suggested best shot (`ReviewItem.series`). The user's
+   confirmation is a manual decision per series, after which the others go to the target.
+4. **Plan.** Routing results become a JSON plan: for each file its target, how it was decided, and
    for each output the content steps (bundles expanded), the final name and folder (capture date
-   from EXIF or the file name), plus the review list, unmatched files, warnings and the "unchanged"
-   list. The plan also embeds the content presets it uses, so a server can apply it **without the
+   from EXIF or the file name), plus the review list, unmatched files, warnings, the "unchanged"
+   list and the files a `keep` target holds (`kept`). A file a `trash` target takes is an item of
+   kind `trash` with no outputs. Then the **last-copy guard** runs (below). The plan also embeds the content presets it uses, so a server can apply it **without the
    config**. A plan built with `--server` uses `server_path` / `server_dir`.
-4. **Apply.** For each item, in parallel: run the content pipe on a staged copy, verify it (below),
+5. **Apply.** For each item, in parallel: run the content pipe on a staged copy, verify it (below),
    link/rename it into place without overwriting, and only after *all* outputs are in place move
    the source to the trash (or, for in-place targets, rename/move it within its source root).
+   `trash` items are moved to the trash after all placements, with the same journal, and undo
+   restores them.
    Every finished item is appended to a journal; the report is refreshed as the run goes.
-5. **Undo.** From the report: restore sources from the trash, then remove the outputs this run
+6. **Undo.** From the report: restore sources from the trash, then remove the outputs this run
    created, refusing to overwrite or delete anything that was changed since.
 
 A *pilot* is a normal apply of a sub-plan (up to N files per target, different extensions
 preferred); the remaining files are a second plan. **Retry failed** builds a plan of the failed
 files of a report, after removing the partial outputs they left.
+
+### Plan versions
+
+`Plan.version` is the lowest format the plan needs. A plan with only `folders` items is **version 1**
+and has exactly the shape it had before targets could be `trash` or `keep` (no `kind` on items, no
+`kept`), so an older `gallery apply` still runs it. A plan with a `trash` item (`PlanItem.kind =
+"trash"`) or a kept file (`Plan.kept`) is **version 2**. `Plan::load` accepts 1 and 2; a newer
+version is refused before anything is touched with an "update gallery on the server" message, so a
+server running an older binary never applies a plan it does not understand. Plan identity (the
+`plan_id` and a pilot's slice id) is a hash of the saved bytes, so it follows the version.
+
+### The last-copy guard
+
+After routing, `guard_last_copies(plan, groups, files)` looks at every set of files that must not
+all go to the trash: each group of byte-identical files (`Groups.same_content`, whatever scope the
+`duplicate` conditions use, `outputs` alone included) and each series. If **every** member is a
+`trash` item, the original (duplicate group) or the best shot (series) is moved from the plan's
+items to its review list with the reason "every other copy goes to the trash too: this one is
+kept for review". It runs in the scan pipeline right after the plan is built, and `explain` runs
+the same guard, so the explanation never disagrees with a real scan. Items are matched by source
+path locally, and by path below the source root, size and mtime for a server plan.
 
 ### The GUI's "one current plan"
 
@@ -122,6 +178,7 @@ release builds ignore it).
 | | `ai-usage.jsonl` | Token usage per AI scan, for cost history. |
 | | `pending-index.json` | Per-file size/mtime/EXIF index for quick pending counts. |
 | | `thumbs/` | Thumbnails shown in the UI. |
+| | `metrics.json` | Per-file sharpness, perceptual hash and content hash used by `series` and `duplicate` conditions (safe to delete). |
 | next to a plan (CLI) | `<plan>.report.json`, `<plan>.jsonl`, `<plan>.lock` | Names are built from the plan name minus a trailing `.json` (`trip.2026.json` → `trip.2026.report.json`). |
 | inside a source | `.gallery-trash/<run>/` | Where trashed originals go when `GALLERY_TRASH=folder` is set. |
 | output folders | `.gallery-tmp-*`, `.gallery-undo-*` | Staging and undo scratch names; never a folder a template can create. |

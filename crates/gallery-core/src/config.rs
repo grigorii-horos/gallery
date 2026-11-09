@@ -78,7 +78,11 @@ impl From<RawConfig> for Config {
     fn from(r: RawConfig) -> Self {
         let (targets, was_staged) = match r.targets {
             RawTargets::List(l) => (l, false),
-            RawTargets::Staged(s) => (s.into_list(), true),
+            // An empty `[targets]` table names no stage: not the old shape.
+            RawTargets::Staged(s) => {
+                let staged = s.names_a_stage();
+                (s.into_list(), staged)
+            }
         };
         Config {
             sources: r.sources,
@@ -342,6 +346,10 @@ struct StagedPrefilter {
 }
 
 impl StagedTargets {
+    fn names_a_stage(&self) -> bool {
+        !(self.before_ai.is_empty() && self.ai.is_empty() && self.after_ai.is_empty())
+    }
+
     /// `before_ai`, `ai`, `after_ai`, in that order; an AI target becomes
     /// one filter `{ sources, match/exclude of the prefilter, ai }`.
     fn into_list(self) -> Vec<Target> {
@@ -1468,7 +1476,7 @@ mod tests {
     use std::path::Path;
 
     fn example() -> Config {
-        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gallery.toml");
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/staged-example.toml");
         Config::load(&p).unwrap()
     }
 
@@ -1835,6 +1843,57 @@ match = "*.png"
             again.target("D").unwrap().filters[0].ai.as_deref(),
             Some("docs")
         );
+    }
+
+    #[test]
+    fn an_empty_targets_table_is_not_the_old_shape() {
+        let c = load_str("[targets]\n").unwrap();
+        assert!(c.targets.is_empty() && !c.was_staged);
+        let c = load_str("[targets]\nbefore_ai = []\n").unwrap();
+        assert!(!c.was_staged);
+    }
+
+    #[test]
+    fn the_shipped_example_is_new_shape_and_valid() {
+        let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gallery.toml");
+        let c = Config::load(&p).unwrap();
+        assert!(!c.was_staged);
+        c.validate().unwrap();
+        let names: Vec<_> = c.targets.iter().map(|t| t.name.as_str()).collect();
+        assert_eq!(
+            names,
+            [
+                "Duplicates",
+                "Blurry re-takes",
+                "Screenshots",
+                "Screenshots and screen recordings",
+                "TikTok",
+                "Night shots at home",
+                "Together",
+                "Documents",
+                "Receipts",
+                "Timeline"
+            ]
+        );
+        assert_eq!(c.target("Duplicates").unwrap().kind, TargetKind::Trash);
+        assert_eq!(c.target("Blurry re-takes").unwrap().kind, TargetKind::Trash);
+        assert_eq!(
+            c.target("Night shots at home").unwrap().kind,
+            TargetKind::Keep
+        );
+        assert!(c.places.contains_key("home") && c.places.contains_key("dacha"));
+        let together = c.target("Together").unwrap();
+        assert!(
+            together
+                .filters
+                .iter()
+                .all(|f| f.near.is_some() && f.expand.is_some())
+        );
+        assert!(c.target("Documents").unwrap().has_ai());
+        // Saved and read again it is the same config.
+        let text = toml::to_string(&c).unwrap();
+        let again: Config = toml::from_str(&text).unwrap();
+        assert_eq!(toml::to_string(&again).unwrap(), text);
     }
 
     #[test]

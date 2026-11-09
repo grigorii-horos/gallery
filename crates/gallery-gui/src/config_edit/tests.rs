@@ -903,7 +903,13 @@ fn mask_tester_uses_user_and_builtin_masks() {
 
 #[test]
 fn example_config_round_trips() {
-    round_trip(&Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/gallery.toml"));
+    // The GUI editor is still stage-based (Task 8): it round-trips the old
+    // three-stage example, kept as a fixture of the core crate. TODO(T8):
+    // point it back at examples/gallery.toml once the editor reads the new shape.
+    round_trip(
+        &Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../gallery-core/tests/fixtures/staged-example.toml"),
+    );
 }
 
 /// The same for any config (a copy of a real one):

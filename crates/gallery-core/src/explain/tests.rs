@@ -2,6 +2,7 @@ use super::*;
 use crate::ai::cache::Stored;
 use crate::overrides::Action;
 use crate::pipeline::NoAi;
+use crate::plan::build_plan;
 use crate::scan::scan_sources;
 
 struct Fx {
@@ -560,5 +561,145 @@ match = "*.jpg"
             target = "Stay",
             via = crate::t!("explain.via_mask")
         )
+    );
+}
+
+fn fixture_with(files: &[(&str, &[u8])], toml_tail: &str) -> Fx {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    for (f, content) in files {
+        let p = root.join(f);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, content).unwrap();
+    }
+    let toml = toml_tail.replace("{r}", &root.to_string_lossy().replace('\\', "/"));
+    let cfg = Config::from_str_at(&toml, root, Path::new("t.toml")).unwrap();
+    Fx { dir, cfg }
+}
+
+#[test]
+fn a_duplicate_goes_to_the_trash_and_the_original_names_the_miss() {
+    let fx = fixture_with(
+        &[
+            ("s/a.jpg", b"same"),
+            ("s/b.jpg", b"same"),
+            ("s/c.jpg", b"other"),
+        ],
+        r#"
+[[sources]]
+id = "s"
+path = "{r}/s"
+
+[[targets]]
+name = "Dups"
+kind = "trash"
+[[targets.filters]]
+sources = ["s"]
+duplicate = { of = ["sources"] }
+"#,
+    );
+    let (a, b) = (fx.explain("s/a.jpg"), fx.explain("s/b.jpg"));
+    // Exactly one of the two copies is the original.
+    let (dup, orig) = if a.outcome == Outcome::Trash {
+        (a, b)
+    } else {
+        (b, a)
+    };
+    assert_eq!(dup.outcome, Outcome::Trash, "{}", dup.to_text());
+    assert!(dup.stages[0].taken && dup.stages[0].miss.is_none());
+    assert_ne!(orig.outcome, Outcome::Trash);
+    let miss = orig.stages[0].miss.as_ref().expect("the original misses");
+    assert_eq!(miss.condition, "duplicate");
+    assert_eq!(miss.detail, crate::t!("filter.miss.no_duplicate"));
+    assert!(orig.to_text().contains("duplicate: "), "{}", orig.to_text());
+    // A file with no twin misses the same way.
+    let c = fx.explain("s/c.jpg");
+    assert_eq!(c.stages[0].miss.as_ref().unwrap().condition, "duplicate");
+}
+
+#[test]
+fn near_misses_read_like_the_condition() {
+    let fx = fixture_with(
+        &[
+            ("cam/20260101_120000.jpg", b"1"),
+            ("partner/20260101_200000.jpg", b"2"),
+            ("partner/20260101_130000.jpg", b"3"),
+        ],
+        r#"
+[[sources]]
+id = "cam"
+path = "{r}/cam"
+[[sources]]
+id = "partner"
+path = "{r}/partner"
+
+[[targets]]
+name = "Together"
+[[targets.filters]]
+sources = ["cam"]
+near = { sources = ["partner"], time = "30m", km = 1 }
+[[targets.outputs]]
+dir = "{r}/out"
+"#,
+    );
+    // The only partner file within 30 minutes is none: 13:00 is an hour away.
+    let ex = fx.explain("cam/20260101_120000.jpg");
+    let miss = ex.stages[0].miss.as_ref().expect("near misses");
+    assert_eq!(miss.condition, "near");
+    assert!(
+        miss.detail.contains("partner")
+            && miss.detail.contains("30m")
+            && miss.detail.contains("1.0 km"),
+        "{}",
+        miss.detail
+    );
+    assert!(ex.to_text().contains("near: "), "{}", ex.to_text());
+    assert_eq!(ex.outcome, Outcome::Unmatched);
+
+    // Within two hours it is taken.
+    let near = fx.cfg.targets[0].filters[0].near.clone();
+    assert!(near.is_some());
+    let mut cfg = fx.cfg.clone();
+    cfg.targets[0].filters[0].near.as_mut().unwrap().time =
+        Some(crate::filter::facts::Spec::parse("2h").unwrap());
+    let fx2 = Fx { dir: fx.dir, cfg };
+    let ex = fx2.explain("cam/20260101_120000.jpg");
+    assert!(ex.stages[0].taken && ex.stages[0].miss.is_none());
+    assert_eq!(ex.outcome, Outcome::Process);
+}
+
+#[test]
+fn explain_holds_the_last_copy_like_a_scan() {
+    // Both copies hit a trash target: the scan trashes one and holds the
+    // other for review, and so does explain.
+    let fx = fixture_with(
+        &[("s/a.jpg", b"same"), ("s/b.jpg", b"same")],
+        r#"
+[[sources]]
+id = "s"
+path = "{r}/s"
+
+[[targets]]
+name = "Dups"
+kind = "trash"
+[[targets.filters]]
+sources = ["s"]
+duplicate = { of = ["sources"] }
+
+[[targets]]
+name = "Everything"
+kind = "trash"
+[[targets.filters]]
+sources = ["s"]
+"#,
+    );
+    let (a, b) = (fx.explain("s/a.jpg"), fx.explain("s/b.jpg"));
+    let mut outcomes = [a.outcome, b.outcome];
+    outcomes.sort_by_key(|o| format!("{o:?}"));
+    assert_eq!(outcomes, [Outcome::Review, Outcome::Trash]);
+    let held = if a.outcome == Outcome::Review { &a } else { &b };
+    assert_eq!(
+        held.verdict,
+        crate::t!("explain.last_copy_held", target = "Everything")
     );
 }
