@@ -414,6 +414,7 @@ fn apply_impl(
         dirs: Mutex::new(HashMap::new()),
         journal: journal.as_ref(),
         incompressible: Mutex::new(Vec::new()),
+        versions: std::sync::OnceLock::new(),
     };
     let collected = Mutex::new(Collected::new(
         report.clone(),
@@ -806,6 +807,9 @@ struct Run<'a> {
     journal: Option<&'a Journal>,
     /// Files no pipe made smaller, written to the store once at the end.
     incompressible: Mutex<Vec<crate::incompressible::Record>>,
+    /// Encoder versions, part of each such record's pipe fingerprint;
+    /// probed once a record is made.
+    versions: std::sync::OnceLock<BTreeMap<String, String>>,
 }
 
 fn same_file_state(item: &PlanItem, meta: &std::fs::Metadata) -> bool {
@@ -1267,8 +1271,7 @@ impl Run<'_> {
             let (Ok(mtime), true) = (mtime_ns(&meta), meta.is_file()) else {
                 continue;
             };
-            let pipe =
-                crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n));
+            let pipe = self.pipe_of(o);
             if let Some(pipe) = pipe {
                 self.incompressible
                     .lock()
@@ -1365,6 +1368,12 @@ impl Run<'_> {
         res.status = ItemStatus::Done { trashed: None };
     }
 
+    /// Fingerprint of the pipe of `o` with this machine's encoders.
+    fn pipe_of(&self, o: &PlannedOutput) -> Option<String> {
+        let versions = self.versions.get_or_init(|| self.tools.encoder_versions());
+        crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n), versions)
+    }
+
     /// Record that the pipe of `o` could not make the source smaller, now
     /// that the file is at `at` (the source path, or its new name), still
     /// the file the plan saw.
@@ -1378,8 +1387,7 @@ impl Run<'_> {
         {
             return;
         }
-        let pipe =
-            crate::incompressible::fingerprint(&o.steps, |n| self.plan.content_presets.get(n));
+        let pipe = self.pipe_of(o);
         if let Some(pipe) = pipe {
             // The plan's size and mtime: the file was just checked to be them.
             self.incompressible
@@ -2681,6 +2689,7 @@ mod tests {
             dirs: Mutex::new(HashMap::new()),
             journal: None,
             incompressible: Mutex::new(Vec::new()),
+            versions: std::sync::OnceLock::new(),
         };
         let staged = d.path().join(".gallery-tmp-r-x");
         std::fs::write(&staged, b"12345").unwrap();

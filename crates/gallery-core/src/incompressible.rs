@@ -12,12 +12,13 @@
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Mutex, OnceLock};
 
 use serde::{Deserialize, Serialize};
 
 use crate::config::ContentPreset;
 use crate::scan::mtime_ns;
+use crate::tools::Tools;
 
 const FILE: &str = "incompressible.json";
 const VERSION: u32 = 1;
@@ -41,18 +42,28 @@ struct Store {
     files: BTreeMap<String, Entry>,
 }
 
-/// Fingerprint of a content pipe: the preset names in order and their full
-/// settings. `None` when a preset is unknown (nothing is recorded then).
+/// Fingerprint of a content pipe: the preset names in order, their full
+/// settings and the encoder versions (an upgrade tries again). `None` when
+/// a preset is unknown (nothing is recorded then).
 pub fn fingerprint<'a>(
     steps: &[String],
     preset: impl Fn(&str) -> Option<&'a ContentPreset>,
+    versions: &BTreeMap<String, String>,
 ) -> Option<String> {
     let mut chain = Vec::with_capacity(steps.len());
     for s in steps {
         chain.push((s.as_str(), preset(s)?));
     }
-    let json = serde_json::to_vec(&chain).ok()?;
+    let json = serde_json::to_vec(&(chain, versions)).ok()?;
     Some(blake3::hash(&json).to_hex().to_string())
+}
+
+/// The encoder versions of this machine's tools ([`Tools::encoder_versions`]);
+/// empty when the tools are not all found.
+pub fn current_versions() -> BTreeMap<String, String> {
+    Tools::discover()
+        .map(|t| t.encoder_versions())
+        .unwrap_or_default()
 }
 
 fn store_path() -> Option<PathBuf> {
@@ -99,26 +110,52 @@ fn load(path: &Path) -> Store {
 #[derive(Debug, Default)]
 pub struct Known {
     files: BTreeMap<String, Entry>,
+    /// [`current_versions`], probed only once an entry matches.
+    versions: OnceLock<BTreeMap<String, String>>,
 }
 
 impl Known {
     /// The store as it is now (empty when absent or unreadable).
     pub fn load() -> Known {
         let files = store_path().map(|p| load(&p).files).unwrap_or_default();
-        Known { files }
+        Known {
+            files,
+            versions: OnceLock::new(),
+        }
+    }
+
+    /// Whether `path`, of `size` and `mtime_ns`, is known to come out no
+    /// smaller from the pipe `steps` (presets from `preset`) with this
+    /// machine's encoders.
+    pub fn keeps<'a>(
+        &self,
+        path: &Path,
+        size: u64,
+        mtime_ns: i128,
+        steps: &[String],
+        preset: impl Fn(&str) -> Option<&'a ContentPreset>,
+    ) -> bool {
+        let Some(e) = self
+            .entry(path)
+            .filter(|e| e.size == size && e.mtime_ns == mtime_ns)
+        else {
+            return false;
+        };
+        let versions = self.versions.get_or_init(current_versions);
+        fingerprint(steps, preset, versions).is_some_and(|fp| fp == e.pipe)
+    }
+
+    fn entry(&self, path: &Path) -> Option<&Entry> {
+        if self.files.is_empty() {
+            return None;
+        }
+        self.files.get(&key(path)?)
     }
 
     /// Whether `path`, of `size` and `mtime_ns`, is known to come out no
     /// smaller from the pipe of fingerprint `pipe`.
     pub fn contains(&self, path: &Path, size: u64, mtime_ns: i128, pipe: &str) -> bool {
-        if self.files.is_empty() {
-            return false;
-        }
-        let Some(k) = key(path) else {
-            return false;
-        };
-        self.files
-            .get(&k)
+        self.entry(path)
             .is_some_and(|e| e.size == size && e.mtime_ns == mtime_ns && e.pipe == pipe)
     }
 }
@@ -191,15 +228,23 @@ mod tests {
         let a = ContentPreset::Photo(PhotoPreset::avif_high());
         let b = ContentPreset::Photo(PhotoPreset::avif_low());
         let m = ContentPreset::Metadata(MetadataPreset::full());
+        let v = BTreeMap::from([("avifenc".to_string(), "avifenc 1.1.1".to_string())]);
         let fp = |steps: &[&str], p: &ContentPreset| {
             let steps: Vec<String> = steps.iter().map(|s| s.to_string()).collect();
-            fingerprint(&steps, |n| if n == "M" { Some(&m) } else { Some(p) })
+            fingerprint(&steps, |n| if n == "M" { Some(&m) } else { Some(p) }, &v)
         };
         assert_eq!(fp(&["X"], &a), fp(&["X"], &a));
         assert_ne!(fp(&["X"], &a), fp(&["X"], &b));
         assert_ne!(fp(&["X"], &a), fp(&["Y"], &a));
         assert_ne!(fp(&["X"], &a), fp(&["X", "M"], &a));
-        assert_eq!(fingerprint(&["X".to_string()], |_| None), None);
+        assert_eq!(fingerprint(&["X".to_string()], |_| None, &v), None);
+        // Another encoder version is another pipe.
+        let x = vec!["X".to_string()];
+        let newer = BTreeMap::from([("avifenc".to_string(), "avifenc 1.3.0".to_string())]);
+        assert_ne!(
+            fingerprint(&x, |_| Some(&a), &v),
+            fingerprint(&x, |_| Some(&a), &newer)
+        );
     }
 
     #[test]
