@@ -28,8 +28,9 @@ pub fn read(tools: &Tools, paths: &[PathBuf]) -> Result<HashMap<PathBuf, serde_j
     read_batches(tools, paths, &NoProgress, &Cancel::new(), &mut |_| {})
 }
 
-/// [`read`] answered from the persistent cache `<cache dir>/exif-cache.json`
-/// where a file's path, size and mtime are unchanged; the rest is read in
+/// [`read`] answered from the persistent cache `<cache dir>/exif/<xx>.json`
+/// (256 shards by key hash; only the shards a request touches are read or
+/// rewritten) where a file's path, size and mtime are unchanged; the rest is read in
 /// batches, with a [`Stage::Exif`] event per batch, and stored. A cancel is
 /// checked before each batch and ends the read with `Error::Cancelled`.
 /// Without a cache dir nothing is persisted.
@@ -39,8 +40,8 @@ pub fn read_with(
     progress: &dyn Progress,
     cancel: &Cancel,
 ) -> Result<HashMap<PathBuf, serde_json::Value>> {
-    let file = crate::paths::cache_dir().map(|d| d.join("exif-cache.json"));
-    read_cached(tools, paths, progress, cancel, file.as_deref())
+    let dir = crate::paths::cache_dir().map(|d| d.join("exif"));
+    read_cached(tools, paths, progress, cancel, dir.as_deref())
 }
 
 #[derive(Serialize, Deserialize)]
@@ -72,6 +73,8 @@ fn tool_identity(tools: &Tools) -> String {
 }
 
 /// Canonical path, size and mtime in nanoseconds: the cache key and check.
+/// Limitation: a file rewritten to the same size within one mtime tick (coarse
+/// filesystems: FAT 2 s, some network shares 1 s) is not noticed.
 type Stamp = (String, u64, u128);
 
 fn stat(p: &Path) -> Option<(u64, u128)> {
@@ -85,9 +88,14 @@ fn stat(p: &Path) -> Option<(u64, u128)> {
     Some((m.len(), ns))
 }
 
-fn load_cache(file: Option<&Path>, tool: &str) -> CacheFile {
-    let loaded: Option<CacheFile> = file
-        .and_then(|f| std::fs::read(f).ok())
+/// Shard of a cache key: first byte of its blake3 hash, as `xx`.
+fn shard_of(key: &str) -> String {
+    format!("{:02x}", blake3::hash(key.as_bytes()).as_bytes()[0])
+}
+
+fn load_shard(dir: &Path, shard: &str, tool: &str) -> CacheFile {
+    let loaded: Option<CacheFile> = std::fs::read(dir.join(format!("{shard}.json")))
+        .ok()
         .and_then(|b| serde_json::from_slice(&b).ok());
     match loaded {
         Some(c) if c.tool == tool => c,
@@ -103,25 +111,27 @@ fn read_cached(
     paths: &[PathBuf],
     progress: &dyn Progress,
     cancel: &Cancel,
-    cache_file: Option<&Path>,
+    cache_dir: Option<&Path>,
 ) -> Result<HashMap<PathBuf, serde_json::Value>> {
-    let Some(cache_file) = cache_file else {
+    let Some(cache_dir) = cache_dir else {
         return read_batches(tools, paths, progress, cancel, &mut |_| {});
     };
     if !paths.is_empty() {
         cancel.check()?;
     }
     let tool = tool_identity(tools);
-    let mut cache = load_cache(Some(cache_file), &tool);
+    let mut shards: HashMap<String, CacheFile> = HashMap::new();
     let mut result = HashMap::new();
-    // Misses: path, cache key and the stat taken before the read, so a file
-    // changed while exiftool runs is re-read next time.
+    // Misses: path and the stamp taken before the read, so a file changed
+    // while exiftool runs is re-read next time.
     let mut misses: Vec<(PathBuf, Option<Stamp>)> = Vec::new();
     for p in paths {
         let key = std::fs::canonicalize(p).ok().zip(stat(p));
         let key = key.map(|(c, (s, m))| (c.to_string_lossy().into_owned(), s, m));
         let hit = key.as_ref().and_then(|(k, s, m)| {
-            cache
+            shards
+                .entry(shard_of(k))
+                .or_insert_with_key(|sh| load_shard(cache_dir, sh, &tool))
                 .entries
                 .get(k)
                 .filter(|e| e.size == *s && e.mtime_ns == *m)
@@ -136,14 +146,16 @@ fn read_cached(
             None => misses.push((p.clone(), key)),
         }
     }
+    drop(shards);
     let hits = result.len();
-    let mut dirty = false;
-    let stats: HashMap<PathBuf, Stamp> = misses
+    let stamps: HashMap<PathBuf, Stamp> = misses
         .iter()
         .filter_map(|(p, k)| k.clone().map(|k| (p.clone(), k)))
         .collect();
     let miss_paths: Vec<PathBuf> = misses.into_iter().map(|(p, _)| p).collect();
     let shifted = Shifted { progress, hits };
+    // New entries by shard; merged onto the shard as it is on disk by then.
+    let mut fresh_entries: HashMap<String, Vec<(String, Entry)>> = HashMap::new();
     let mut store = |raw: &serde_json::Value| {
         let Some(src) = raw.get("SourceFile").and_then(|s| s.as_str()) else {
             return;
@@ -151,30 +163,21 @@ fn read_cached(
         if raw.get("Error").is_some() {
             return;
         }
-        if let Some((k, size, mtime_ns)) = stats.get(Path::new(src)) {
-            cache.entries.insert(
+        if let Some((k, size, mtime_ns)) = stamps.get(Path::new(src)) {
+            fresh_entries.entry(shard_of(k)).or_default().push((
                 k.clone(),
                 Entry {
                     size: *size,
                     mtime_ns: *mtime_ns,
                     rec: raw.clone(),
                 },
-            );
-            dirty = true;
+            ));
         }
     };
     let fresh = read_batches(tools, &miss_paths, &shifted, cancel, &mut store);
     // Keep what was read even if a later batch failed or was cancelled.
-    let fresh = match fresh {
-        Ok(f) => f,
-        Err(e) => {
-            if dirty {
-                save_cache(cache_file, &mut cache);
-            }
-            return Err(e);
-        }
-    };
-    result.extend(fresh);
+    save_shards(cache_dir, &tool, fresh_entries);
+    result.extend(fresh?);
     if miss_paths.is_empty() && !paths.is_empty() {
         progress.step(ProgressEvent {
             stage: Stage::Exif,
@@ -183,23 +186,26 @@ fn read_cached(
             current: paths.last().cloned(),
         });
     }
-    if dirty {
-        save_cache(cache_file, &mut cache);
-    }
     Ok(result)
 }
 
-/// Prune entries of vanished files, then write the cache atomically. A
-/// failure to write only costs the next run a re-read.
-fn save_cache(file: &Path, cache: &mut CacheFile) {
-    cache.entries.retain(|k, _| Path::new(k).exists());
-    let Ok(bytes) = serde_json::to_vec(cache) else {
+/// For each shard with new entries: re-read it from disk (another process
+/// may have written it while exiftool ran), add the entries, drop entries of
+/// vanished files, write it atomically. A failure to write only costs the
+/// next run a re-read.
+fn save_shards(dir: &Path, tool: &str, fresh: HashMap<String, Vec<(String, Entry)>>) {
+    if fresh.is_empty() {
         return;
-    };
-    if let Some(dir) = file.parent() {
-        let _ = std::fs::create_dir_all(dir);
     }
-    let _ = crate::paths::write_atomic(file, &bytes);
+    let _ = std::fs::create_dir_all(dir);
+    for (shard, entries) in fresh {
+        let mut cache = load_shard(dir, &shard, tool);
+        cache.entries.extend(entries);
+        cache.entries.retain(|k, _| Path::new(k).exists());
+        if let Ok(bytes) = serde_json::to_vec(&cache) {
+            let _ = crate::paths::write_atomic(&dir.join(format!("{shard}.json")), &bytes);
+        }
+    }
 }
 
 /// Reports a miss-only read against the whole request: cached files count
@@ -438,7 +444,7 @@ mod tests {
     fn second_read_of_unchanged_files_runs_no_exiftool() {
         let d = tempfile::tempdir().unwrap();
         let (t, count) = fake_exiftool(d.path());
-        let cache = d.path().join("cache").join("exif-cache.json");
+        let cache = d.path().join("cache").join("exif");
         let a = d.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
         let p = [a.clone()];
@@ -467,7 +473,7 @@ mod tests {
     fn rewritten_file_with_same_size_is_read_again() {
         let d = tempfile::tempdir().unwrap();
         let (t, count) = fake_exiftool(d.path());
-        let cache = d.path().join("exif-cache.json");
+        let cache = d.path().join("exif");
         let a = d.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
         let p = [a.clone()];
@@ -482,44 +488,154 @@ mod tests {
         assert_eq!(r[&a]["Tag"], "two");
     }
 
+    /// Entry keys over all shard files of a cache dir.
+    #[cfg(unix)]
+    fn cached_keys(dir: &Path) -> Vec<String> {
+        let mut keys = Vec::new();
+        for f in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let c: CacheFile = serde_json::from_slice(&std::fs::read(f.path()).unwrap()).unwrap();
+            keys.extend(c.entries.into_keys());
+        }
+        keys.sort();
+        keys
+    }
+
+    #[cfg(unix)]
+    fn key_of(p: &Path) -> String {
+        std::fs::canonicalize(p)
+            .unwrap()
+            .to_string_lossy()
+            .into_owned()
+    }
+
     #[cfg(unix)]
     #[test]
     fn corrupt_cache_is_ignored_and_rebuilt() {
         let d = tempfile::tempdir().unwrap();
         let (t, count) = fake_exiftool(d.path());
-        let cache = d.path().join("exif-cache.json");
-        std::fs::write(&cache, b"{ not json").unwrap();
+        let cache = d.path().join("exif");
+        std::fs::create_dir(&cache).unwrap();
+        for i in 0..=255u8 {
+            std::fs::write(cache.join(format!("{i:02x}.json")), b"{ not json").unwrap();
+        }
         let a = d.path().join("a.txt");
         std::fs::write(&a, "one").unwrap();
         let p = [a.clone()];
         read_cached(&t, &p, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
         read_cached(&t, &p, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
         assert_eq!(runs(&count), 1);
-        assert!(serde_json::from_slice::<CacheFile>(&std::fs::read(&cache).unwrap()).is_ok());
+        assert!(
+            std::fs::read(cache.join(format!("{}.json", shard_of(&key_of(&a)))))
+                .is_ok_and(|b| serde_json::from_slice::<CacheFile>(&b).is_ok())
+        );
     }
 
     #[cfg(unix)]
     #[test]
-    fn no_cache_file_reads_without_writing_and_saving_prunes_gone_files() {
+    fn no_cache_dir_reads_without_writing() {
         let d = tempfile::tempdir().unwrap();
         let (t, count) = fake_exiftool(d.path());
         let a = d.path().join("a.txt");
-        let b = d.path().join("b.txt");
         std::fs::write(&a, "one").unwrap();
-        std::fs::write(&b, "two").unwrap();
-        let both = [a.clone(), b.clone()];
-        read_cached(&t, &both, &NoProgress, &Cancel::new(), None).unwrap();
-        read_cached(&t, &both, &NoProgress, &Cancel::new(), None).unwrap();
+        read_cached(
+            &t,
+            std::slice::from_ref(&a),
+            &NoProgress,
+            &Cancel::new(),
+            None,
+        )
+        .unwrap();
+        read_cached(&t, &[a], &NoProgress, &Cancel::new(), None).unwrap();
         assert_eq!(runs(&count), 2);
+    }
 
-        let cache = d.path().join("exif-cache.json");
-        read_cached(&t, &both, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
-        let load = |c: &Path| serde_json::from_slice::<CacheFile>(&std::fs::read(c).unwrap());
-        assert_eq!(load(&cache).unwrap().entries.len(), 2);
+    #[cfg(unix)]
+    #[test]
+    fn saving_prunes_gone_files_in_touched_shards_only() {
+        let d = tempfile::tempdir().unwrap();
+        let (t, _) = fake_exiftool(d.path());
+        let cache = d.path().join("exif");
+        let mk = |n: &str| {
+            let p = d.path().join(n);
+            std::fs::write(&p, n).unwrap();
+            p
+        };
+        let b = mk("b.txt");
+        // A file in b's shard, and one in another shard.
+        let same = (0..)
+            .map(|i| mk(&format!("s{i}.txt")))
+            .find(|p| shard_of(&key_of(p)) == shard_of(&key_of(&b)));
+        let same = same.unwrap();
+        let other = (0..)
+            .map(|i| mk(&format!("o{i}.txt")))
+            .find(|p| shard_of(&key_of(p)) != shard_of(&key_of(&b)))
+            .unwrap();
+        let other2 = (0..)
+            .map(|i| mk(&format!("q{i}.txt")))
+            .find(|p| {
+                shard_of(&key_of(p)) != shard_of(&key_of(&b))
+                    && shard_of(&key_of(p)) != shard_of(&key_of(&other))
+            })
+            .unwrap();
+        let all = [b.clone(), other.clone(), other2.clone()];
+        read_cached(&t, &all, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        assert_eq!(cached_keys(&cache).len(), 3);
         std::fs::remove_file(&b).unwrap();
-        let c = d.path().join("c.txt");
-        std::fs::write(&c, "three").unwrap();
-        read_cached(&t, &[c], &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
-        assert_eq!(load(&cache).unwrap().entries.len(), 2, "b pruned, c added");
+        std::fs::remove_file(&other2).unwrap();
+        read_cached(&t, &[same], &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        let keys = cached_keys(&cache);
+        assert!(!keys.contains(&key_of_gone(&b)), "b pruned from its shard");
+        assert_eq!(
+            keys.len(),
+            3,
+            "other2 in an untouched shard stays: {keys:?}"
+        );
+    }
+
+    #[cfg(unix)]
+    fn key_of_gone(p: &Path) -> String {
+        std::fs::canonicalize(p.parent().unwrap())
+            .unwrap()
+            .join(p.file_name().unwrap())
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn save_merges_with_what_another_process_wrote_meanwhile() {
+        let d = tempfile::tempdir().unwrap();
+        let cache = d.path().join("exif");
+        let a = d.path().join("a.txt");
+        std::fs::write(&a, "a").unwrap();
+        let ka = key_of(&a);
+        let entry = |k: &str| {
+            (
+                k.to_string(),
+                Entry {
+                    size: 1,
+                    mtime_ns: 1,
+                    rec: json!({}),
+                },
+            )
+        };
+        // Another process stored `a` first; we store `b` in the same shard.
+        let shard = shard_of(&ka);
+        save_shards(
+            &cache,
+            "T",
+            HashMap::from([(shard.clone(), vec![entry(&ka)])]),
+        );
+        let b = (0..)
+            .map(|i| d.path().join(format!("b{i}.txt")))
+            .find(|p| {
+                std::fs::write(p, "b").unwrap();
+                shard_of(&key_of(p)) == shard
+            })
+            .unwrap();
+        let kb = key_of(&b);
+        save_shards(&cache, "T", HashMap::from([(shard, vec![entry(&kb)])]));
+        let keys = cached_keys(&cache);
+        assert!(keys.contains(&ka) && keys.contains(&kb), "{keys:?}");
     }
 }
