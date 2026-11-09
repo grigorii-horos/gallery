@@ -104,7 +104,7 @@ date = { time = "22:00..05:00" }
   every file of those sources. `match`/`exclude` keep today's mask syntax
   (`@name`, `!`, lists = OR).
 - Negation: every condition table accepts `not = true` (e.g. "not near
-  Partner"); `geo` also accepts `"!@home"`.
+  partner"); `geo` also accepts `"!@home"`.
 
 ### Conditions
 

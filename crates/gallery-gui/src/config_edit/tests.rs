@@ -478,7 +478,7 @@ path = "/tmp/gallery-edit-test/camera"
 id = "partner"
 path = "/tmp/gallery-edit-test/partner"
 
-# Shared with Partner.
+# Shared with the partner.
 [[targets]]
 name = "Together"
 [[targets.filters]]
@@ -641,7 +641,7 @@ fn set_place_writes_places_after_the_sources() {
     let after = read(&fx.path);
     assert!(
         after.contains(
-            "path = \"/tmp/gallery-edit-test/partner\"\n\n[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 2.0 }\n\n# Shared with Partner.\n[[targets]]"
+            "path = \"/tmp/gallery-edit-test/partner\"\n\n[places]\nhome = { lat = 47.0245, lon = 28.8323, km = 2.0 }\n\n# Shared with the partner.\n[[targets]]"
         ),
         "{after}"
     );

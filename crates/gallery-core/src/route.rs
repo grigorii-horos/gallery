@@ -1906,7 +1906,7 @@ expand = "event"
         };
         let shots = [
             photo("camera", "c1.jpg", "2026:08:01 10:00:00", Some(HOME)),
-            // Alone: Partner is 5 km away, but it is the same outing.
+            // Alone: the partner is 5 km away, but it is the same outing.
             photo("camera", "c2.jpg", "2026:08:01 10:30:00", Some(AWAY)),
             photo("camera", "c3.jpg", "2026:08:05 10:00:00", Some(HOME)),
             photo("partner", "o1.jpg", "2026:08:01 10:05:00", Some(HOME)),

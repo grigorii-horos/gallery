@@ -22,7 +22,7 @@ const base: EditOutcome = {
   draft: {
     sources: [
       { id: "camera", path: "~/Cam", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
-      { id: "partner", path: "~/Partner", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
+      { id: "partner", path: "~/partner", server_path: null, recursive: false, skip: null, ai_prefix: null, ai_prefix_file: null, ai_suffix: null, ai_suffix_file: null },
     ],
     places: [{ name: "home", lat: 47.0245, lon: 28.8323, km: 2 }],
     targets: [
