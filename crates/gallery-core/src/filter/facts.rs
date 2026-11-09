@@ -850,7 +850,7 @@ fn one_of(prop: &str, list: &Strs, value: Option<&str>) -> Verdict {
 }
 
 /// Whether the record has a non-null tag `wanted` (`Tag` or `Group:Tag`).
-#[cfg(test)]
+#[cfg(all(test, unix))]
 pub(crate) fn has_tag_in_record(exif: &Value, wanted: &str) -> bool {
     has_tag(exif, wanted)
 }

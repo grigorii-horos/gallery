@@ -527,6 +527,7 @@ fn write_impl(tools: &Tools, from: Option<&Path>, path: &Path, args: &[String]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(unix)]
     use crate::scan::FileEntry;
     use serde_json::json;
     use std::path::PathBuf;
