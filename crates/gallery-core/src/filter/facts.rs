@@ -849,15 +849,24 @@ fn one_of(prop: &str, list: &Strs, value: Option<&str>) -> Verdict {
     }
 }
 
+/// Whether the record has a non-null tag `wanted` (`Tag` or `Group:Tag`).
+#[cfg(test)]
+pub(crate) fn has_tag_in_record(exif: &Value, wanted: &str) -> bool {
+    has_tag(exif, wanted)
+}
+
 fn has_tag(exif: &Value, wanted: &str) -> bool {
     let (group, name) = wanted.rsplit_once(':').unwrap_or(("", wanted));
+    let named = |k: &str| {
+        let (g, n) = k.rsplit_once(':').unwrap_or(("", k));
+        n.eq_ignore_ascii_case(name) && (group.is_empty() || g.eq_ignore_ascii_case(group))
+    };
     exif.as_object().is_some_and(|o| {
-        o.iter().any(|(k, v)| {
-            let (g, n) = k.rsplit_once(':').unwrap_or(("", k));
-            !v.is_null()
-                && n.eq_ignore_ascii_case(name)
-                && (group.is_empty() || g.eq_ignore_ascii_case(group))
-        })
+        o.iter().any(|(k, v)| !v.is_null() && named(k))
+            // A cached record keeps the other tags' names only.
+            || o.get(crate::exif::PRESENT)
+                .and_then(Value::as_array)
+                .is_some_and(|l| l.iter().filter_map(Value::as_str).any(named))
     })
 }
 

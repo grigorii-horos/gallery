@@ -44,11 +44,81 @@ pub fn read_with(
     read_cached(tools, paths, progress, cancel, dir.as_deref())
 }
 
+/// Tags (any group: `IFD0:Make` is "Make") of a read record that readers of
+/// [`read_with`] look at; the cache keeps these and drops the rest of the
+/// raw `-G1` record (3-20 KB each, mostly maker notes and binary stubs).
+///
+/// WHERE TO ADD A TAG: a reader of the records `read_with` returns (the
+/// lookups in `filter/facts.rs`, `datetime.rs`, and what `facts_of` reads
+/// for route, plan, explain, pending and the effect preview) that starts to
+/// look at a tag not listed here must add its name below. The list is part
+/// of the cache identity, so adding a name discards the old shards. A user
+/// `has_tag`/`missing_tag` name cannot be listed: those are answered from
+/// [`PRESENT`], the names of every other non-null tag of the file.
+const KEPT_TAGS: &[&str] = &[
+    // filter/facts.rs: device, GPS, size, orientation, media codecs.
+    "GPSLatitude",
+    "GPSLongitude",
+    "Make",
+    "Model",
+    "Software",
+    "ImageSize",
+    "ImageWidth",
+    "ImageHeight",
+    "ExifImageWidth",
+    "ExifImageHeight",
+    "SourceImageWidth",
+    "SourceImageHeight",
+    "Orientation",
+    "Rotation",
+    "Duration",
+    "MediaDuration",
+    "VideoFrameRate",
+    "FrameRate",
+    "CompressorID",
+    "VideoCodec",
+    "CodecID",
+    "AudioFormat",
+    "AudioCodecID",
+    "AudioChannels",
+    "AudioSampleRate",
+    // datetime.rs: capture date.
+    "DateTimeOriginal",
+    "CreateDate",
+    "ModifyDate",
+];
+
+/// Key of the cached record that lists the other non-null tags (as
+/// `Group:Tag`), so `props.has_tag` / `missing_tag` of any name still hold.
+pub(crate) const PRESENT: &str = "_Present";
+
+/// `rec` cut down to `SourceFile`, the [`KEPT_TAGS`] and [`PRESENT`].
+fn minimized(rec: &serde_json::Value) -> serde_json::Value {
+    let Some(obj) = rec.as_object() else {
+        return rec.clone();
+    };
+    let mut out = serde_json::Map::new();
+    let mut present = Vec::new();
+    for (k, v) in obj {
+        let name = k.rsplit_once(':').map_or(k.as_str(), |(_, n)| n);
+        if k == "SourceFile" || KEPT_TAGS.contains(&name) {
+            out.insert(k.clone(), v.clone());
+        } else if !v.is_null() && k.contains(':') {
+            present.push(serde_json::Value::String(k.clone()));
+        }
+    }
+    if !present.is_empty() {
+        out.insert(PRESENT.into(), serde_json::Value::Array(present));
+    }
+    serde_json::Value::Object(out)
+}
+
 #[derive(Serialize, Deserialize)]
 struct Entry {
     size: u64,
     mtime_ns: u128,
-    /// The raw exiftool record, before the QuickTime zone conversion.
+    /// The exiftool record cut to what readers use (see [`KEPT_TAGS`]), before
+    /// the QuickTime zone conversion.
     rec: serde_json::Value,
 }
 
@@ -66,9 +136,10 @@ fn tool_identity(tools: &Tools) -> String {
         .map(|(s, m)| format!("{s}:{m}"))
         .unwrap_or_default();
     format!(
-        "1|{}|{stamp}|{}",
+        "2|{}|{stamp}|{}|{}",
         tools.exiftool.display(),
-        READ_ARGS.join(" ")
+        READ_ARGS.join(" "),
+        KEPT_TAGS.join(",")
     )
 }
 
@@ -114,7 +185,9 @@ fn read_cached(
     cache_dir: Option<&Path>,
 ) -> Result<HashMap<PathBuf, serde_json::Value>> {
     let Some(cache_dir) = cache_dir else {
-        return read_batches(tools, paths, progress, cancel, &mut |_, _| {});
+        let mut all = read_batches(tools, paths, progress, cancel, &mut |_, _| {})?;
+        all.values_mut().for_each(|r| *r = minimized(r));
+        return Ok(all);
     };
     if !paths.is_empty() {
         cancel.check()?;
@@ -166,7 +239,7 @@ fn read_cached(
                 Entry {
                     size: *size,
                     mtime_ns: *mtime_ns,
-                    rec: raw.clone(),
+                    rec: minimized(raw),
                 },
             ));
         }
@@ -174,7 +247,8 @@ fn read_cached(
     let fresh = read_batches(tools, &miss_paths, &shifted, cancel, &mut store);
     // Keep what was read even if a later batch failed or was cancelled.
     save_shards(cache_dir, &tool, fresh_entries);
-    result.extend(fresh?);
+    // The same shape as a hit, so a reader never works on a first run only.
+    result.extend(fresh?.into_iter().map(|(p, r)| (p, minimized(&r))));
     if miss_paths.is_empty() && !paths.is_empty() {
         progress.step(ProgressEvent {
             stage: Stage::Exif,
@@ -449,6 +523,7 @@ fn write_impl(tools: &Tools, from: Option<&Path>, path: &Path, args: &[String]) 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scan::FileEntry;
     use serde_json::json;
     use std::path::PathBuf;
 
@@ -521,7 +596,7 @@ mod tests {
             &script,
             format!(
                 "#!/bin/sh\necho x >> '{}'\nfor last; do :; done\nprintf '['\nsep=''\n\
-                 while IFS= read -r f; do printf '%s{{\"SourceFile\":\"%s\",\"Tag\":\"%s\",\
+                 while IFS= read -r f; do printf '%s{{\"SourceFile\":\"%s\",\"Model\":\"%s\",\
                  \"QuickTime:CreateDate\":\"2026:04:12 10:00:00\"}}' \"$sep\" \"$f\" \"$(cat \"$f\")\"; sep=,; done < \"$last\"\nprintf ']'\n",
                 count.display()
             ),
@@ -682,14 +757,14 @@ mod tests {
         std::fs::write(&a, "one").unwrap();
         let p = [a.clone()];
         let r = read_cached(&t, &p, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
-        assert_eq!(r[&a]["Tag"], "one");
+        assert_eq!(r[&a]["Model"], "one");
         std::fs::write(&a, "two").unwrap();
         let f = std::fs::File::options().write(true).open(&a).unwrap();
         f.set_modified(std::time::SystemTime::now() + std::time::Duration::from_secs(60))
             .unwrap();
         let r = read_cached(&t, &p, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
         assert_eq!(runs(&count), 2);
-        assert_eq!(r[&a]["Tag"], "two");
+        assert_eq!(r[&a]["Model"], "two");
     }
 
     /// Entry keys over all shard files of a cache dir.
@@ -732,6 +807,198 @@ mod tests {
             std::fs::read(cache.join(format!("{}.json", shard_of(&key_of(&a)))))
                 .is_ok_and(|b| serde_json::from_slice::<CacheFile>(&b).is_ok())
         );
+    }
+
+    /// A fake exiftool that prints `records.json` beside it.
+    #[cfg(unix)]
+    fn canned_exiftool(dir: &Path, records: &serde_json::Value) -> Tools {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::write(dir.join("records.json"), records.to_string()).unwrap();
+        let script = dir.join("exiftool");
+        std::fs::write(
+            &script,
+            format!("#!/bin/sh\ncat '{}/records.json'\n", dir.display()),
+        )
+        .unwrap();
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let mut t = tools_in(Some("Asia/Tokyo"));
+        t.exiftool = script;
+        t
+    }
+
+    /// Realistic `-G1 -n` records: a phone clip (QuickTime dates, GPS,
+    /// tracks, rotation, bulky maker data) and a camera photo.
+    #[cfg(unix)]
+    fn realistic(video: &Path, photo: &Path) -> serde_json::Value {
+        json!([
+            {
+                "SourceFile": video.to_string_lossy(),
+                "System:FileName": "v.mp4",
+                "File:ImageWidth": 1920,
+                "File:ImageHeight": 1080,
+                "QuickTime:CreateDate": "2026:04:12 10:00:00",
+                "QuickTime:ModifyDate": "2026:04:12 10:00:05",
+                "QuickTime:Duration": 12.5,
+                "QuickTime:Rotation": 90,
+                "QuickTime:CompressorID": "hvc1",
+                "QuickTime:AudioFormat": "mp4a",
+                "QuickTime:AudioChannels": 2,
+                "Track1:TrackCreateDate": "2026:04:12 10:00:00",
+                "Track1:VideoFrameRate": 29.97,
+                "Keys:Make": "Camera Co",
+                "Keys:Model": "Phone 1",
+                "Keys:GPSCoordinates": "48.85 2.35 35",
+                "GPS:GPSLatitude": 48.8566,
+                "GPS:GPSLongitude": 2.3522,
+                "UserData:Thumbnail": "(Binary data 9000 bytes)",
+                "Null:Empty": null,
+            },
+            {
+                "SourceFile": photo.to_string_lossy(),
+                "File:ImageWidth": 6000,
+                "File:ImageHeight": 4000,
+                "IFD0:Make": "Camera Co",
+                "IFD0:Model": "Body 7",
+                "IFD0:Software": "fw 1.2",
+                "IFD0:Orientation": 6,
+                "IFD0:ModifyDate": "2026:05:01 09:00:00",
+                "ExifIFD:DateTimeOriginal": "2026:05:01 08:59:58",
+                "ExifIFD:CreateDate": "2026:05:01 08:59:58",
+                "ExifIFD:ExposureTime": 0.004,
+                "MakerNotes:SerialNumber": "0123456789",
+                "MakerNotes:Blob": "x".repeat(4000),
+                "Composite:ImageSize": "6000 4000",
+            },
+        ])
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn cached_records_keep_only_listed_tags_and_read_like_full_ones() {
+        use crate::filter::facts::facts_of;
+        use crate::media::kind_of;
+        let d = tempfile::tempdir().unwrap();
+        let video = d.path().join("v.mp4");
+        let photo = d.path().join("p.jpg");
+        std::fs::write(&video, "v").unwrap();
+        std::fs::write(&photo, "p").unwrap();
+        let t = canned_exiftool(d.path(), &realistic(&video, &photo));
+        let cache = d.path().join("cache").join("exif");
+        let paths = [video.clone(), photo.clone()];
+        let first = read_cached(&t, &paths, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        let second = read_cached(&t, &paths, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        let full = read_batches(&t, &paths, &NoProgress, &Cancel::new(), &mut |_, _| {}).unwrap();
+        assert_eq!(first, second, "a first read looks like a cached one");
+
+        // Stored: SourceFile, listed tags, and the names list; nothing else.
+        for f in std::fs::read_dir(&cache).unwrap().flatten() {
+            let c: CacheFile = serde_json::from_slice(&std::fs::read(f.path()).unwrap()).unwrap();
+            for e in c.entries.values() {
+                for (k, v) in e.rec.as_object().unwrap() {
+                    let name = k.rsplit_once(':').map_or(k.as_str(), |(_, n)| n);
+                    assert!(
+                        k == "SourceFile" || k == PRESENT || KEPT_TAGS.contains(&name),
+                        "stray tag {k}"
+                    );
+                    assert!(!v.to_string().contains("xxxx"), "bulk kept in {k}");
+                }
+            }
+        }
+        let bulk = std::fs::read_dir(&cache)
+            .unwrap()
+            .flatten()
+            .map(|f| f.metadata().unwrap().len())
+            .sum::<u64>();
+        assert!(bulk < 3000, "cache of two records is {bulk} bytes");
+
+        for p in &paths {
+            let e = FileEntry {
+                source_id: "camera".into(),
+                path: p.clone(),
+                rel: p.file_name().unwrap().into(),
+                size: 1,
+                mtime_ns: 0,
+            };
+            let tz = Some(chrono_tz::Asia::Tokyo);
+            for got in [&first[p], &second[p]] {
+                assert_eq!(facts_of(&e, got, tz), facts_of(&e, &full[p], tz), "{p:?}");
+                let name = e.rel.to_string_lossy();
+                let cap = |x| crate::datetime::capture_date(&name, kind_of(p), x, tz);
+                assert_eq!(cap(got), cap(&full[p]));
+                assert_eq!(got["SourceFile"], full[p]["SourceFile"]);
+            }
+        }
+        let f = facts_of(
+            &FileEntry {
+                source_id: "camera".into(),
+                path: video.clone(),
+                rel: "v.mp4".into(),
+                size: 1,
+                mtime_ns: 0,
+            },
+            &second[&video],
+            Some(chrono_tz::Asia::Tokyo),
+        );
+        assert_eq!(f.gps, Some((48.8566, 2.3522)));
+        assert_eq!(
+            f.capture.map(|c| c.to_string()).as_deref(),
+            Some("2026-04-12 19:00:00")
+        );
+        assert_eq!((f.width, f.height), (Some(1080), Some(1920)), "rotated");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn has_tag_of_an_unlisted_tag_survives_the_cache() {
+        use crate::filter::facts::has_tag_in_record;
+        let d = tempfile::tempdir().unwrap();
+        let video = d.path().join("v.mp4");
+        let photo = d.path().join("p.jpg");
+        std::fs::write(&video, "v").unwrap();
+        std::fs::write(&photo, "p").unwrap();
+        let t = canned_exiftool(d.path(), &realistic(&video, &photo));
+        let cache = d.path().join("exif");
+        let paths = [video, photo.clone()];
+        read_cached(&t, &paths, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        let hit = read_cached(&t, &paths, &NoProgress, &Cancel::new(), Some(&cache)).unwrap();
+        let r = &hit[&photo];
+        assert!(has_tag_in_record(r, "ExposureTime"));
+        assert!(has_tag_in_record(r, "ExifIFD:exposuretime"));
+        assert!(!has_tag_in_record(r, "IFD0:ExposureTime"));
+        assert!(!has_tag_in_record(r, "Flash"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn old_full_record_shards_are_discarded() {
+        let d = tempfile::tempdir().unwrap();
+        let (t, count) = fake_exiftool(d.path());
+        let cache = d.path().join("exif");
+        std::fs::create_dir(&cache).unwrap();
+        let a = d.path().join("a.txt");
+        std::fs::write(&a, "one").unwrap();
+        let (size, mtime_ns) = stat(&a).unwrap();
+        let k = key_of(&a);
+        let old = json!({
+            "tool": tool_identity(&t).replacen("2|", "1|", 1),
+            "entries": { k.clone(): { "size": size, "mtime_ns": mtime_ns,
+                "rec": { "SourceFile": "x", "MakerNotes:Blob": "stale" } } },
+        });
+        std::fs::write(
+            cache.join(format!("{}.json", shard_of(&k))),
+            old.to_string(),
+        )
+        .unwrap();
+        let r = read_cached(
+            &t,
+            std::slice::from_ref(&a),
+            &NoProgress,
+            &Cancel::new(),
+            Some(&cache),
+        )
+        .unwrap();
+        assert_eq!(runs(&count), 1, "old identity: read again");
+        assert!(r[&a].get("MakerNotes:Blob").is_none());
     }
 
     #[cfg(unix)]
