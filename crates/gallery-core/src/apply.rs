@@ -143,6 +143,11 @@ pub struct ItemResult {
     /// learns throughput from it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub elapsed_ms: Option<u64>,
+    /// The plan target that routed the file (absent in older reports): a
+    /// partial undo by target relies on it, since the plan file may have
+    /// been rescanned since.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -820,6 +825,7 @@ impl Run<'_> {
                 .collect(),
             error: None,
             elapsed_ms: None,
+            target: Some(item.target.clone()),
         };
         let meta = match std::fs::symlink_metadata(&item.source) {
             Ok(m) => m,
@@ -2038,6 +2044,7 @@ mod tests {
             outputs: vec![],
             error: None,
             elapsed_ms: None,
+            target: None,
         }
     }
 

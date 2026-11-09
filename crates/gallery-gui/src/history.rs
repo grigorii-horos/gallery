@@ -412,20 +412,6 @@ pub fn server_command(report: &Report, file_name: &str) -> String {
     }
 }
 
-/// The target of each file of the plan next to the report (empty when the
-/// plan cannot be read).
-fn plan_targets(report: &Path) -> HashMap<PathBuf, String> {
-    plan_of_report(report)
-        .and_then(|p| gallery_core::plan::Plan::load(&p).ok())
-        .map(|p| {
-            p.items
-                .into_iter()
-                .map(|it| (it.source, it.target))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
 /// The report at `path` with its files, for the detail view; `export_dir`
 /// marks a report found there as the server's. Reads only.
 pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, String> {
@@ -445,7 +431,7 @@ pub fn load(path: &Path, export_dir: Option<&Path>) -> Result<ReportDetail, Stri
         side,
         head.as_ref().map(|h| h.items.len()),
     );
-    let targets = plan_targets(path);
+    let targets = gallery_core::undo::report_targets(path, &report);
     let items = report
         .items
         .iter()
@@ -639,8 +625,7 @@ fn selection_sources(
     target: &str,
 ) -> Result<Vec<PathBuf>, String> {
     guard_undo(path, plans_dir)?;
-    let plan = plan_of_report(path);
-    gallery_core::undo::target_sources(path, plan.as_deref(), target).map_err(|e| e.to_string())
+    gallery_core::undo::target_sources(path, None, target).map_err(|e| e.to_string())
 }
 
 /// `start_retry` payload.
@@ -1385,6 +1370,100 @@ outputs = [{{ dir = "{out}/rest" }}]
         let detail = load(&rp, None).unwrap();
         assert_eq!(detail.undo.restore, 2);
         assert_eq!(detail.items.len(), 2);
+    }
+
+    /// An interrupted run: a target's files include those only in the journal.
+    #[test]
+    fn undo_target_counts_the_journal_of_an_unfinished_run() {
+        let d = tempfile::tempdir().unwrap();
+        let rp = d.path().join("a.plan.report.json");
+        let item = |s: &str, target: &str| {
+            json!({"source": s, "target": target,
+                "status": {"state": "done", "trashed": {"kind": "folder", "path": "/t/x"}},
+                "outputs": []})
+        };
+        let report = json!({
+            "run_id": "r", "plan": d.path().join("a.plan.json"), "started": "", "finished": "",
+            "tool_warnings": [], "items": [item("/s/a.jpg", "pics")]
+        });
+        std::fs::write(&rp, report.to_string()).unwrap();
+        let line = |it: serde_json::Value| json!({"run_id": "r", "item": it}).to_string() + "\n";
+        let j = line(item("/s/b.jpg", "pics")) + &line(item("/s/c.txt", "rest"));
+        std::fs::write(gallery_core::apply::journal_path(&rp), j).unwrap();
+        let got = gallery_core::undo::target_sources(&rp, None, "pics").unwrap();
+        assert_eq!(got, [Path::new("/s/a.jpg"), Path::new("/s/b.jpg")]);
+    }
+
+    /// A rescanned plan routes files elsewhere: a report that recorded its
+    /// targets keeps them; an old report (no target recorded) trusts the plan
+    /// only where the planned outputs are the same, else the target is unknown.
+    #[test]
+    fn targets_come_from_the_report_not_a_rescanned_plan() {
+        let d = tempfile::tempdir().unwrap();
+        let (rp, plans) = three_targets(d.path());
+        let plan_path = plan_of_report(&rp).unwrap();
+        let mut plan = Plan::load(&plan_path).unwrap();
+        for it in &mut plan.items {
+            it.target = "zzz".into();
+        }
+        plan.save(&plan_path).unwrap();
+        let of = |t: &str| {
+            load(&rp, None)
+                .unwrap()
+                .items
+                .iter()
+                .filter(|i| i.target.as_deref() == Some(t))
+                .count()
+        };
+        assert_eq!(
+            (of("pics"), of("rest"), of("junk"), of("zzz")),
+            (2, 1, 1, 0)
+        );
+
+        // The same report as an old one, without recorded targets.
+        let mut v: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(&rp).unwrap()).unwrap();
+        for it in v["items"].as_array_mut().unwrap() {
+            it.as_object_mut().unwrap().remove("target");
+        }
+        std::fs::write(&rp, v.to_string()).unwrap();
+        assert_eq!(of("zzz"), 4, "same planned outputs: the plan is trusted");
+
+        // The jpg files now plan other outputs: their target is unknown.
+        for it in &mut plan.items {
+            if it.source.extension().is_some_and(|e| e == "jpg") {
+                it.outputs[0].dest.set_extension("other");
+            }
+        }
+        plan.save(&plan_path).unwrap();
+        assert_eq!((of("zzz"), of("pics")), (2, 0));
+        let unknown = load(&rp, None)
+            .unwrap()
+            .items
+            .iter()
+            .filter(|i| i.target.is_none())
+            .count();
+        assert_eq!(unknown, 2);
+        assert!(
+            undo_selected(
+                &rp,
+                Some(&plans),
+                &Selection::Target("pics".into()),
+                &|_| {},
+                &Cancel::new()
+            )
+            .is_err()
+        );
+        // Per-file undo still works for an unknown-target file.
+        let r = undo_selected(
+            &rp,
+            Some(&plans),
+            &Selection::Files(vec![d.path().join("src/cat.jpg")]),
+            &|_| {},
+            &Cancel::new(),
+        )
+        .unwrap();
+        assert_eq!(r.restored, 1);
     }
 
     #[test]

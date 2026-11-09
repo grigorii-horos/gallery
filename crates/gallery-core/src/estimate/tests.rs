@@ -249,6 +249,7 @@ fn report_of(plan: &Plan, ms: u64, size_pct: u64) -> Report {
                     .collect(),
                 error: None,
                 elapsed_ms: Some(ms),
+                target: None,
             })
             .collect(),
         tool_versions: Default::default(),

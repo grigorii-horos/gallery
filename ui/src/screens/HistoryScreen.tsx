@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
 import { num } from "../i18n/format";
-import { errorText, historyApi, type ItemView, type ReportDetail, type ReportEntry } from "../api";
+import { errorText, historyApi, type ItemView, type ReportDetail, type ReportEntry, type UndoPreview } from "../api";
 import {
   entryChips,
   entryTally,
@@ -200,7 +200,7 @@ function Detail({
   const [filter, setFilter] = useState<ItemFilter>("all");
   const [shown, setShown] = useState(PAGE);
   const [confirm, setConfirm] = useState<
-    "undo" | "retry" | { target: string; sources: string[] } | { file: ItemView } | null
+    "undo" | "retry" | { target: string; preview: UndoPreview } | { file: ItemView } | null
   >(null);
 
   useEffect(() => {
@@ -409,7 +409,7 @@ function Detail({
                     type="button"
                     className="btn quiet"
                     aria-label={t("history_undo_target", { target: g.target })}
-                    onClick={() => setConfirm({ target: g.target, sources: g.sources })}
+                    onClick={() => setConfirm({ target: g.target, preview: g.preview })}
                   >
                     {t("history_undo")}
                   </button>
@@ -451,7 +451,7 @@ function Detail({
       )}
       {confirm !== null && typeof confirm === "object" && "target" in confirm && (
         <Confirm
-          {...partialUndoConfirmLines(confirm.target, targets.find((g) => g.target === confirm.target)!.preview)}
+          {...partialUndoConfirmLines(confirm.target, confirm.preview)}
           action={t("undo")}
           onCancel={() => setConfirm(null)}
           onConfirm={() => {

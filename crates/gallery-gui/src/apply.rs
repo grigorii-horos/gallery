@@ -575,6 +575,7 @@ mod tests {
             outputs: vec![],
             error: Some("x".into()),
             elapsed_ms: None,
+            target: None,
         });
         write(&r);
         assert_eq!(already_applied(&path), Some(Applied::WithFailures));
@@ -707,6 +708,7 @@ mod tests {
             }],
             error: None,
             elapsed_ms: None,
+            target: None,
         };
         let report = Report {
             run_id: "x".into(),
