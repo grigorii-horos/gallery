@@ -1,4 +1,4 @@
-import { useState, type ComponentType } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { useTranslation } from "react-i18next";
 import type { ConditionKey, FilterDraft } from "../model";
 import { AiCondition } from "./AiCondition";
@@ -63,13 +63,31 @@ export function ConditionMenu({ filter, ctx, onAdd }: { filter: FilterDraft; ctx
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
   const have = activeKeys(filter);
+  const button = useRef<HTMLButtonElement>(null);
+  const list = useRef<HTMLUListElement>(null);
+  // Opening moves focus to the first choice, so the keyboard can pick one.
+  useEffect(() => {
+    if (open) list.current?.querySelector<HTMLButtonElement>("button:not(:disabled)")?.focus();
+  }, [open]);
+  const close = () => {
+    setOpen(false);
+    button.current?.focus();
+  };
   return (
-    <div className="cond-menu">
-      <button type="button" className="link small" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
+    <div
+      className="cond-menu"
+      onKeyDown={(e) => {
+        if (open && e.key === "Escape") {
+          e.stopPropagation();
+          close();
+        }
+      }}
+    >
+      <button ref={button} type="button" className="link small" aria-haspopup="menu" aria-expanded={open} onClick={() => setOpen(!open)}>
         {t("cond_add")}
       </button>
       {open && (
-        <ul role="menu" className="cond-menu-list">
+        <ul ref={list} role="menu" className="cond-menu-list">
           {CONDITIONS.map((c) => (
             <li key={c.key} role="none">
               <button
@@ -78,7 +96,7 @@ export function ConditionMenu({ filter, ctx, onAdd }: { filter: FilterDraft; ctx
                 className="btn quiet"
                 disabled={have.includes(c.key)}
                 onClick={() => {
-                  setOpen(false);
+                  close();
                   onAdd(c.key, c.fresh(ctx));
                 }}
               >

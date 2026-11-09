@@ -123,4 +123,24 @@ describe("places panel", () => {
     expect(await within(form).findByRole("alert")).toHaveTextContent("no GPS position in this file");
     expect(within(form).getByLabelText("Latitude")).toHaveValue("");
   });
+
+  it("shows the error of a failing photo dialog instead of leaving it unhandled", async () => {
+    const user = userEvent.setup();
+    pick.mockRejectedValue("dialog plugin is not available");
+    render(<Panel />);
+    await screen.findByText("home");
+    const form = screen.getByRole("button", { name: "Add place" }).closest(".field-body") as HTMLElement;
+    await user.click(within(form).getByRole("button", { name: "From a photo…" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("dialog plugin is not available");
+  });
+
+  it("says so when a place's coordinates are not numbers, and saves nothing", async () => {
+    const user = userEvent.setup();
+    render(<Panel />);
+    const row = (await screen.findByText("home")).closest("li")!;
+    expect(within(row).queryByRole("alert")).toBeNull();
+    await user.type(within(row).getByLabelText("Latitude"), "x");
+    expect(within(row).getByRole("alert")).toHaveTextContent("must be numbers");
+    expect(lastOps()).not.toContainEqual(expect.objectContaining({ op: "set_place" }));
+  });
 });

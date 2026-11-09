@@ -85,6 +85,20 @@ describe("geo", () => {
   });
 });
 
+describe("geo circle", () => {
+  it("keeps the circle form when its numbers are cleared, and accepts negative coordinates", async () => {
+    const { last, user } = setup(GeoCondition, { lat: 1, lon: 2, km: 3 });
+    expect(screen.getByLabelText("Latitude")).not.toHaveAttribute("min");
+    expect(screen.getByLabelText("Radius, km")).toHaveAttribute("min", "0");
+    for (const l of ["Latitude", "Longitude", "Radius, km"]) await user.clear(screen.getByLabelText(l));
+    expect(last()).toEqual({});
+    // Still the circle form, not the GPS one.
+    expect(screen.getByLabelText("Place by")).toHaveValue("circle");
+    await user.type(screen.getByLabelText("Latitude"), "-33.9");
+    expect(last()).toEqual({ lat: -33.9 });
+  });
+});
+
 describe("event", () => {
   it("edits its options", async () => {
     const { last, user } = setup(EventCondition, {});
@@ -146,6 +160,15 @@ describe("duplicate", () => {
     expect(last()).toEqual({ of: ["sources", "outputs"] });
     await user.click(screen.getByLabelText("Not (invert)"));
     expect(last()).toEqual({ of: ["sources", "outputs"], not: true });
+  });
+});
+
+describe("duplicate scope", () => {
+  it("lets the last scope be switched off instead of snapping back", async () => {
+    const { last, user } = setup(DuplicateCondition, {});
+    await user.click(screen.getByRole("button", { name: "other files of the scan" }));
+    expect(last()).toEqual({ of: [] });
+    expect(screen.getByRole("button", { name: "other files of the scan" })).toHaveAttribute("aria-pressed", "false");
   });
 });
 

@@ -265,7 +265,9 @@ function TargetForm({
         </button>
       </div>
 
-      <h3>{t("targets_filters")} <span className="muted small">— {t("targets_filters_hint")}</span></h3>
+      <h3>
+        {t("targets_filters")} <span className="muted small">— {t("targets_filters_hint")}</span>
+      </h3>
       {form.filters.length === 0 && <p className="notice warn">{t("targets_no_filters")}</p>}
       <ul className="filters">
         {form.filters.map((f, i) => (
@@ -317,7 +319,7 @@ function TargetForm({
               onChange={(no) => update({ ...form, outputs: form.outputs.map((x, j) => (j === i ? no : x)) })}
               onRemove={() => update({ ...form, outputs: form.outputs.filter((_, j) => j !== i) })}
             />
-  ))}
+          ))}
           <button type="button" className="link small" onClick={() => update({ ...form, outputs: [...form.outputs, { dir: "", server_dir: null, content: [], rename: [] }] })}>
             {t("targets_add_output")}
           </button>

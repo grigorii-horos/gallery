@@ -149,6 +149,19 @@ describe("condition menu and forms", () => {
     expect(screen.getByRole("menuitem", { name: "Date" })).toBeEnabled();
   });
 
+  it("moves focus into the menu and closes it with Escape, back to its button", async () => {
+    const user = userEvent.setup();
+    render(<Targets />);
+    await screen.findByRole("textbox", { name: "Target name" });
+    const open = screen.getByRole("button", { name: "+ condition" });
+    await user.click(open);
+    // The first choice that is not disabled (Duplicate is taken).
+    expect(screen.getByRole("menuitem", { name: "Date" })).toHaveFocus();
+    await user.keyboard("{Escape}");
+    expect(screen.queryByRole("menu")).toBeNull();
+    expect(open).toHaveFocus();
+  });
+
   it("adds a condition from the menu", async () => {
     const user = userEvent.setup();
     render(<Targets />);

@@ -260,7 +260,7 @@ describe("“Decide”", () => {
     it("groups by event and decides a whole event at once", async () => {
       const user = userEvent.setup();
       view = seriesView();
-      view.plan.review.push(nameError(item("bad", "2026-04-12T10:30:00", "no ext")));
+      view.plan.review.push(nameError(item("bad", "2026-04-12T10:30:00", "no ext")), item("plain.jpg", "2026-04-12T10:10:00"));
       await open();
       expect(screen.queryByRole("region", { name: /^Event/ })).toBeNull();
       await user.click(screen.getByRole("checkbox", { name: "Group by event" }));
@@ -269,14 +269,55 @@ describe("“Decide”", () => {
       expect(events).toHaveLength(2);
       const first = events[0];
       await user.selectOptions(within(first).getByRole("combobox", { name: "Target for the whole event" }), "Photos");
-      // The name-error file is left out of a target.
-      await user.click(within(first).getByRole("button", { name: "Apply to the whole event (3)" }));
+      // The name-error file and the held series' members are left out of a target.
+      expect(within(first).getByText(/1 files with a name that cannot be built are left out/)).toBeInTheDocument();
+      expect(within(first).getByText(/3 files held for a series are left out/)).toBeInTheDocument();
+      await user.click(within(first).getByRole("button", { name: "Apply to the whole event (1)" }));
       expect(invoke).toHaveBeenCalledWith("decide_event", {
         path: null,
-        members: members.map((m) => ({ source_path: m, size: 1, mtime_ns: 0 })),
+        members: [{ source_path: "/media/cam/plain.jpg", size: 1, mtime_ns: 0 }],
         action: { kind: "target", name: "Photos" },
       });
       expect(invoke.mock.calls.filter((c) => c[0] === "decide_event")).toHaveLength(1);
+    });
+
+    it("counts a card as a series in the head and shows it in every event of its members", async () => {
+      const user = userEvent.setup();
+      // One series whose members fall in two events.
+      const split = [
+        { ...inSeries("s1.jpg"), captured: "2026-04-12T10:00:00" },
+        { ...inSeries("s2.jpg"), captured: "2026-04-12T20:00:00" },
+        { ...inSeries("s3.jpg"), captured: "2026-04-12T20:00:05" },
+      ];
+      view = { ...base, plan: { ...base.plan, review: [...split, item("late.jpg", "2026-04-12T20:30:00")] } };
+      await open();
+      // 4 files in the card and one ordinary series.
+      expect(screen.getByText("4 files in 2 series")).toBeInTheDocument();
+      await user.click(screen.getByRole("checkbox", { name: "Group by event" }));
+      const events = screen.getAllByRole("region", { name: /^Event/ });
+      expect(events).toHaveLength(2);
+      for (const ev of events) expect(within(ev).getByRole("region", { name: "Best shot of the series s1.jpg" })).toBeInTheDocument();
+      // The count is what is on screen: the card's 3 files, plus late.jpg in the second event.
+      const count = (ev: HTMLElement) => ev.querySelector(".event-head .muted")!.textContent;
+      expect(count(events[0])).toBe("3 files");
+      expect(count(events[1])).toBe("4 files");
+    });
+
+    it("moves the best-shot pick with the arrow keys like a radio group", async () => {
+      const user = userEvent.setup();
+      view = seriesView();
+      await open();
+      const card = screen.getByRole("region", { name: "Best shot of the series s1.jpg" });
+      const shots = within(card).getAllByRole("radio");
+      expect(shots.map((x) => x.tabIndex)).toEqual([0, -1, -1]);
+      shots[0].focus();
+      await user.keyboard("{ArrowRight}");
+      expect(shots[1]).toHaveFocus();
+      expect(shots.map((x) => x.getAttribute("aria-checked"))).toEqual(["false", "true", "false"]);
+      await user.keyboard("{ArrowLeft}{ArrowLeft}");
+      // Wraps round to the last shot.
+      expect(shots[2]).toHaveFocus();
+      expect(shots[2]).toHaveAttribute("aria-checked", "true");
     });
   });
 });

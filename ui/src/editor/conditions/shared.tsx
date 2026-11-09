@@ -71,14 +71,28 @@ export function OptText({
   );
 }
 
-/** A labelled optional number option. */
-export function OptNumber({ o, k, label, onChange, placeholder }: { o: Raw; k: string; label: string; onChange: (o: Raw) => void; placeholder?: string }) {
+/** A labelled optional number option; `min` defaults to 0, `null` allows negatives (coordinates). */
+export function OptNumber({
+  o,
+  k,
+  label,
+  onChange,
+  placeholder,
+  min = 0,
+}: {
+  o: Raw;
+  k: string;
+  label: string;
+  onChange: (o: Raw) => void;
+  placeholder?: string;
+  min?: number | null;
+}) {
   return (
     <Field label={label}>
       <input
         className="input mono"
         type="number"
-        min={0}
+        min={min ?? undefined}
         step="any"
         aria-label={label}
         value={str(o[k])}
