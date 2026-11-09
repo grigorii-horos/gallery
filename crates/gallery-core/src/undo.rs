@@ -82,22 +82,24 @@ pub fn undo_items_with(
     undo_selected(report_path, Some(&only), progress, cancel)
 }
 
-/// An error naming the first of `sources` that is not an item of the report
-/// (a typo or another run's file): [`undo_items`] alone ignores such a path.
+/// An error naming the first of `sources` that is not an item of the report.
 pub fn ensure_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<()> {
     resolve_in_report(report_path, sources).map(|_| ())
 }
 
-/// The spelling of a path that stands for the file itself: canonical when
-/// the file exists (`/var` and `/private/var` are one place on macOS, a
-/// symlinked folder is its target), else the path as given.
+/// The spelling of a path that stands for the file itself: its longest
+/// existing ancestor canonical (`/var` and `/private/var` are one place on
+/// macOS, a symlinked folder is its target) and the rest appended, so a file
+/// that is gone (moved by the run) still has one.
 fn file_identity(p: &Path) -> PathBuf {
-    std::fs::canonicalize(p).unwrap_or_else(|_| p.to_path_buf())
+    crate::plan::resolve(p).unwrap_or_else(|| p.to_path_buf())
 }
 
-/// `sources` as the report spells them, matched by file identity
-/// ([`file_identity`]) and else by the exact path; an error names the first
-/// that is not an item of the report.
+/// `sources` as the report spells them, matched by the exact path and else by
+/// file identity ([`file_identity`]); an error names the first that is not an
+/// item of the report (a typo or another run's file: [`undo_items`] alone
+/// ignores such a path). Hand the result to [`undo_items`], which compares
+/// the report's own spelling.
 pub fn resolve_in_report(report_path: &Path, sources: &[PathBuf]) -> Result<Vec<PathBuf>> {
     let mut report = read_report(report_path)?;
     merge_journal(report_path, &mut report)?;
@@ -891,11 +893,15 @@ mod tests {
             resolve_in_report(&rp, std::slice::from_ref(&by_real)).unwrap(),
             vec![link.join("a.jpg")]
         );
-        ensure_in_report(&rp, &[by_real]).unwrap();
-        // A file that is gone still matches by its exact spelling.
+        // A file that is gone still matches by its exact spelling, and by its
+        // real folder when the report spells it through the symlink.
         assert_eq!(
             resolve_in_report(&rp, std::slice::from_ref(&gone)).unwrap(),
             vec![gone.clone()]
+        );
+        assert_eq!(
+            resolve_in_report(&rp, &[real.join("gone.jpg")]).unwrap(),
+            vec![gone]
         );
         // Another file is no item of the run.
         assert!(resolve_in_report(&rp, &[real.join("b.jpg")]).is_err());
