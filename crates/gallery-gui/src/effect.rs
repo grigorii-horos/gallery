@@ -291,9 +291,10 @@ mod tests {
         eprintln!("scan {} ms, diff {} ms", first.scan_ms, second.diff_ms);
         assert!(!second.rescanned);
         // Debug build; release is about three times faster.
-        // Shared CI runners are several times slower (1.5 s seen on macOS).
+        // Shared CI runners are several times slower (1.5 s seen on macOS,
+        // 6.1 s on Windows, where every file stat is much slower).
         let limit = if std::env::var_os("CI").is_some() {
-            5000
+            if cfg!(windows) { 15000 } else { 5000 }
         } else {
             1000
         };
