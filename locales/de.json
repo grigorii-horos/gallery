@@ -646,5 +646,9 @@
   "edit.rename_decisions_other": "%{count} manuelle Entscheidungen verwenden das Ziel „%{from}“. Nach der Umbenennung gilt: %{after}; nach dem Speichern kannst du sie auf „%{to}“ übertragen.",
   "edit.no_preset_named": "es gibt keine Voreinstellung namens „%{name}“",
   "edit.preset_unparsed": "die Voreinstellung konnte nicht gelesen werden",
-  "edit.bad_preview_date": "Datum „%{value}“ ist ungültig: erwartet wird die Form 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "Datum „%{value}“ ist ungültig: erwartet wird die Form 2026-11-05 10:15:00",
+  "filter.bad_range": "„%{value}“ ist kein gültiger Bereich: Formen wie 10..20, ..500KB, >=60 oder <40 verwenden",
+  "filter.bad_duration": "„%{value}“ ist keine gültige Dauer: Zahl und s, m, h, d, w oder y (zum Beispiel 2h)",
+  "filter.bad_time": "„%{value}“ ist kein gültiges Zeitfenster: Form 22:00..05:00 verwenden",
+  "filter.bad_date": "„%{value}“ ist kein gültiger Datumsbereich: Form 2026-08-12..2026-08-18 verwenden (jedes Ende darf fehlen)"
 }

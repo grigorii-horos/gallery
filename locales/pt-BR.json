@@ -653,5 +653,9 @@
   "edit.rename_decisions_other": "%{count} decisões manuais usam o destino “%{from}”. Após a renomeação: %{after}; depois de salvar você pode movê-las para “%{to}”.",
   "edit.no_preset_named": "não há predefinição chamada “%{name}”",
   "edit.preset_unparsed": "não foi possível interpretar a predefinição",
-  "edit.bad_preview_date": "a data “%{value}” não é válida: esperada a forma 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "a data “%{value}” não é válida: esperada a forma 2026-11-05 10:15:00",
+  "filter.bad_range": "“%{value}” não é um intervalo válido: use formas como 10..20, ..500KB, >=60 ou <40",
+  "filter.bad_duration": "“%{value}” não é uma duração válida: um número e s, m, h, d, w ou y (por exemplo 2h)",
+  "filter.bad_time": "“%{value}” não é uma faixa de horário válida: use a forma 22:00..05:00",
+  "filter.bad_date": "“%{value}” não é um intervalo de datas válido: use a forma 2026-08-12..2026-08-18 (qualquer extremo pode ficar vazio)"
 }

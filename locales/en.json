@@ -646,5 +646,9 @@
   "edit.rename_decisions_other": "%{count} manual decisions use target “%{from}”. After the rename %{after}; after saving you can move them to “%{to}”.",
   "edit.no_preset_named": "there is no preset named “%{name}”",
   "edit.preset_unparsed": "preset could not be parsed",
-  "edit.bad_preview_date": "date “%{value}” is not valid: expected the form 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "date “%{value}” is not valid: expected the form 2026-11-05 10:15:00",
+  "filter.bad_range": "“%{value}” is not a valid range: use forms like 10..20, ..500KB, >=60 or <40",
+  "filter.bad_duration": "“%{value}” is not a valid duration: use a number and s, m, h, d, w or y (for example 2h)",
+  "filter.bad_time": "“%{value}” is not a valid time window: use the form 22:00..05:00",
+  "filter.bad_date": "“%{value}” is not a valid date range: use the form 2026-08-12..2026-08-18 (either end may be empty)"
 }

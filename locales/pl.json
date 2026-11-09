@@ -660,5 +660,9 @@
   "edit.rename_decisions_other": "%{count} decyzji ręcznej używają celu „%{from}”. Po zmianie nazwy: %{after}; po zapisaniu możesz je przenieść na „%{to}”.",
   "edit.no_preset_named": "nie ma ustawienia wstępnego o nazwie „%{name}”",
   "edit.preset_unparsed": "nie udało się przetworzyć ustawienia wstępnego",
-  "edit.bad_preview_date": "data „%{value}” jest nieprawidłowa: oczekiwana postać 2026-11-05 10:15:00"
+  "edit.bad_preview_date": "data „%{value}” jest nieprawidłowa: oczekiwana postać 2026-11-05 10:15:00",
+  "filter.bad_range": "„%{value}” nie jest poprawnym zakresem: użyj postaci 10..20, ..500KB, >=60 lub <40",
+  "filter.bad_duration": "„%{value}” nie jest poprawnym czasem trwania: liczba i s, m, h, d, w lub y (na przykład 2h)",
+  "filter.bad_time": "„%{value}” nie jest poprawnym przedziałem godzin: użyj postaci 22:00..05:00",
+  "filter.bad_date": "„%{value}” nie jest poprawnym zakresem dat: użyj postaci 2026-08-12..2026-08-18 (dowolny koniec może być pusty)"
 }
