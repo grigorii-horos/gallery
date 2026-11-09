@@ -147,6 +147,11 @@ export function ExplainView({ ex }: { ex: Explanation }) {
                   <strong>{tg.name}</strong> {tg.ai && <span className="muted small">{t("stage_ai")}</span>}{" "}
                   <span className="small">{tg.taken ? t("explain_took") : tg.candidate ? t("explain_fits") : t("explain_no_fit")}</span>
                 </p>
+                {tg.miss && (
+                  <p className="muted small explain-miss">
+                    {t("explain_miss", { condition: tg.miss.condition, detail: tg.miss.detail })}
+                  </p>
+                )}
                 <ul className="explain-filters">
                   {tg.filters.map((f) => (
                     <li key={f.index} className={f.fit}>

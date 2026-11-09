@@ -30,7 +30,7 @@ const base: EditOutcome = {
       {
         name: "Timeline",
         kind: "folders",
-        filters: [{ sources: ["camera"], match: ["@photo"], exclude: [] }],
+        filters: [{ sources: ["camera"], match: ["@photo"], exclude: [], ai: null, expand: null, conditions: {} }],
         outputs: [{ dir: "~/Timeline", server_dir: null, content: [{ preset: "avif-high", mask: null }], rename: [] }],
       },
     ],
@@ -122,11 +122,12 @@ describe("editor screens", () => {
     await waitFor(() => expect(lastOps()[0]).toMatchObject({ op: "add_target", kind: "folders", target: { name: "New target" } }));
   });
 
-  it("gives a filter an AI description", async () => {
+  it("gives a filter an AI description from the condition menu", async () => {
     const user = userEvent.setup();
     render(<Targets />);
     await screen.findByRole("textbox", { name: "Target name" });
-    await user.click(screen.getByRole("button", { name: "Description for the AI" }));
+    await user.click(screen.getByRole("button", { name: "+ condition" }));
+    await user.click(screen.getByRole("menuitem", { name: "AI" }));
     await waitFor(() => {
       const op = lastOps()[0];
       expect(op.op === "update_target" && op.target.filters[0].ai).toBe("");

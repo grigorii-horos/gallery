@@ -4078,3 +4078,98 @@ ul.preview-rows .no .mark {
     overflow: auto;
   }
 }
+
+/* kind and AI badges in the target list */
+.badge {
+  display: inline-block;
+  margin-left: 4px;
+  padding: 0 6px;
+  border-radius: 8px;
+  background: var(--sunken);
+  color: var(--muted);
+  font-size: var(--fs-sm);
+  font-weight: 500;
+}
+
+.badge.kind-trash {
+  background: var(--bad-soft);
+  color: var(--bad);
+}
+
+.badge.kind-keep,
+.badge.ai {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* conditions of a filter */
+.cond {
+  margin: 8px 0;
+  padding: 6px 10px 8px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+
+.cond legend {
+  padding: 0 4px;
+  font-weight: 500;
+}
+
+.cond-not {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin: 4px 12px 4px 0;
+  color: var(--muted);
+}
+
+.cond-menu {
+  position: relative;
+  display: inline-block;
+}
+
+.cond-menu-list {
+  position: absolute;
+  z-index: 5;
+  min-width: 160px;
+  margin: 2px 0 0;
+  padding: 4px;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  background: var(--surface);
+  list-style: none;
+}
+
+.cond-menu-list .btn {
+  display: block;
+  width: 100%;
+  text-align: left;
+}
+
+/* places in Settings */
+.place-list {
+  margin: 0 0 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.place-row,
+.place-fields {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 4px 0;
+}
+
+.place-name {
+  min-width: 90px;
+}
+
+.place-fields .input {
+  width: 120px;
+}
+
+.explain-miss {
+  margin: 2px 0;
+}

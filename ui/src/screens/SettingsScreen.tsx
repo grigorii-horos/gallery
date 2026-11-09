@@ -3,13 +3,15 @@ import { useTranslation } from "react-i18next";
 import { errorText, localeApi, trayApi, type TraySettings } from "../api";
 import { LANGUAGES, SYSTEM, applyLanguageSetting, languageSetting, normalizeSetting, systemLocale } from "../i18n";
 import type { PendingState } from "../tray/usePending";
+import { PlacesPanel } from "../editor/PlacesPanel";
+import type { ConfigEditor } from "../editor/useConfigEditor";
 import { AiExamples } from "./AiExamples";
 
 const MIN_INTERVAL = 5;
 const MAX_INTERVAL = 24 * 60;
 
 /// Tray and notifications. Gallery only counts and tells; it never applies by itself.
-export function SettingsScreen({ pending }: { pending: PendingState }) {
+export function SettingsScreen({ pending, editor }: { pending: PendingState; editor?: ConfigEditor }) {
   const { t } = useTranslation();
   const [language, setLanguage] = useState(languageSetting);
   const [languageError, setLanguageError] = useState<string | null>(null);
@@ -172,6 +174,7 @@ export function SettingsScreen({ pending }: { pending: PendingState }) {
               : t("settings_last", { total: s.total, ready: s.to_process, ai: s.need_ai })}
         </p>
       )}
+      {editor && <PlacesPanel editor={editor} />}
       <AiExamples />
     </section>
   );

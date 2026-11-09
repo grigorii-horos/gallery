@@ -23,11 +23,11 @@ export interface FilterDraft {
   match: string[] | null;
   exclude: string[];
   /** AI category description; null: the filter does not ask the AI. */
-  ai?: string | null;
+  ai: string | null;
   /** `"event"`: grow the match to whole events. */
-  expand?: string | null;
+  expand: string | null;
   /** The other conditions as written in the file (TOML values as JSON), by key. */
-  conditions?: Record<string, unknown>;
+  conditions: Record<string, unknown>;
 }
 
 /** The keys of a filter that hold a condition. */

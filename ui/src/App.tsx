@@ -196,7 +196,7 @@ function ScreenBody({
         />
       );
     case "settings":
-      return <SettingsScreen pending={pending} />;
+      return <SettingsScreen pending={pending} editor={editor} />;
     default:
       return <Placeholder />;
   }

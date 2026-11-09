@@ -139,3 +139,20 @@ describe("file search", () => {
     expect(suggestFiles(files, "img", 1)).toHaveLength(1);
   });
 });
+
+describe("explain view: first miss of a target", () => {
+  const target = (miss: { condition: string; detail: string } | null) => ({
+    ...base,
+    stages: [{ kind: "folders" as const, ai: false, name: "Together", candidate: false, taken: false, filters: [], miss }],
+  });
+
+  it("says which condition kept the file out", () => {
+    render(<ExplainView ex={target({ condition: "near", detail: "no olga file within 2h / 1 km" })} />);
+    expect(screen.getByText("Not taken: near: no olga file within 2h / 1 km")).toBeInTheDocument();
+  });
+
+  it("shows nothing when the target has no miss", () => {
+    render(<ExplainView ex={target(null)} />);
+    expect(screen.queryByText(/Not taken/)).toBeNull();
+  });
+});
