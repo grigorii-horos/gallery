@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
+import { gpsOf, pickMediaFile } from "./api";
 import { EditorBar, EditorFailure, Field, TextInput } from "./fields";
 import type { PlaceDraft } from "./model";
 import type { ConfigEditor } from "./useConfigEditor";
@@ -23,6 +24,18 @@ function PlaceFields({
   onChange: (p: { name: string; lat: string; lon: string; km: string }) => void;
 }) {
   const { t } = useTranslation();
+  const [problem, setProblem] = useState<string | null>(null);
+  const fromPhoto = async () => {
+    setProblem(null);
+    const file = await pickMediaFile(t("place_from_photo_title"));
+    if (!file) return;
+    try {
+      const { lat, lon } = await gpsOf(file);
+      onChange({ ...place, lat: String(lat), lon: String(lon) });
+    } catch (e) {
+      setProblem(typeof e === "string" ? e : e instanceof Error ? e.message : String(e));
+    }
+  };
   const coord = (k: "lat" | "lon") => (text: string) => {
     const pair = parseLatLon(text);
     onChange(pair ? { ...place, lat: String(pair.lat), lon: String(pair.lon) } : { ...place, [k]: text });
@@ -33,6 +46,14 @@ function PlaceFields({
       <TextInput mono label={t("place_lat")} placeholder={t("place_lat")} value={place.lat} onChange={coord("lat")} />
       <TextInput mono label={t("place_lon")} placeholder={t("place_lon")} value={place.lon} onChange={coord("lon")} />
       <TextInput mono label={t("place_km")} placeholder={t("place_km")} value={place.km} onChange={(km) => onChange({ ...place, km })} />
+      <button type="button" className="link small" onClick={() => void fromPhoto()}>
+        {t("place_from_photo")}
+      </button>
+      {problem && (
+        <p role="alert" className="bad-text small">
+          {problem}
+        </p>
+      )}
     </div>
   );
 }

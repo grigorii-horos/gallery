@@ -553,6 +553,7 @@
   "gui.internal_retry": "błąd wewnętrzny ponawiania: %{error}",
   "gui.internal_scan": "błąd wewnętrzny skanowania: %{error}",
   "gui.internal_check": "błąd wewnętrzny sprawdzania: %{error}",
+  "gui.place_no_gps": "ten plik nie zawiera pozycji GPS",
   "gui.no_config_dir": "brak katalogu ustawień użytkownika",
   "desktop.linux_only": "wpis w menu i uruchamianie przy logowaniu są dostępne tylko w systemie Linux; tutaj użyj ustawień systemu",
   "current.no_files": "W planie nie ma plików do uruchomienia.",

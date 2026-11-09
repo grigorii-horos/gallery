@@ -545,6 +545,7 @@
   "gui.internal_retry": "interner Fehler bei der Wiederholung: %{error}",
   "gui.internal_scan": "interner Scanfehler: %{error}",
   "gui.internal_check": "interner Prüffehler: %{error}",
+  "gui.place_no_gps": "Diese Datei enthält keine GPS-Position",
   "gui.no_config_dir": "kein Einstellungsverzeichnis des Benutzers",
   "desktop.linux_only": "Menüeintrag und Start bei der Anmeldung gibt es nur unter Linux; nutzen Sie hier die Einstellungen des Betriebssystems",
   "current.no_files": "Der Plan enthält keine Dateien zum Ausführen.",

@@ -13,6 +13,9 @@ const base: EditOutcome = {
   draft: { sources: [], places: [{ name: "home", lat: 47.0245, lon: 28.8323, km: 2 }], targets: [], masks: [] },
 };
 
+const pick = vi.fn<() => Promise<string | null>>();
+vi.mock("@tauri-apps/plugin-dialog", () => ({ open: () => pick() }));
+
 type Args = { ops: EditOp[] };
 const invoke = vi.fn<(cmd: string, args: Args) => Promise<unknown>>();
 vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args: Args) => invoke(cmd, args) }));
@@ -86,5 +89,38 @@ describe("places panel", () => {
     await screen.findByText("home");
     await user.click(screen.getByRole("button", { name: "Remove place home" }));
     await waitFor(() => expect(lastOps()).toEqual([{ op: "remove_place", name: "home" }]));
+  });
+
+  it("takes the coordinates of a picked photo", async () => {
+    const user = userEvent.setup();
+    pick.mockResolvedValue("/p/a.jpg");
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "gps_of") return { lat: 46.5, lon: 28.25 };
+      if (cmd === "config_draft") return { ...base, changed: args.ops.length > 0 };
+      throw new Error(cmd);
+    });
+    render(<Panel />);
+    await screen.findByText("home");
+    const form = screen.getByRole("button", { name: "Add place" }).closest(".field-body") as HTMLElement;
+    await user.click(within(form).getByRole("button", { name: "From a photo…" }));
+    await waitFor(() => expect(within(form).getByLabelText("Latitude")).toHaveValue("46.5"));
+    expect(within(form).getByLabelText("Longitude")).toHaveValue("28.25");
+    expect(invoke).toHaveBeenCalledWith("gps_of", { path: "/p/a.jpg" });
+  });
+
+  it("shows the message of a photo without GPS and keeps the fields", async () => {
+    const user = userEvent.setup();
+    pick.mockResolvedValue("/p/b.jpg");
+    invoke.mockImplementation(async (cmd, args) => {
+      if (cmd === "gps_of") throw "no GPS position in this file";
+      if (cmd === "config_draft") return { ...base, changed: args.ops.length > 0 };
+      throw new Error(cmd);
+    });
+    render(<Panel />);
+    await screen.findByText("home");
+    const form = screen.getByRole("button", { name: "Add place" }).closest(".field-body") as HTMLElement;
+    await user.click(within(form).getByRole("button", { name: "From a photo…" }));
+    expect(await within(form).findByRole("alert")).toHaveTextContent("no GPS position in this file");
+    expect(within(form).getByLabelText("Latitude")).toHaveValue("");
   });
 });
