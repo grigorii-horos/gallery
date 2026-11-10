@@ -47,7 +47,7 @@
   "files_one": "{{count, number}} fichier",
   "files_many": "{{count, number}} de fichiers",
   "files_other": "{{count, number}} fichiers",
-  "fate_trash": "vers la corbeille",
+  "fate_trash": "copiés, original vers la corbeille",
   "fate_renamed": "renommés sur place",
   "fate_kept": "laissés où ils sont",
   "fate_to_trash": "à la corbeille (cibles corbeille)",

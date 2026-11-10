@@ -49,7 +49,7 @@
   "files_few": "{{count, number}} pliki",
   "files_many": "{{count, number}} plików",
   "files_other": "{{count, number}} pliku",
-  "fate_trash": "do kosza",
+  "fate_trash": "skopiowane, oryginał do kosza",
   "fate_renamed": "zmieniono nazwy na miejscu",
   "fate_kept": "zostają tam, gdzie są",
   "fate_to_trash": "do kosza (cele-kosze)",
