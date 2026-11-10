@@ -45,7 +45,7 @@
   "unit_gb": "{{n}} GB",
   "files_one": "{{count, number}} Datei",
   "files_other": "{{count, number}} Dateien",
-  "fate_trash": "in den Papierkorb",
+  "fate_trash": "kopiert, Original in den Papierkorb",
   "fate_renamed": "vor Ort umbenannt",
   "fate_kept": "bleiben, wo sie sind",
   "fate_to_trash": "in den Papierkorb (Papierkorb-Ziele)",

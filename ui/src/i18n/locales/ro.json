@@ -47,7 +47,7 @@
   "files_one": "{{count, number}} fișier",
   "files_few": "{{count, number}} fișiere",
   "files_other": "{{count, number}} de fișiere",
-  "fate_trash": "în coș",
+  "fate_trash": "copiate, originalul în coș",
   "fate_renamed": "redenumite pe loc",
   "fate_kept": "lăsate unde sunt",
   "fate_to_trash": "la coș (ținte de tip coș)",
