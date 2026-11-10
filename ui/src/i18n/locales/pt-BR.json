@@ -479,6 +479,7 @@
   "decide_decided": "decidido",
   "decide_name_error": "Não foi possível montar o nome para o destino “{{targets}}”",
   "decide_ai_suggests": "A IA sugere:",
+  "ai_tags_label": "Palavras-chave",
   "decide_more_reasons_one": "e mais {{count, number}} explicação em arquivos da série",
   "decide_more_reasons_many": "e mais {{count, number}} explicações em arquivos da série",
   "decide_more_reasons_other": "e mais {{count, number}} explicações em arquivos da série",

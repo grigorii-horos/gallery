@@ -158,8 +158,12 @@ ANSWER FORMAT:\n\
 NONE — no category fits;\n\
 - reason — the reason in 3-6 words, written in English (\"Lidl receipt\", \"ESP32 board close-up\");\n\
 - confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n\
-- tags — 3-10 short keywords for what the frame shows, lowercase, written in English;\n\
-- description — one sentence describing the frame, written in English.\n";
+- tags — 5-20 short keywords, lowercase, written in English: the concrete things \
+visible in the frame (name each kind of object, food, plant, animal or product specifically, \
+e.g. \"pineapple\", not just \"fruit\"), the kind of place and the activity;\n\
+- description — 2-4 sentences in English describing what is in the frame concretely: \
+the main objects by name, readable text or brands, the setting and what is happening. \
+Say what you see, not a guess about the occasion.\n";
     assert_eq!(system_prompt(&cats(), &SourcePrompt::default()), expected);
     // Blank texts add nothing.
     assert_eq!(
@@ -423,7 +427,7 @@ fn classify_parses_structured_answer() {
         "2023-06-01"
     );
     let body: Value = serde_json::from_slice(&reqs[0].body).unwrap();
-    assert_eq!(body["max_tokens"], 4000);
+    assert_eq!(body["max_tokens"], 16000);
     assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
     assert_eq!(body["output_config"]["effort"], "low");
     assert_eq!(body["output_config"]["format"]["type"], "json_schema");
@@ -532,7 +536,7 @@ fn classify_refusal_is_low() {
 }
 
 #[test]
-fn classify_max_tokens_is_error() {
+fn an_answer_cut_off_at_max_tokens_goes_to_review_and_is_not_cached() {
     require_tool!("magick");
     let rt = rt();
     let s = server(
@@ -541,11 +545,25 @@ fn classify_max_tokens_is_error() {
             .set_body_json(json!({"stop_reason": "max_tokens", "content": [], "usage": {}})),
     );
     let d = tempfile::tempdir().unwrap();
-    let c = classifier(&s.uri(), &d.path().join("cache.jsonl"));
-    let e = c
-        .classify(vec![req(d.path(), "a.jpg", cats())])
-        .unwrap_err();
-    assert!(matches!(e, Error::Ai(m) if m.contains("max_tokens")));
+    let cache = d.path().join("cache.jsonl");
+    let c = classifier(&s.uri(), &cache);
+    let r = c
+        .classify(vec![
+            req(d.path(), "a.jpg", cats()),
+            req(d.path(), "b.jpg", cats()),
+        ])
+        .unwrap();
+    assert_eq!(r.len(), 2);
+    for a in &r {
+        assert_eq!(a.category, None);
+        assert_eq!(a.confidence, Confidence::Low);
+        assert!(a.reason.contains("max_tokens"), "{}", a.reason);
+    }
+    assert!(
+        std::fs::read_to_string(&cache)
+            .unwrap_or_default()
+            .is_empty()
+    );
 }
 
 #[test]
@@ -816,13 +834,14 @@ fn classify_asks_for_tags_and_reads_them() {
     assert_eq!(schema["properties"]["tags"]["type"], "array");
     assert_eq!(schema["properties"]["tags"]["items"]["type"], "string");
     assert_eq!(schema["properties"]["description"]["type"], "string");
-    // Optional: an answer without them is still valid.
+    // Required: left optional, the model always left the description out.
     assert_eq!(
         schema["required"],
-        json!(["category", "reason", "confidence"])
+        json!(["category", "reason", "confidence", "tags", "description"])
     );
+    assert_eq!(schema["additionalProperties"], json!(false));
     let system = body["system"][0]["text"].as_str().unwrap();
-    assert!(system.contains("- tags — 3-10 short keywords"), "{system}");
+    assert!(system.contains("- tags — 5-20 short keywords"), "{system}");
 
     // The cache keeps them: the next run has them without a request.
     let again = classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
@@ -831,20 +850,23 @@ fn classify_asks_for_tags_and_reads_them() {
 }
 
 #[test]
-fn answer_cached_before_tags_is_used_without_a_request() {
+fn answer_cached_before_meta_version_is_asked_again_and_replaced() {
     use gallery_core::ai::cache::{key, prompt_hash};
     use gallery_core::ai::cache_prompt;
-    use gallery_core::ai::client::cached_answer;
+    use gallery_core::ai::client::{cached_answer, is_cached};
     require_tool!("magick");
     let rt = rt();
     let s = server(
         &rt,
-        ResponseTemplate::new(200).set_body_json(answer_body("Boards", "new answer", "OK")),
+        ResponseTemplate::new(200).set_body_json(answer_body_with(json!({
+            "category": "Boards", "reason": "new answer", "confidence": "OK",
+            "tags": ["board"], "description": "A board on a desk.",
+        }))),
     );
     let d = tempfile::tempdir().unwrap();
     let cache = d.path().join("cache.jsonl");
     let file = req(d.path(), "a.jpg", cats());
-    // A row exactly as an older build wrote it: no tags, no description.
+    // A row exactly as an older build wrote it: no tags, no description, no meta.
     let model = AiSettings::default().model;
     let k = key(
         &file.entry,
@@ -855,15 +877,27 @@ fn answer_cached_before_tags_is_used_without_a_request() {
         "category": "Receipts", "reason": "old answer", "confidence": "OK"
     }});
     std::fs::write(&cache, format!("{row}\n")).unwrap();
+    let old = gallery_core::ai::cache::Cache::load(&cache);
+    assert!(!is_cached(&old, &model, &file));
+    assert!(cached_answer(&old, &model, &file).is_none());
 
     let r = classifier(&s.uri(), &cache)
         .classify(vec![file.clone()])
         .unwrap();
-    assert!(received(&rt, &s).is_empty(), "no new paid request");
-    assert_eq!(r[0].category.as_deref(), Some("Receipts"));
-    assert_eq!(r[0].reason, "old answer");
-    assert!(r[0].meta.is_none());
+    assert_eq!(received(&rt, &s).len(), 1, "asked again");
+    assert_eq!(r[0].reason, "new answer");
     let loaded = gallery_core::ai::cache::Cache::load(&cache);
-    let hit = cached_answer(&loaded, &model, &file).expect("cached");
-    assert!(hit.meta.is_none());
+    assert!(is_cached(&loaded, &model, &file));
+    let hit = cached_answer(&loaded, &model, &file).expect("replaced");
+    assert_eq!(hit.reason, "new answer");
+    assert_eq!(hit.meta.unwrap().description, "A board on a desk.");
+    let text = std::fs::read_to_string(&cache).unwrap();
+    assert!(
+        text.lines().last().unwrap().contains("\"meta\":2"),
+        "{text}"
+    );
+
+    // Now current: not asked a third time.
+    classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
+    assert_eq!(received(&rt, &s).len(), 1);
 }

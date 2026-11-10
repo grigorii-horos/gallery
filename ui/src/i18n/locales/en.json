@@ -451,6 +451,7 @@
   "decide_decided": "decided",
   "decide_name_error": "The name could not be built for target “{{targets}}”",
   "decide_ai_suggests": "AI suggests:",
+  "ai_tags_label": "Keywords",
   "decide_more_reasons_one": "and {{count, number}} more explanation on files of the series",
   "decide_more_reasons_other": "and {{count, number}} more explanations on files of the series",
   "decide_series_files": "Files of the series",

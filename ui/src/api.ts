@@ -227,6 +227,14 @@ export interface ReviewItem {
   name_error?: boolean;
   /** Held because a `series` condition matched: the whole series and the suggested best shot. */
   series?: { members: string[]; best: string } | null;
+  /** The AI's keywords and description behind a doubtful answer; absent when it gave none or in older plans. */
+  ai_meta?: AiMeta | null;
+}
+
+/** Keywords and description the AI gave a file. */
+export interface AiMeta {
+  tags?: string[];
+  description?: string;
 }
 
 export interface OverrideResult {
@@ -356,7 +364,7 @@ export type ExplainAi =
   | { kind: "no_candidates" }
   | { kind: "not_reached"; candidates: string[] }
   | { kind: "not_asked"; candidates: string[] }
-  | { kind: "cached"; category: string | null; reason: string; low: boolean };
+  | { kind: "cached"; category: string | null; reason: string; low: boolean; meta?: AiMeta };
 
 export interface StepCheck {
   index: number;
