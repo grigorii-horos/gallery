@@ -69,6 +69,8 @@ fn reads_a_saved_plan() {
         .unwrap()
         .env("LC_ALL", "C")
         .env("HOME", d.path())
+        // `HOME` alone does not move the XDG dirs when they are set.
+        .env("GALLERY_DATA_DIR", d.path().join("data/gallery"))
         .args(["unmatched", "-c"])
         .arg(&cfg)
         .arg("--plan")
