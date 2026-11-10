@@ -158,8 +158,12 @@ ANSWER FORMAT:\n\
 NONE — no category fits;\n\
 - reason — the reason in 3-6 words, written in English (\"Lidl receipt\", \"ESP32 board close-up\");\n\
 - confidence — OK, or LOW if the frame sits on the border of two categories or you are unsure.\n\
-- tags — 3-10 short keywords for what the frame shows, lowercase, written in English;\n\
-- description — one sentence describing the frame, written in English.\n";
+- tags — 5-20 short keywords, lowercase, written in English: the concrete things \
+visible in the frame (name each kind of object, food, plant, animal or product specifically, \
+e.g. \"pineapple\", not just \"fruit\"), the kind of place and the activity;\n\
+- description — 2-4 sentences in English describing what is in the frame concretely: \
+the main objects by name, readable text or brands, the setting and what is happening. \
+Say what you see, not a guess about the occasion.\n";
     assert_eq!(system_prompt(&cats(), &SourcePrompt::default()), expected);
     // Blank texts add nothing.
     assert_eq!(
@@ -836,7 +840,7 @@ fn classify_asks_for_tags_and_reads_them() {
         json!(["category", "reason", "confidence"])
     );
     let system = body["system"][0]["text"].as_str().unwrap();
-    assert!(system.contains("- tags — 3-10 short keywords"), "{system}");
+    assert!(system.contains("- tags — 5-20 short keywords"), "{system}");
 
     // The cache keeps them: the next run has them without a request.
     let again = classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
