@@ -986,6 +986,12 @@ async fn effect_preview(
     .await
 }
 
+/// Stop the `effect_preview` in flight (it answers `None`).
+#[tauri::command]
+fn effect_cancel(state: State<'_, effect::EffectState>) {
+    state.cancel();
+}
+
 /// Apply `ops` to the config at `path` and write it in place (comments and
 /// order kept, `.bak` of the old text) — only if the file still has
 /// `version` and the result is valid.
@@ -1319,6 +1325,7 @@ pub fn run() {
             remove_override,
             config_draft,
             effect_preview,
+            effect_cancel,
             config_retarget_overrides,
             config_edit,
             config_preview_change,

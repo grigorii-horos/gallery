@@ -18,6 +18,12 @@ export interface EffectState {
   error: string | null;
   /** Set while the backend counts duplicates and sharpness: the panel shows it instead of looking frozen. */
   counting?: Counting | null;
+  /** The person stopped the request in flight: nothing runs until the next edit or `recalc`. */
+  stopped?: boolean;
+  /** Cancel the request in flight. */
+  stop?: () => void;
+  /** Ask again for the same edits (after a stop). */
+  recalc?: () => void;
 }
 
 /** `effect-progress` payload (the backend's scan progress shape). */
@@ -37,6 +43,8 @@ interface Answer {
 export function useEffectPreview(configPath: string | null, ops: EditOp[], active: boolean): EffectState {
   const [answer, setAnswer] = useState<Answer>({ diff: null, error: null, forOps: [] });
   const [counting, setCounting] = useState<Counting | null>(null);
+  const [stoppedFor, setStoppedFor] = useState<EditOp[] | null>(null);
+  const [nonce, setNonce] = useState(0);
   // The backend reports only the slow group passes of a preview as "plan"
   // events (the scan and EXIF stages are quick or kept between requests).
   useEffect(() => {
@@ -62,6 +70,7 @@ export function useEffectPreview(configPath: string | null, ops: EditOp[], activ
     let stale = false;
     const timer = setTimeout(() => {
       setCounting(null);
+      setStoppedFor(null);
       effectApi.preview(configPath, ops).then(
         (diff) => {
           if (stale || diff === null) return;
@@ -80,7 +89,14 @@ export function useEffectPreview(configPath: string | null, ops: EditOp[], activ
       stale = true;
       clearTimeout(timer);
     };
-  }, [configPath, ops, active]);
-  const loading = active && answer.forOps !== ops;
-  return { diff: answer.diff, error: answer.error, loading, counting: loading ? counting : null };
+  }, [configPath, ops, active, nonce]);
+  const stopped = active && stoppedFor === ops && answer.forOps !== ops;
+  const loading = active && answer.forOps !== ops && !stopped;
+  const stop = () => {
+    setStoppedFor(ops);
+    setCounting(null);
+    effectApi.cancel().catch(() => {});
+  };
+  const recalc = () => setNonce((n) => n + 1);
+  return { diff: answer.diff, error: answer.error, loading, counting: loading ? counting : null, stopped, stop, recalc };
 }
