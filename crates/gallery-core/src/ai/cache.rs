@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 use std::fs::OpenOptions;
-use std::io::Write;
+use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -87,11 +87,59 @@ impl Cache {
         .expect("row serializes");
         let mut f = OpenOptions::new()
             .create(true)
+            .read(true)
             .append(true)
             .open(&self.path)?;
-        writeln!(f, "{line}")?;
-        f.flush()?;
+        // A run that died in the middle of a line left it without its line
+        // break: start on a fresh line so this answer is not glued to it.
+        let mut row = String::new();
+        if f.metadata()?.len() > 0 {
+            let mut last = [0u8; 1];
+            f.seek(SeekFrom::End(-1))?;
+            f.read_exact(&mut last)?;
+            if last[0] != b'\n' {
+                row.push('\n');
+            }
+        }
+        row.push_str(&line);
+        row.push('\n');
+        f.write_all(row.as_bytes())?;
+        // Paid for: on disk before the next request, even if the power goes.
+        f.sync_data()?;
         self.map.insert(key, result);
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn stored(c: &str) -> Stored {
+        Stored {
+            category: c.into(),
+            reason: String::new(),
+            confidence: "ok".into(),
+            tags: Vec::new(),
+            description: String::new(),
+        }
+    }
+
+    #[test]
+    fn an_answer_after_a_torn_line_is_kept() {
+        let d = tempfile::tempdir().unwrap();
+        let path = d.path().join("ai-cache.jsonl");
+        let mut c = Cache::load(&path);
+        c.put("a".into(), stored("A")).unwrap();
+        // A run died while writing the next row.
+        let mut f = OpenOptions::new().append(true).open(&path).unwrap();
+        f.write_all(br#"{"key":"b","res"#).unwrap();
+        drop(f);
+        let mut c = Cache::load(&path);
+        c.put("c".into(), stored("C")).unwrap();
+        let c = Cache::load(&path);
+        assert_eq!(c.get("a").unwrap().category, "A");
+        assert_eq!(c.get("c").unwrap().category, "C");
+        assert!(c.get("b").is_none());
     }
 }
