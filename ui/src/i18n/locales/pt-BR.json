@@ -47,7 +47,7 @@
   "files_one": "{{count, number}} arquivo",
   "files_many": "{{count, number}} de arquivos",
   "files_other": "{{count, number}} arquivos",
-  "fate_trash": "para a lixeira",
+  "fate_trash": "copiados, original para a lixeira",
   "fate_renamed": "renomeados no lugar",
   "fate_kept": "ficam onde estão",
   "fate_to_trash": "para a lixeira (destinos de lixeira)",

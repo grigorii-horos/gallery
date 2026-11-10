@@ -49,7 +49,7 @@
   "files_few": "{{count, number}} файла",
   "files_many": "{{count, number}} файлов",
   "files_other": "{{count, number}} файла",
-  "fate_trash": "в корзину",
+  "fate_trash": "скопировано, оригинал в корзину",
   "fate_renamed": "переименованы на месте",
   "fate_kept": "остаются на месте",
   "fate_to_trash": "в корзину (цели-корзины)",
