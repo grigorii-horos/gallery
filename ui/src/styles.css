@@ -3176,8 +3176,20 @@ textarea.input {
   position: static;
 }
 
+/* One ordered list on the left, the chosen target's editor taking the rest. */
 .editor-screen .targets {
-  grid-template-columns: repeat(3, minmax(150px, 1fr)) minmax(400px, 1.7fr);
+  grid-template-columns: minmax(260px, 360px) minmax(0, 1fr);
+}
+
+.editor-screen .targets .inspector {
+  grid-column: auto;
+  max-width: 980px;
+}
+
+@media (max-width: 900px) {
+  .editor-screen .targets {
+    grid-template-columns: minmax(0, 1fr);
+  }
 }
 
 .pchip-panel .check {
