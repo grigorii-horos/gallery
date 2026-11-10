@@ -101,7 +101,7 @@ gallery scan -c <CONFIG> --estimate
 
 Scans the sources, reads EXIF, routes every file through the ordered targets, and writes a plan. It
 prints a summary: files per target, the review list, unmatched files, warnings and the AI cost.
-Nothing but the plan file (and the AI answer cache) is written; sources are never touched.
+Nothing but the plan file (and the stored AI answers) is written; sources are never touched.
 
 | Flag | Meaning |
 |---|---|

@@ -93,7 +93,7 @@ pub fn is_cached(cache: &Cache, model: &str, req: &AiRequest) -> bool {
     let hash = cache::prompt_hash(&cache_prompt(&req.categories, &req.prompt));
     cache
         .get(&cache::key(&req.entry, model, &hash))
-        .is_some_and(|s| s.is_current() && to_answer(s, &req.categories).is_ok())
+        .is_some_and(|s| s.is_current() && to_answer(s, &req.categories, model).is_ok())
 }
 
 /// The cached answer for a request, if there is a valid one (no API call).
@@ -102,7 +102,7 @@ pub fn cached_answer(cache: &Cache, model: &str, req: &AiRequest) -> Option<AiAn
     cache
         .get(&cache::key(&req.entry, model, &hash))
         .filter(|s| s.is_current())
-        .and_then(|s| to_answer(s, &req.categories).ok())
+        .and_then(|s| to_answer(s, &req.categories, model).ok())
 }
 
 /// System prompt for one category set; categories are (name, description).
@@ -278,9 +278,18 @@ impl AiClassifier {
         self
     }
 
-    /// Default answer cache: `<user cache dir>/gallery/ai-cache.jsonl`.
+    /// Default answer store: `<user data dir>/gallery/ai-answers.jsonl`.
+    /// The answers are paid for, so they live with the data, not the cache;
+    /// an answer cache left by older builds
+    /// (`<user cache dir>/gallery/ai-cache.jsonl`) is moved there once.
     pub fn default_cache_path() -> Option<PathBuf> {
-        crate::paths::cache_dir().map(|d| d.join("ai-cache.jsonl"))
+        let path = crate::paths::data_dir()?.join("ai-answers.jsonl");
+        if let Some(old) = crate::paths::cache_dir().map(|d| d.join("ai-cache.jsonl"))
+            && let Err(e) = cache::adopt(&old, &path)
+        {
+            eprintln!("warning: {}: {e}", old.display());
+        }
+        Some(path)
     }
 
     pub fn usage(&self) -> Usage {
@@ -288,7 +297,13 @@ impl AiClassifier {
     }
 }
 
-pub(crate) fn to_answer(stored: &Stored, categories: &[(String, String)]) -> Result<AiAnswer> {
+/// `model` is the model the answer came from; it goes into the metadata of
+/// the outputs with the rest of the answer.
+pub(crate) fn to_answer(
+    stored: &Stored,
+    categories: &[(String, String)],
+    model: &str,
+) -> Result<AiAnswer> {
     let category = if stored.category == NONE_CATEGORY || stored.category == LEGACY_NONE_CATEGORY {
         None
     } else if categories.iter().any(|(n, _)| *n == stored.category) {
@@ -307,7 +322,13 @@ pub(crate) fn to_answer(stored: &Stored, categories: &[(String, String)]) -> Res
         } else {
             Confidence::Low
         },
-        meta: to_meta(stored),
+        meta: to_meta(stored).map(|m| AiMeta {
+            category: stored.category.clone(),
+            confidence: stored.confidence.clone(),
+            reason: one_line(&stored.reason),
+            model: model.to_string(),
+            ..m
+        }),
     })
 }
 
@@ -341,7 +362,11 @@ fn to_meta(stored: &Stored) -> Option<AiMeta> {
         .take(MAX_DESCRIPTION_CHARS)
         .collect();
     let description = description.trim().to_string();
-    (!tags.is_empty() || !description.is_empty()).then_some(AiMeta { tags, description })
+    (!tags.is_empty() || !description.is_empty()).then_some(AiMeta {
+        tags,
+        description,
+        ..AiMeta::default()
+    })
 }
 
 fn backoff(base_ms: u64, attempt: u32) -> Duration {
@@ -536,7 +561,7 @@ async fn run_job(
         return Ok((job.idx, None, stored));
     };
     // Validate now so a bad answer fails the run instead of poisoning the cache.
-    to_answer(&stored, &ctx.categories)?;
+    to_answer(&stored, &ctx.categories, "")?;
     Ok((job.idx, Some(job.key), stored))
 }
 
@@ -586,7 +611,7 @@ impl Classifier for AiClassifier {
             let hit = cache
                 .get(&key)
                 .filter(|s| s.is_current())
-                .and_then(|s| to_answer(s, &req.categories).ok());
+                .and_then(|s| to_answer(s, &req.categories, model).ok());
             match hit {
                 Some(a) => answers[idx] = Some(a),
                 None => groups[gi].2.push(Job {
@@ -646,9 +671,10 @@ impl AiClassifier {
     ) -> Result<()> {
         let jobs_limit = self.shared.settings.jobs.max(1);
         let cancel = count.cancel.clone();
+        let model = self.shared.settings.model.clone();
         let mut record = |r: JobResult, ctx: &GroupCtx| -> Result<()> {
             let (idx, key, stored) = r;
-            answers[idx] = Some(to_answer(&stored, &ctx.categories)?);
+            answers[idx] = Some(to_answer(&stored, &ctx.categories, &model)?);
             if let Some(key) = key {
                 cache.put(key, stored)?;
             }
@@ -754,6 +780,26 @@ mod tests {
 #[cfg(test)]
 mod meta_tests {
     use super::*;
+
+    #[test]
+    fn the_answer_rides_along_in_the_meta() {
+        let mut s = stored(&["cat"], "A cat.");
+        s.category = "cats".into();
+        s.reason = "a cat\non a sofa".into();
+        s.confidence = "OK".into();
+        let cats = vec![("cats".to_string(), String::new())];
+        let m = to_answer(&s, &cats, "claude-x").unwrap().meta.unwrap();
+        assert_eq!(
+            (
+                m.category.as_str(),
+                m.confidence.as_str(),
+                m.reason.as_str(),
+                m.model.as_str()
+            ),
+            ("cats", "OK", "a cat on a sofa", "claude-x")
+        );
+        assert_eq!(m.tags, vec!["cat".to_string()]);
+    }
 
     fn stored(tags: &[&str], description: &str) -> Stored {
         Stored {

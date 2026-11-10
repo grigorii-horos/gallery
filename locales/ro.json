@@ -260,7 +260,7 @@
   "ai.key_perms": "permisiunile %{mode} îl expun altora, este necesar 600 (chmod 600)",
   "ai.key_replaced": "fișierul a fost înlocuit în timpul citirii",
   "ai.http_client": "client http: %{error}",
-  "ai.no_cache_dir": "nu există dosar de cache al utilizatorului",
+  "ai.no_cache_dir": "nu există dosar de date al utilizatorului",
   "ai.unknown_category": "modelul a răspuns cu o categorie necunoscută `%{name}`",
   "ai.no_key": "nu există cheie: setează ANTHROPIC_API_KEY sau CLAUDE_API_KEY ori pune cheia în ~/.config/gallery/api-key (mod 600)",
   "ai.request_failed": "solicitarea a eșuat: %{error}",

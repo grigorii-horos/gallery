@@ -747,9 +747,11 @@ examples = 20                    # default: how many of your latest corrections 
 | `examples` | `20` | When you change what the AI decided (or settle a doubtful answer), the correction is stored as **text** (no images) and the latest `examples` for the same source are shown to the model in later requests. `0` turns learning off. List/clear them with `gallery examples list` / `clear` or in the GUI Settings. Examples affect only *new* requests: answers already cached stay valid. |
 | `language` | unset | Language the model writes each answer's short reason, keywords and description in: a name or a code (`"en"`, `"ru"`, `"Ukrainian"`). **Unset, it follows the interface language** — the GUI's *Settings → Language*, or the CLI's `--lang` / `LANG` — and is English by default. An explicit value always wins. Category names and descriptions are sent exactly as you wrote them. |
 
-Answers are cached per file (path, size, mtime), model and prompt in
-`<cache dir>/gallery/ai-cache.jsonl`, so a file is asked about only once; examples are deliberately
-not part of the cache key.
+Answers are stored per file (path, size, mtime), model and prompt in
+`<data dir>/gallery/ai-answers.jsonl` (`~/.local/share/gallery/` on Linux), so a file is asked about
+only once; examples are deliberately not part of the key. The answers live with your data, not in
+the cache directory, so clearing caches does not throw away what was paid for. A
+`<cache dir>/gallery/ai-cache.jsonl` left by older versions is moved there on first use.
 
 ### AI keywords and description
 
@@ -766,6 +768,10 @@ routing; they are only written into the file's metadata:
   `XMP-dc:Description`; videos in MP4/MOV get the same XMP tags. Keywords the file already has are
   kept (and not repeated); an existing description is never replaced. exiftool cannot write
   WebM/MKV: such an output is placed without them, with a warning.
+- The answer itself goes along in Gallery's own XMP namespace
+  (`https://github.com/grigorii-horos/gallery/ns/1.0/`): `XMP-gallery:AiCategory` (the target the
+  AI picked), `AiConfidence` (`OK` or `LOW`), `AiReason` and `AiModel`. They replace any earlier
+  values. Plain exiftool reads them back: `exiftool -XMP-gallery:all photo.avif`.
 - **Older answers are asked again once.** Answers cached before keywords and a description were
   required carry neither, so the next scan sends those files to the model again (a paid request) and
   stores the new answer in place of the old one. The cost estimate (`--estimate`, and the one in the
