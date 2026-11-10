@@ -479,6 +479,7 @@
   "decide_decided": "decidido",
   "decide_name_error": "No se pudo construir el nombre para el destino «{{targets}}»",
   "decide_ai_suggests": "La IA propone:",
+  "ai_tags_label": "Palabras clave",
   "decide_more_reasons_one": "y {{count, number}} explicación más en archivos de la serie",
   "decide_more_reasons_many": "y {{count, number}} explicaciones más en archivos de la serie",
   "decide_more_reasons_other": "y {{count, number}} explicaciones más en archivos de la serie",

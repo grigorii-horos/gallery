@@ -285,6 +285,7 @@ fn ai_not_asked_then_cached() {
             Stored {
                 tags: Vec::new(),
                 description: String::new(),
+                meta: crate::ai::cache::META_VERSION,
                 category: "cats".into(),
                 reason: "a cat".into(),
                 confidence: "OK".into(),
@@ -760,6 +761,7 @@ rename = ["By extension"]
             Stored {
                 tags: Vec::new(),
                 description: String::new(),
+                meta: crate::ai::cache::META_VERSION,
                 category: "cats".into(),
                 reason: "a cat".into(),
                 confidence: "LOW".into(),

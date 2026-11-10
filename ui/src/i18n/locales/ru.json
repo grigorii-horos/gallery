@@ -507,6 +507,7 @@
   "decide_decided": "решено",
   "decide_name_error": "Не удалось построить имя для цели «{{targets}}»",
   "decide_ai_suggests": "ИИ предлагает:",
+  "ai_tags_label": "Ключевые слова",
   "decide_more_reasons_one": "и ещё {{count, number}} пояснение к файлам серии",
   "decide_more_reasons_few": "и ещё {{count, number}} пояснения к файлам серии",
   "decide_more_reasons_many": "и ещё {{count, number}} пояснений к файлам серии",

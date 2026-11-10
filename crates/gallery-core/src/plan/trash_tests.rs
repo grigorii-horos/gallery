@@ -85,6 +85,7 @@ fn trash_and_keep_targets_become_plan_decisions() {
                 suggested: "Junk".into(),
                 reason: "series".into(),
                 series: Some(series.clone()),
+                ai_meta: None,
             },
         ),
     ];

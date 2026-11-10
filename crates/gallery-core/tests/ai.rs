@@ -834,11 +834,12 @@ fn classify_asks_for_tags_and_reads_them() {
     assert_eq!(schema["properties"]["tags"]["type"], "array");
     assert_eq!(schema["properties"]["tags"]["items"]["type"], "string");
     assert_eq!(schema["properties"]["description"]["type"], "string");
-    // Optional: an answer without them is still valid.
+    // Required: left optional, the model always left the description out.
     assert_eq!(
         schema["required"],
-        json!(["category", "reason", "confidence"])
+        json!(["category", "reason", "confidence", "tags", "description"])
     );
+    assert_eq!(schema["additionalProperties"], json!(false));
     let system = body["system"][0]["text"].as_str().unwrap();
     assert!(system.contains("- tags — 5-20 short keywords"), "{system}");
 
@@ -849,20 +850,23 @@ fn classify_asks_for_tags_and_reads_them() {
 }
 
 #[test]
-fn answer_cached_before_tags_is_used_without_a_request() {
+fn answer_cached_before_meta_version_is_asked_again_and_replaced() {
     use gallery_core::ai::cache::{key, prompt_hash};
     use gallery_core::ai::cache_prompt;
-    use gallery_core::ai::client::cached_answer;
+    use gallery_core::ai::client::{cached_answer, is_cached};
     require_tool!("magick");
     let rt = rt();
     let s = server(
         &rt,
-        ResponseTemplate::new(200).set_body_json(answer_body("Boards", "new answer", "OK")),
+        ResponseTemplate::new(200).set_body_json(answer_body_with(json!({
+            "category": "Boards", "reason": "new answer", "confidence": "OK",
+            "tags": ["board"], "description": "A board on a desk.",
+        }))),
     );
     let d = tempfile::tempdir().unwrap();
     let cache = d.path().join("cache.jsonl");
     let file = req(d.path(), "a.jpg", cats());
-    // A row exactly as an older build wrote it: no tags, no description.
+    // A row exactly as an older build wrote it: no tags, no description, no meta.
     let model = AiSettings::default().model;
     let k = key(
         &file.entry,
@@ -873,15 +877,27 @@ fn answer_cached_before_tags_is_used_without_a_request() {
         "category": "Receipts", "reason": "old answer", "confidence": "OK"
     }});
     std::fs::write(&cache, format!("{row}\n")).unwrap();
+    let old = gallery_core::ai::cache::Cache::load(&cache);
+    assert!(!is_cached(&old, &model, &file));
+    assert!(cached_answer(&old, &model, &file).is_none());
 
     let r = classifier(&s.uri(), &cache)
         .classify(vec![file.clone()])
         .unwrap();
-    assert!(received(&rt, &s).is_empty(), "no new paid request");
-    assert_eq!(r[0].category.as_deref(), Some("Receipts"));
-    assert_eq!(r[0].reason, "old answer");
-    assert!(r[0].meta.is_none());
+    assert_eq!(received(&rt, &s).len(), 1, "asked again");
+    assert_eq!(r[0].reason, "new answer");
     let loaded = gallery_core::ai::cache::Cache::load(&cache);
-    let hit = cached_answer(&loaded, &model, &file).expect("cached");
-    assert!(hit.meta.is_none());
+    assert!(is_cached(&loaded, &model, &file));
+    let hit = cached_answer(&loaded, &model, &file).expect("replaced");
+    assert_eq!(hit.reason, "new answer");
+    assert_eq!(hit.meta.unwrap().description, "A board on a desk.");
+    let text = std::fs::read_to_string(&cache).unwrap();
+    assert!(
+        text.lines().last().unwrap().contains("\"meta\":2"),
+        "{text}"
+    );
+
+    // Now current: not asked a third time.
+    classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
+    assert_eq!(received(&rt, &s).len(), 1);
 }

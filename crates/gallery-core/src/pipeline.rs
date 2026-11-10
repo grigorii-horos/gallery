@@ -437,6 +437,7 @@ dir = "{out}/rest"
             Stored {
                 tags: Vec::new(),
                 description: String::new(),
+                meta: crate::ai::cache::META_VERSION,
                 category: "cats".into(),
                 reason: "r".into(),
                 confidence: "OK".into(),
@@ -445,6 +446,38 @@ dir = "{out}/rest"
         .unwrap();
         let d = run(&Overrides::default());
         assert_eq!((d.candidates, d.cached, d.to_send), (1, 1, 0));
+
+        // An answer of the older format (meta 0) is asked again: to send.
+        let mut c = Cache::load(&cache_path);
+        c.put(
+            cache::key(cat, &f.cfg.ai.model, &hash),
+            Stored {
+                tags: Vec::new(),
+                description: String::new(),
+                meta: 0,
+                category: "cats".into(),
+                reason: "r".into(),
+                confidence: "OK".into(),
+            },
+        )
+        .unwrap();
+        let d = run(&Overrides::default());
+        assert_eq!((d.candidates, d.cached, d.to_send), (1, 0, 1));
+        // Its replacement (last row wins) is free again.
+        c.put(
+            cache::key(cat, &f.cfg.ai.model, &hash),
+            Stored {
+                tags: vec!["cat".into()],
+                description: "A cat.".into(),
+                meta: crate::ai::cache::META_VERSION,
+                category: "cats".into(),
+                reason: "r".into(),
+                confidence: "OK".into(),
+            },
+        )
+        .unwrap();
+        let d = run(&Overrides::default());
+        assert_eq!((d.cached, d.to_send), (1, 0));
 
         // A cached answer of another model does not count.
         let mut other = f.cfg.clone();

@@ -26,7 +26,7 @@ use crate::plan::{
 };
 use crate::progress::{Cancel, NoProgress};
 use crate::route::{
-    AiAnswer, AiRequest, Classifier, Confidence, Decision, Fit, RouteCtx, Via, filter_fit,
+    AiAnswer, AiMeta, AiRequest, Classifier, Confidence, Decision, Fit, RouteCtx, Via, filter_fit,
     first_miss, route_with_overrides,
 };
 use crate::scan::{FileEntry, Rejection, mtime_ns, rejection, scan_sources_with};
@@ -143,6 +143,9 @@ pub enum AiState {
         category: Option<String>,
         reason: String,
         low: bool,
+        /// Keywords and description of the answer, when it has them.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        meta: Option<AiMeta>,
     },
 }
 
@@ -619,6 +622,7 @@ pub fn explain(
                 category: a.category.clone(),
                 reason: a.reason.clone(),
                 low: a.confidence == Confidence::Low,
+                meta: a.meta.clone(),
             },
         }
     };
@@ -1190,6 +1194,7 @@ impl Explanation {
                 category,
                 reason,
                 low,
+                ..
             } => {
                 let none = crate::t!("explain.tree.no_category");
                 let _ = writeln!(

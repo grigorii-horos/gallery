@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tokio::sync::Semaphore;
 use tokio::task::JoinSet;
 
-use super::cache::{self, Cache, Stored};
+use super::cache::{self, Cache, META_VERSION, Stored};
 use super::thumb;
 use crate::config::AiSettings;
 use crate::media::{MediaKind, kind_of};
@@ -93,7 +93,7 @@ pub fn is_cached(cache: &Cache, model: &str, req: &AiRequest) -> bool {
     let hash = cache::prompt_hash(&cache_prompt(&req.categories, &req.prompt));
     cache
         .get(&cache::key(&req.entry, model, &hash))
-        .is_some_and(|s| to_answer(s, &req.categories).is_ok())
+        .is_some_and(|s| s.is_current() && to_answer(s, &req.categories).is_ok())
 }
 
 /// The cached answer for a request, if there is a valid one (no API call).
@@ -101,6 +101,7 @@ pub fn cached_answer(cache: &Cache, model: &str, req: &AiRequest) -> Option<AiAn
     let hash = cache::prompt_hash(&cache_prompt(&req.categories, &req.prompt));
     cache
         .get(&cache::key(&req.entry, model, &hash))
+        .filter(|s| s.is_current())
         .and_then(|s| to_answer(s, &req.categories).ok())
 }
 
@@ -184,7 +185,7 @@ fn schema(categories: &[(String, String)]) -> Value {
             "tags": {"type": "array", "items": {"type": "string"}},
             "description": {"type": "string"},
         },
-        "required": ["category", "reason", "confidence"],
+        "required": ["category", "reason", "confidence", "tags", "description"],
         "additionalProperties": false,
     })
 }
@@ -452,6 +453,7 @@ impl Shared {
                     confidence: "LOW".into(),
                     tags: Vec::new(),
                     description: String::new(),
+                    meta: META_VERSION,
                 }));
             }
             Some("max_tokens") => return Ok(None),
@@ -468,8 +470,13 @@ impl Shared {
             .and_then(|b| b.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Ai(crate::t!("ai.no_text")))?;
-        serde_json::from_str(text)
-            .map(Some)
+        serde_json::from_str::<Stored>(text)
+            .map(|s| {
+                Some(Stored {
+                    meta: META_VERSION,
+                    ..s
+                })
+            })
             .map_err(|e| Error::Ai(crate::t!("ai.bad_answer", error = e)))
     }
 }
@@ -509,6 +516,7 @@ async fn run_job(
                 confidence: "LOW".into(),
                 tags: Vec::new(),
                 description: String::new(),
+                meta: META_VERSION,
             };
             return Ok((job.idx, None, stored));
         }
@@ -523,6 +531,7 @@ async fn run_job(
             confidence: "LOW".into(),
             tags: Vec::new(),
             description: String::new(),
+            meta: META_VERSION,
         };
         return Ok((job.idx, None, stored));
     };
@@ -576,6 +585,7 @@ impl Classifier for AiClassifier {
             let key = cache::key(&req.entry, model, &groups[gi].1);
             let hit = cache
                 .get(&key)
+                .filter(|s| s.is_current())
                 .and_then(|s| to_answer(s, &req.categories).ok());
             match hit {
                 Some(a) => answers[idx] = Some(a),
@@ -752,6 +762,7 @@ mod meta_tests {
             confidence: "OK".into(),
             tags: tags.iter().map(|t| t.to_string()).collect(),
             description: description.into(),
+            meta: META_VERSION,
         }
     }
 

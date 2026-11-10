@@ -123,6 +123,24 @@ describe("“Decide”", () => {
     history.replaceState(null, "", "#flow");
   });
 
+  it("shows the AI's description and keywords next to its reason", async () => {
+    view = {
+      ...base,
+      plan: {
+        ...base.plan,
+        review: [
+          { ...item("a.jpg", "2026-04-12T10:00:00"), ai_meta: { tags: ["invoice", "paper"], description: "A scanned invoice on a desk." } },
+          item("c.jpg", "2026-04-12T12:00:00", "Landscape or document"),
+        ],
+      },
+    };
+    const series = await open();
+    expect(within(series[0]).getByText("A scanned invoice on a desk.")).toBeInTheDocument();
+    const tags = within(within(series[0]).getByRole("list", { name: "Keywords" })).getAllByRole("listitem");
+    expect(tags.map((x) => x.textContent)).toEqual(["invoice", "paper"]);
+    expect(within(series[1]).queryByRole("list", { name: "Keywords" })).toBeNull();
+  });
+
   it("groups review files into series and applies a target to the checked ones", async () => {
     const user = userEvent.setup();
     const series = await open();

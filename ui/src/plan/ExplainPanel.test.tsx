@@ -17,6 +17,32 @@ const base: Explanation = {
 };
 
 describe("explain view", () => {
+  it("shows the AI's reason, description and keywords", () => {
+    render(
+      <ExplainView
+        ex={{
+          ...base,
+          ai: {
+            kind: "cached",
+            category: "pics",
+            reason: "Lidl receipt",
+            low: false,
+            meta: { tags: ["receipt", "lidl"], description: "A Lidl receipt on a table." },
+          },
+        }}
+      />,
+    );
+    expect(screen.getByText("Lidl receipt")).toBeInTheDocument();
+    expect(screen.getByText("A Lidl receipt on a table.")).toBeInTheDocument();
+    const tags = within(screen.getByRole("list", { name: "Keywords" })).getAllByRole("listitem");
+    expect(tags.map((x) => x.textContent)).toEqual(["receipt", "lidl"]);
+  });
+
+  it("shows no keywords for an answer without them", () => {
+    render(<ExplainView ex={{ ...base, ai: { kind: "cached", category: "pics", reason: "old", low: false } }} />);
+    expect(screen.queryByRole("list", { name: "Keywords" })).toBeNull();
+  });
+
   it("leads with the verdict and shows why each filter missed", () => {
     render(
       <ExplainView

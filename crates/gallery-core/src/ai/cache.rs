@@ -11,9 +11,12 @@ use sha2::{Digest, Sha256};
 use crate::Result;
 use crate::scan::FileEntry;
 
+/// Version of the answer format. 2: `tags` and a `description` are required
+/// of the model. A cached answer with a lower `meta` (0: written before) is
+/// not used: the file is asked again once.
+pub const META_VERSION: u32 = 2;
+
 /// The model's structured answer as stored (category is the raw enum value).
-/// `tags` and `description` are absent in answers cached before they were
-/// asked for: such an answer is used as is, without them.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct Stored {
     pub category: String,
@@ -23,6 +26,16 @@ pub struct Stored {
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    /// Answer-format version; rows of older builds have none (0).
+    #[serde(default)]
+    pub meta: u32,
+}
+
+impl Stored {
+    /// Whether the answer was made for the current format ([`META_VERSION`]).
+    pub fn is_current(&self) -> bool {
+        self.meta >= META_VERSION
+    }
 }
 
 #[derive(Serialize, Deserialize)]
@@ -122,6 +135,7 @@ mod tests {
             confidence: "ok".into(),
             tags: Vec::new(),
             description: String::new(),
+            meta: META_VERSION,
         }
     }
 

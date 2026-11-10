@@ -4263,3 +4263,26 @@ ul.preview-rows .no .mark {
   border-bottom: 1px solid var(--line);
   background: var(--paper);
 }
+
+.ai-desc {
+  margin: 4px 0 0;
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.ai-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  list-style: none;
+  margin: 4px 0 0;
+  padding: 0;
+}
+
+.ai-tags li {
+  padding: 0 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  font-size: 0.85em;
+  color: var(--muted);
+}
