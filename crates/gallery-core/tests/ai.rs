@@ -423,7 +423,7 @@ fn classify_parses_structured_answer() {
         "2023-06-01"
     );
     let body: Value = serde_json::from_slice(&reqs[0].body).unwrap();
-    assert_eq!(body["max_tokens"], 4000);
+    assert_eq!(body["max_tokens"], 16000);
     assert_eq!(body["system"][0]["cache_control"]["type"], "ephemeral");
     assert_eq!(body["output_config"]["effort"], "low");
     assert_eq!(body["output_config"]["format"]["type"], "json_schema");
@@ -532,7 +532,7 @@ fn classify_refusal_is_low() {
 }
 
 #[test]
-fn classify_max_tokens_is_error() {
+fn an_answer_cut_off_at_max_tokens_goes_to_review_and_is_not_cached() {
     require_tool!("magick");
     let rt = rt();
     let s = server(
@@ -541,11 +541,25 @@ fn classify_max_tokens_is_error() {
             .set_body_json(json!({"stop_reason": "max_tokens", "content": [], "usage": {}})),
     );
     let d = tempfile::tempdir().unwrap();
-    let c = classifier(&s.uri(), &d.path().join("cache.jsonl"));
-    let e = c
-        .classify(vec![req(d.path(), "a.jpg", cats())])
-        .unwrap_err();
-    assert!(matches!(e, Error::Ai(m) if m.contains("max_tokens")));
+    let cache = d.path().join("cache.jsonl");
+    let c = classifier(&s.uri(), &cache);
+    let r = c
+        .classify(vec![
+            req(d.path(), "a.jpg", cats()),
+            req(d.path(), "b.jpg", cats()),
+        ])
+        .unwrap();
+    assert_eq!(r.len(), 2);
+    for a in &r {
+        assert_eq!(a.category, None);
+        assert_eq!(a.confidence, Confidence::Low);
+        assert!(a.reason.contains("max_tokens"), "{}", a.reason);
+    }
+    assert!(
+        std::fs::read_to_string(&cache)
+            .unwrap_or_default()
+            .is_empty()
+    );
 }
 
 #[test]

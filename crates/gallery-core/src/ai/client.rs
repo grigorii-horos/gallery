@@ -24,7 +24,9 @@ const NONE_CATEGORY: &str = "NONE";
 /// The previous (Russian) spelling of [`NONE_CATEGORY`]; answers and cache
 /// entries made before the prompt became English still carry it.
 const LEGACY_NONE_CATEGORY: &str = "НИКАКАЯ";
-const MAX_TOKENS: u32 = 4000;
+/// Room for the answer and the model's thinking, which counts against the
+/// same limit (adaptive thinking is on by default on current models).
+const MAX_TOKENS: u32 = 16000;
 /// At most this many keywords of an answer are kept.
 const MAX_TAGS: usize = 10;
 /// A keyword is cut to this many bytes (the IPTC Keywords limit).
@@ -32,7 +34,7 @@ const MAX_TAG_BYTES: usize = 64;
 /// A description is cut to this many characters.
 const MAX_DESCRIPTION_CHARS: usize = 300;
 const MAX_RETRIES: u32 = 6;
-const TIMEOUT: Duration = Duration::from_secs(120);
+const TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
 const DEFAULT_BACKOFF_MS: u64 = 500;
 
@@ -352,7 +354,13 @@ impl Shared {
         t.cache_read += n("cache_read_input_tokens");
     }
 
-    async fn request(&self, ctx: &GroupCtx, image_b64: &str, video: bool) -> Result<Stored> {
+    /// `Ok(None)`: the answer was cut off at `max_tokens`.
+    async fn request(
+        &self,
+        ctx: &GroupCtx,
+        image_b64: &str,
+        video: bool,
+    ) -> Result<Option<Stored>> {
         let key = self
             .api_key
             .as_deref()
@@ -428,21 +436,21 @@ impl Shared {
         unreachable!("loop returns on the last attempt")
     }
 
-    fn parse(&self, v: &Value) -> Result<Stored> {
+    fn parse(&self, v: &Value) -> Result<Option<Stored>> {
         if let Some(u) = v.get("usage") {
             self.add_usage(u);
         }
         match v.get("stop_reason").and_then(Value::as_str) {
             Some("refusal") => {
-                return Ok(Stored {
+                return Ok(Some(Stored {
                     category: NONE_CATEGORY.into(),
                     reason: crate::t!("ai.refused"),
                     confidence: "LOW".into(),
                     tags: Vec::new(),
                     description: String::new(),
-                });
+                }));
             }
-            Some("max_tokens") => return Err(Error::Ai(crate::t!("ai.truncated"))),
+            Some("max_tokens") => return Ok(None),
             _ => {}
         }
         let text = v
@@ -456,7 +464,9 @@ impl Shared {
             .and_then(|b| b.get("text"))
             .and_then(Value::as_str)
             .ok_or_else(|| Error::Ai(crate::t!("ai.no_text")))?;
-        serde_json::from_str(text).map_err(|e| Error::Ai(crate::t!("ai.bad_answer", error = e)))
+        serde_json::from_str(text)
+            .map(Some)
+            .map_err(|e| Error::Ai(crate::t!("ai.bad_answer", error = e)))
     }
 }
 
@@ -500,7 +510,18 @@ async fn run_job(
         }
     };
     let b64 = base64::engine::general_purpose::STANDARD.encode(bytes);
-    let stored = shared.request(&ctx, &b64, video).await?;
+    let Some(stored) = shared.request(&ctx, &b64, video).await? else {
+        // Cut off at max_tokens: this file goes to review and is asked again
+        // next scan (not cached); the rest of the run goes on.
+        let stored = Stored {
+            category: NONE_CATEGORY.into(),
+            reason: crate::t!("ai.truncated"),
+            confidence: "LOW".into(),
+            tags: Vec::new(),
+            description: String::new(),
+        };
+        return Ok((job.idx, None, stored));
+    };
     // Validate now so a bad answer fails the run instead of poisoning the cache.
     to_answer(&stored, &ctx.categories)?;
     Ok((job.idx, Some(job.key), stored))
