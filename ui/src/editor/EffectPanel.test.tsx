@@ -1,6 +1,6 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { EffectPanel } from "./EffectPanel";
 import type { Counts, EffectDiff } from "./effect";
 import { targetLine } from "./effect";
@@ -76,6 +76,21 @@ describe("effect panel", () => {
     rerender(<EffectPanel state={{ diff, loading: true, error: null, counting: null }} />);
     expect(screen.queryByRole("status")).toBeNull();
     expect(screen.getByText("calculating…")).toBeInTheDocument();
+  });
+
+  it("Stop cancels the request and shows the stopped state; Recalculate asks again", async () => {
+    const user = userEvent.setup();
+    const stop = vi.fn();
+    const recalc = vi.fn();
+    const counting = { done: 40, total: 120 };
+    const { rerender } = render(<EffectPanel state={{ diff: null, loading: true, error: null, counting, stop, recalc }} />);
+    await user.click(screen.getByRole("button", { name: "Stop" }));
+    expect(stop).toHaveBeenCalledTimes(1);
+    rerender(<EffectPanel state={{ diff: null, loading: false, error: null, stopped: true, stop, recalc }} />);
+    expect(screen.getByRole("status")).toHaveTextContent("stopped — edit or press Recalculate to try again");
+    expect(screen.queryByRole("button", { name: "Stop" })).toBeNull();
+    await user.click(screen.getByRole("button", { name: "Recalculate" }));
+    expect(recalc).toHaveBeenCalledTimes(1);
   });
 
   it("words a target line", () => {

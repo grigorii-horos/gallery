@@ -63,4 +63,20 @@ describe("useEffectPreview", () => {
     });
     expect(result.current).toMatchObject({ loading: false, counting: null });
   });
+
+  it("stop calls the cancel command and stops; recalc asks again for the same edits", async () => {
+    invoke.mockImplementation((cmd) => (cmd === "effect_preview" ? new Promise(() => {}) : Promise.resolve(undefined)));
+    const ops = [op("a")];
+    const { result } = renderHook(() => useEffectPreview("/c.toml", ops, true));
+    await act(async () => void vi.advanceTimersByTime(EFFECT_PAUSE_MS + 10));
+    expect(result.current.loading).toBe(true);
+    await act(async () => result.current.stop?.());
+    expect(invoke).toHaveBeenCalledWith("effect_cancel", undefined);
+    expect(result.current).toMatchObject({ stopped: true, loading: false, counting: null });
+    invoke.mockClear();
+    await act(async () => result.current.recalc?.());
+    await act(async () => void vi.advanceTimersByTime(EFFECT_PAUSE_MS + 10));
+    expect(invoke).toHaveBeenCalledWith("effect_preview", { configPath: "/c.toml", ops, refresh: false });
+    expect(result.current).toMatchObject({ stopped: false, loading: true });
+  });
 });

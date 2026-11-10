@@ -68,6 +68,8 @@ export const effectApi = {
   /// `null` when a newer request cancelled this one.
   preview: (configPath: string | null, ops: EditOp[], refresh = false) =>
     invoke<EffectDiff | null>("effect_preview", { configPath, ops, refresh }),
+  /// Stops the request in flight (it answers `null`).
+  cancel: () => invoke<void>("effect_cancel"),
 };
 
 export const OUTCOME_TITLE: Record<Outcome, MessageKey> = {

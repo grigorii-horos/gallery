@@ -59,6 +59,13 @@ impl EffectState {
         c
     }
 
+    /// Cancel the request in flight, if any (it answers `None`).
+    pub fn cancel(&self) {
+        if let Some(c) = self.running.lock().expect("effect lock").take() {
+            c.cancel();
+        }
+    }
+
     /// Forget the scan (the next preview scans again).
     pub fn forget(&self) {
         *self.scanned.lock().expect("effect lock") = None;
@@ -258,6 +265,17 @@ mod tests {
         let b = st.begin();
         assert!(a.is_cancelled());
         assert!(!b.is_cancelled());
+    }
+
+    #[test]
+    fn cancel_stops_the_request_in_flight_and_is_harmless_when_idle() {
+        let st = EffectState::default();
+        st.cancel();
+        let a = st.begin();
+        st.cancel();
+        assert!(a.is_cancelled());
+        st.cancel();
+        assert!(!st.begin().is_cancelled());
     }
 
     #[test]
