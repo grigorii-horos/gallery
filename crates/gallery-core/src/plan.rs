@@ -1492,21 +1492,21 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let dir = tmp.path().join("phone");
         std::fs::create_dir_all(&dir).unwrap();
-        let src = dir.join("a.jpg");
-        std::fs::write(&src, b"jpeg").unwrap();
+        let src = dir.join("a.avif");
+        std::fs::write(&src, b"avif").unwrap();
         let real = |p: &Path| {
             let m = std::fs::metadata(p).unwrap();
             FileEntry {
                 size: m.len(),
                 mtime_ns: crate::scan::mtime_ns(&m).unwrap(),
-                ..entry(tmp.path(), "phone", "a.jpg")
+                ..entry(tmp.path(), "phone", "a.avif")
             }
         };
         let backup = tmp.path().join("backup");
         let c = cfg(
             tmp.path(),
             vec![
-                output(&dir, vec![step("*.jpg", "AVIF")], vec![]),
+                output(&dir, vec![step("*.avif", "AVIF")], vec![]),
                 output(&backup, vec![], vec![]),
             ],
         );
@@ -1515,7 +1515,7 @@ mod tests {
             ops(&p.items[0].outputs),
             [
                 (OutputOp::Write, dir.join("a.avif")),
-                (OutputOp::Write, backup.join("a.jpg")),
+                (OutputOp::Write, backup.join("a.avif")),
             ]
         );
         let steps = ["AVIF".to_string()];
@@ -1525,8 +1525,17 @@ mod tests {
         crate::incompressible::remember(&src, &pipe(&old).unwrap());
         let p = local(&c, vec![(real(&src), to("t"))]);
         assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
-        // With this machine's encoders: kept.
+        // Recorded under the rule before conversions always converted (no
+        // policy in the fingerprint): never matches.
         let now = crate::incompressible::current_versions();
+        let chain = vec![("AVIF", c.content_preset("AVIF").unwrap())];
+        let legacy = blake3::hash(&serde_json::to_vec(&(chain, &now)).unwrap())
+            .to_hex()
+            .to_string();
+        crate::incompressible::remember(&src, &legacy);
+        let p = local(&c, vec![(real(&src), to("t"))]);
+        assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
+        // With this machine's encoders: kept.
         crate::incompressible::remember(&src, &pipe(&now).unwrap());
 
         // Kept in place; only the backup is left to write.
@@ -1535,13 +1544,13 @@ mod tests {
             ops(&p.items[0].outputs),
             [
                 (OutputOp::Keep, src.clone()),
-                (OutputOp::Write, backup.join("a.jpg")),
+                (OutputOp::Write, backup.join("a.avif")),
             ]
         );
         assert!(p.items[0].outputs[0].steps.is_empty());
         // Once the backup holds the bytes, nothing is left to do.
         std::fs::create_dir_all(&backup).unwrap();
-        std::fs::copy(&src, backup.join("a.jpg")).unwrap();
+        std::fs::copy(&src, backup.join("a.avif")).unwrap();
         let p = local(&c, vec![(real(&src), to("t"))]);
         assert!(p.items.is_empty(), "{p:?}");
         assert_eq!(p.unchanged, std::slice::from_ref(&src));
@@ -1555,7 +1564,7 @@ mod tests {
         assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
 
         // So does a changed file.
-        std::fs::write(&src, b"jpeg, edited").unwrap();
+        std::fs::write(&src, b"avif, edited").unwrap();
         let p = local(&c, vec![(real(&src), to("t"))]);
         assert_eq!(p.items[0].outputs[0].op, OutputOp::Write);
     }

@@ -340,7 +340,6 @@
   "content.video_failed": "Video %{path}: %{error}",
   "content.no_video_stream": "kein Videostream – unverändert belassen",
   "content.already_av1": "bereits AV1 – unverändert belassen",
-  "content.not_smaller_low": "auch bei niedriger Stufe nicht kleiner als die Quelle",
   "content.duration_vs": "Dauer stimmt nicht überein: %{a} gegen %{b}",
   "content.meta_unreadable_input": "Metadaten nicht kopiert: exiftool konnte die Eingabe nicht lesen",
   "content.gps_not_copied": "GPS nicht kopiert: %{tag} fehlt im Ergebnis",

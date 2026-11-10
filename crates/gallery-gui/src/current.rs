@@ -51,6 +51,11 @@ pub struct Fingerprint {
     pub sources: String,
     /// Size and mtime of the AI answer cache: changes when answers are added.
     pub ai_cache: String,
+    /// Size and mtime of the store of files their content pipe cannot
+    /// shrink: a run that leaves such files in place changes no source file,
+    /// only this store, and the plan must then drop them.
+    #[serde(default)]
+    pub incompressible: String,
 }
 
 /// The state file next to the plan.
@@ -157,6 +162,8 @@ fn fingerprint(
         overrides: hash_opt(overrides),
         sources: sources_hash(files),
         ai_cache: cache_stamp(env.ai_cache),
+        incompressible: gallery_core::incompressible::stamp()
+            .map_or_else(|| "none".into(), |(len, t)| format!("{len}|{t}")),
     }
 }
 

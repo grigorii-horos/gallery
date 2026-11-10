@@ -178,7 +178,7 @@ release builds ignore it).
 | | `ai-usage.jsonl` | Token usage per AI scan, for cost history. |
 | | `pending-index.json` | Per-file size/mtime/EXIF index for quick pending counts. |
 | | `thumbs/` | Thumbnails shown in the UI. |
-| | `incompressible.json` | Files whose content pipe could not make them smaller (path, size, mtime, pipe fingerprint): planning keeps them in place instead of encoding them again. Safe to delete; it only costs one more encode per file. |
+| | `incompressible.json` | Files whose same-format content pipe (never a conversion) could not make them smaller (path, size, mtime, pipe fingerprint): planning keeps them in place instead of encoding them again. Safe to delete; it only costs one more encode per file. |
 | | `metrics.json` | Per-file sharpness, perceptual hash and content hash used by `series` and `duplicate` conditions (safe to delete). |
 | next to a plan (CLI) | `<plan>.report.json`, `<plan>.jsonl`, `<plan>.lock` | Names are built from the plan name minus a trailing `.json` (`trip.2026.json` → `trip.2026.report.json`). |
 | inside a source | `.gallery-trash/<run>/` | Where trashed originals go when `GALLERY_TRASH=folder` is set. |
