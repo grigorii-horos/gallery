@@ -262,7 +262,7 @@
   "ai.key_perms": "uprawnienia %{mode} udostępniają go innym, wymagane 600 (chmod 600)",
   "ai.key_replaced": "plik został podmieniony w trakcie odczytu",
   "ai.http_client": "klient http: %{error}",
-  "ai.no_cache_dir": "brak katalogu pamięci podręcznej użytkownika",
+  "ai.no_cache_dir": "brak katalogu danych użytkownika",
   "ai.unknown_category": "model odpowiedział nieznaną kategorią `%{name}`",
   "ai.no_key": "brak klucza: ustaw ANTHROPIC_API_KEY lub CLAUDE_API_KEY albo umieść klucz w ~/.config/gallery/api-key (tryb 600)",
   "ai.request_failed": "zapytanie nie powiodło się: %{error}",

@@ -235,6 +235,11 @@ export interface ReviewItem {
 export interface AiMeta {
   tags?: string[];
   description?: string;
+  /** The answer as written into the outputs' XMP (raw category, OK/LOW, reason, model). */
+  category?: string;
+  confidence?: string;
+  reason?: string;
+  model?: string;
 }
 
 export interface OverrideResult {

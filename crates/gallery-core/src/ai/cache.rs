@@ -124,9 +124,66 @@ impl Cache {
     }
 }
 
+/// Move the answers in `old` (a store left at an earlier location) into
+/// `new` and remove `old`. Answers already in `new` win over those from
+/// `old`; nothing to do when `old` is missing.
+pub fn adopt(old: &Path, new: &Path) -> std::io::Result<()> {
+    if !old.exists() || old == new {
+        return Ok(());
+    }
+    if let Some(dir) = new.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    if !new.exists() && std::fs::rename(old, new).is_ok() {
+        return Ok(());
+    }
+    // Another file system, or both exist: `load` lets later lines win, so
+    // the old answers go first.
+    let mut text = std::fs::read(old)?;
+    if !text.is_empty() && !text.ends_with(b"\n") {
+        text.push(b'\n');
+    }
+    if let Ok(cur) = std::fs::read(new) {
+        text.extend_from_slice(&cur);
+    }
+    crate::paths::write_atomic(new, &text)?;
+    std::fs::remove_file(old)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn adopt_moves_old_answers_and_keeps_newer_ones() {
+        let d = tempfile::tempdir().unwrap();
+        let old = d.path().join("cache/ai-cache.jsonl");
+        let new = d.path().join("data/ai-answers.jsonl");
+        // Nothing there: nothing happens.
+        adopt(&old, &new).unwrap();
+        assert!(!new.exists());
+
+        std::fs::create_dir_all(old.parent().unwrap()).unwrap();
+        let mut c = Cache::load(&old);
+        c.put("a".into(), stored("x")).unwrap();
+        c.put("b".into(), stored("x")).unwrap();
+        adopt(&old, &new).unwrap();
+        assert!(!old.exists());
+        assert_eq!(Cache::load(&new).get("a"), Some(&stored("x")));
+
+        // Both exist: the old rows join, the new store's own answer wins.
+        let mut c = Cache::load(&old);
+        c.put("a".into(), stored("old")).unwrap();
+        c.put("c".into(), stored("old")).unwrap();
+        let mut n = Cache::load(&new);
+        n.put("a".into(), stored("new")).unwrap();
+        adopt(&old, &new).unwrap();
+        assert!(!old.exists());
+        let n = Cache::load(&new);
+        assert_eq!(n.get("a"), Some(&stored("new")));
+        assert_eq!(n.get("b"), Some(&stored("x")));
+        assert_eq!(n.get("c"), Some(&stored("old")));
+    }
 
     fn stored(c: &str) -> Stored {
         Stored {
