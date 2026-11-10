@@ -901,3 +901,110 @@ fn answer_cached_before_meta_version_is_asked_again_and_replaced() {
     classifier(&s.uri(), &cache).classify(vec![file]).unwrap();
     assert_eq!(received(&rt, &s).len(), 1);
 }
+
+/// A stand-in `claude` that records its arguments, environment and stdin
+/// and prints a stream-json transcript ending in `result`.
+#[cfg(unix)]
+fn fake_claude(dir: &Path, result: &Value) -> PathBuf {
+    use std::os::unix::fs::PermissionsExt;
+    let script = dir.join("claude");
+    let log = dir.join("claude.log");
+    std::fs::write(
+        &script,
+        format!(
+            "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{log}.args'\n\
+             env > '{log}.env'\ncat > '{log}.stdin'\n\
+             echo '{{\"type\":\"system\",\"subtype\":\"init\"}}'\necho '{result}'\n",
+            log = log.display(),
+            result = result,
+        ),
+    )
+    .unwrap();
+    std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    script
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_backend_runs_the_cli_without_the_api_key() {
+    require_tool!("magick");
+    let d = tempfile::tempdir().unwrap();
+    let answer = json!({"category": "Receipts", "reason": "a receipt", "confidence": "OK",
+                        "tags": ["receipt"], "description": "A shop receipt."});
+    let claude = fake_claude(
+        d.path(),
+        &json!({"type": "result", "subtype": "success", "is_error": false,
+                "structured_output": answer,
+                "usage": {"input_tokens": 3, "output_tokens": 7}}),
+    );
+    let settings = AiSettings {
+        backend: "claude-code".into(),
+        ..AiSettings::default()
+    };
+    let cache = d.path().join("cache.jsonl");
+    // An API key in the environment must not reach the CLI (it would bill it).
+    let c = AiClassifier::with_api_key(
+        &settings,
+        tools(),
+        cache.clone(),
+        "http://127.0.0.1:9".into(),
+        Some("test-key".into()),
+    )
+    .unwrap()
+    .with_claude(claude);
+    let file = req(d.path(), "a.jpg", cats());
+    let a = c.classify(vec![file.clone()]).unwrap();
+    assert_eq!(a[0].category.as_deref(), Some("Receipts"));
+    assert_eq!(a[0].confidence, Confidence::Ok);
+    assert_eq!(c.usage().output, 7);
+
+    let log =
+        |ext: &str| std::fs::read_to_string(d.path().join(format!("claude.log.{ext}"))).unwrap();
+    let args = log("args");
+    for flag in [
+        "-p",
+        "--json-schema",
+        "--system-prompt",
+        "--no-session-persistence",
+        "stream-json",
+    ] {
+        assert!(args.lines().any(|l| l == flag), "{flag} missing: {args}");
+    }
+    let stdin: Value = serde_json::from_str(log("stdin").trim()).unwrap();
+    assert_eq!(stdin["message"]["content"][0]["type"], "image");
+    // The answer is stored like an API answer: asked once.
+    std::fs::remove_file(d.path().join("claude.log.stdin")).unwrap();
+    c.classify(vec![file]).unwrap();
+    assert!(!d.path().join("claude.log.stdin").exists(), "asked again");
+    assert_eq!(std::fs::read_to_string(&cache).unwrap().lines().count(), 1);
+}
+
+#[cfg(unix)]
+#[test]
+fn claude_code_backend_error_stops_the_run_with_its_text() {
+    require_tool!("magick");
+    let d = tempfile::tempdir().unwrap();
+    let claude = fake_claude(
+        d.path(),
+        &json!({"type": "result", "subtype": "success", "is_error": true,
+                "result": "Claude AI usage limit reached"}),
+    );
+    let settings = AiSettings {
+        backend: "claude-code".into(),
+        ..AiSettings::default()
+    };
+    let c = AiClassifier::with_api_key(
+        &settings,
+        tools(),
+        d.path().join("cache.jsonl"),
+        "http://127.0.0.1:9".into(),
+        None,
+    )
+    .unwrap()
+    .with_claude(claude);
+    let e = c
+        .classify(vec![req(d.path(), "a.jpg", cats())])
+        .unwrap_err()
+        .to_string();
+    assert!(e.contains("usage limit reached"), "{e}");
+}

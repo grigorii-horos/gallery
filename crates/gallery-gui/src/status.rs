@@ -16,6 +16,10 @@ pub struct AppStatus {
     pub config_warnings: Vec<String>,
     pub tools: ToolsStatus,
     pub api_key_source: ApiKeySource,
+    /// `[ai] backend` of the config (`api` when it cannot be read).
+    pub ai_backend: String,
+    /// Where the `claude` CLI is, for the `claude-code` backend.
+    pub claude_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -66,7 +70,12 @@ const TOOLS: [(&str, bool); 6] = [
 
 pub fn app_status(config_path: &Path) -> AppStatus {
     let (config_ok, config_error, config_warnings) = config_health(config_path);
+    let ai_backend = Config::load(config_path)
+        .map(|c| c.ai.backend)
+        .unwrap_or_else(|_| "api".into());
     AppStatus {
+        ai_backend,
+        claude_path: gallery_core::ai::claude_code::find().map(|p| p.display().to_string()),
         config_path: config_path.display().to_string(),
         config_ok,
         config_error,

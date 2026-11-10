@@ -743,5 +743,8 @@
   "undo.no_such_file": "это не файл данного запуска: %{path}",
   "history.no_files_selected": "Выберите хотя бы один файл для отмены.",
   "cli.undo.files": "Отменить только этот исходный файл запуска (можно повторять)",
-  "cli.undo.targets": "Отменить только файлы этой цели (можно повторять)"
+  "cli.undo.targets": "Отменить только файлы этой цели (можно повторять)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "для AI-бэкенда claude-code нужен Claude Code CLI (`claude`) в PATH с входом в вашу подписку Claude",
+  "config.ai_backend": "неизвестный [ai] backend «%{name}»: укажите \"api\" или \"claude-code\""
 }

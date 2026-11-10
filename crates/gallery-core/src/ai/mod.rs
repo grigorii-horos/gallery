@@ -1,6 +1,7 @@
 //! AI classifier: thumbnails, Anthropic Messages API client, jsonl cache.
 
 pub mod cache;
+pub mod claude_code;
 pub mod client;
 pub mod key;
 pub mod thumb;

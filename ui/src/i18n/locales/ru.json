@@ -22,6 +22,8 @@
   "status_key_env": "Ключ ИИ из окружения",
   "status_key_file": "Ключ ИИ из файла",
   "status_key_none": "Нет ключа ИИ",
+  "status_ai_claude_code": "ИИ: Claude Code (подписка)",
+  "status_ai_no_claude": "ИИ: не найден Claude Code CLI",
   "status_checking": "Проверка конфигурации и инструментов…",
   "status_unavailable": "Состояние недоступно",
   "status_config_warnings_one": "Конфигурация в порядке, {{count, number}} предупреждение",

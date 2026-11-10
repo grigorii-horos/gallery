@@ -22,6 +22,8 @@
   "status_key_env": "Klucz AI ze środowiska",
   "status_key_file": "Klucz AI z pliku",
   "status_key_none": "Brak klucza AI",
+  "status_ai_claude_code": "AI: Claude Code (subskrypcja)",
+  "status_ai_no_claude": "AI: nie znaleziono Claude Code CLI",
   "status_checking": "Sprawdzanie konfiguracji i narzędzi…",
   "status_unavailable": "Stan niedostępny",
   "status_config_warnings_one": "Konfiguracja w porządku, {{count, number}} ostrzeżenie",

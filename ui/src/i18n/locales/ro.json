@@ -22,6 +22,8 @@
   "status_key_env": "Cheia IA din mediu",
   "status_key_file": "Cheia IA dintr-un fișier",
   "status_key_none": "Fără cheie IA",
+  "status_ai_claude_code": "AI: Claude Code (abonament)",
+  "status_ai_no_claude": "AI: CLI-ul Claude Code nu a fost găsit",
   "status_checking": "Se verifică configurația și instrumentele…",
   "status_unavailable": "Stare indisponibilă",
   "status_config_warnings_one": "Configurație OK, {{count, number}} avertisment",

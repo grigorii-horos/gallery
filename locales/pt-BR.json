@@ -736,5 +736,8 @@
   "undo.no_such_file": "não é um arquivo desta execução: %{path}",
   "history.no_files_selected": "Escolha pelo menos um arquivo para desfazer.",
   "cli.undo.files": "Desfazer somente este arquivo de origem da execução (repetível)",
-  "cli.undo.targets": "Desfazer somente os arquivos deste destino (repetível)"
+  "cli.undo.targets": "Desfazer somente os arquivos deste destino (repetível)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "o backend de IA claude-code precisa da CLI do Claude Code (`claude`) no PATH, conectada à sua assinatura do Claude",
+  "config.ai_backend": "[ai] backend desconhecido \"%{name}\": use \"api\" ou \"claude-code\""
 }

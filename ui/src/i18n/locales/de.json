@@ -22,6 +22,8 @@
   "status_key_env": "KI-Schlüssel aus der Umgebung",
   "status_key_file": "KI-Schlüssel aus einer Datei",
   "status_key_none": "Kein KI-Schlüssel",
+  "status_ai_claude_code": "KI: Claude Code (Abo)",
+  "status_ai_no_claude": "KI: Claude Code CLI nicht gefunden",
   "status_checking": "Konfiguration und Werkzeuge werden geprüft …",
   "status_unavailable": "Status nicht verfügbar",
   "status_config_warnings_one": "Konfiguration in Ordnung, {{count, number}} Warnung",

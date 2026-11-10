@@ -732,6 +732,7 @@ directory. A template must not contain `\`, empty or `.`/`..` components, or fol
 
 ```toml
 [ai]
+# backend = "claude-code"        # default "api"; "claude-code" uses your Claude subscription
 model    = "claude-sonnet-5-5"   # default
 effort   = "low"                 # default; passed to the API as the request's effort
 jobs     = 8                     # default: parallel requests
@@ -741,6 +742,7 @@ examples = 20                    # default: how many of your latest corrections 
 
 | Key | Default | Meaning |
 |---|---|---|
+| `backend` | `api` | `api`: the Anthropic Messages API, billed to an API key (see below). `claude-code`: each file is one headless run of the official Claude Code CLI (`claude -p`), on the Claude subscription you are signed in with — see [Claude Code backend](#claude-code-backend). |
 | `model` | `claude-sonnet-5-5` | Anthropic model used for classification. Used for cost estimates when its price is known. |
 | `effort` | `low` | Request effort. Classification of a thumbnail rarely needs more. |
 | `jobs` | `8` | Requests in flight at once. |
@@ -752,6 +754,27 @@ Answers are stored per file (path, size, mtime), model and prompt in
 only once; examples are deliberately not part of the key. The answers live with your data, not in
 the cache directory, so clearing caches does not throw away what was paid for. A
 `<cache dir>/gallery/ai-cache.jsonl` left by older versions is moved there on first use.
+
+### Claude Code backend
+
+With `backend = "claude-code"` Gallery asks the [Claude Code](https://code.claude.com) CLI instead of
+calling the API itself. Install it, run `claude` once and sign in with your Claude subscription. Gallery
+never sees or stores that login.
+
+- Each file is one `claude -p` run: the same system prompt, thumbnail and answer schema as the API
+  backend, with Claude Code's own system prompt, tools, settings, MCP servers, skills and session
+  history turned off. `model` and `effort` are passed on.
+- `ANTHROPIC_API_KEY`, `CLAUDE_API_KEY` and `ANTHROPIC_AUTH_TOKEN` are removed from the CLI's
+  environment: with a key present Claude Code bills the key, not the subscription.
+- Answers are stored exactly like API answers, so switching backends asks nothing again.
+- Requests count against your plan's usage limits (a rolling window of a few hours plus a weekly
+  one), shared with your own use of Claude. When a limit is reached the run stops with Claude Code's
+  message; answers already received are kept and the next scan continues from there. Lower `jobs`
+  to spread a large first scan.
+- Cost figures (`--estimate`, the scan summary) are what the same tokens would cost on the API; on a
+  subscription nothing is billed per request.
+- This is meant for your own library on your own subscription, as Anthropic's terms allow for the
+  unmodified Claude Code CLI. Gallery does not share a subscription between people.
 
 ### AI keywords and description
 

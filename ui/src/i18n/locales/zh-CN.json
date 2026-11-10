@@ -22,6 +22,8 @@
   "status_key_env": "来自环境变量的 AI 密钥",
   "status_key_file": "来自文件的 AI 密钥",
   "status_key_none": "没有 AI 密钥",
+  "status_ai_claude_code": "AI：Claude Code（订阅）",
+  "status_ai_no_claude": "AI：未找到 Claude Code CLI",
   "status_checking": "正在检查配置和工具…",
   "status_unavailable": "状态不可用",
   "status_config_warnings_other": "配置正常，{{count, number}} 条警告",

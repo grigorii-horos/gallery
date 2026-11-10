@@ -729,5 +729,8 @@
   "undo.no_such_file": "keine Datei dieses Laufs: %{path}",
   "history.no_files_selected": "Wähle mindestens eine Datei zum Rückgängigmachen.",
   "cli.undo.files": "Nur diese Quelldatei des Laufs rückgängig machen (wiederholbar)",
-  "cli.undo.targets": "Nur die Dateien dieses Ziels rückgängig machen (wiederholbar)"
+  "cli.undo.targets": "Nur die Dateien dieses Ziels rückgängig machen (wiederholbar)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "das AI-Backend claude-code braucht die Claude Code CLI (`claude`) im PATH, angemeldet mit Ihrem Claude-Abo",
+  "config.ai_backend": "unbekanntes [ai] backend „%{name}“: \"api\" oder \"claude-code\" verwenden"
 }

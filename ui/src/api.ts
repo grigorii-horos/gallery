@@ -22,6 +22,10 @@ export interface AppStatus {
     capabilities: { svtav1: boolean; opus: boolean; vidstab: boolean } | null;
   };
   api_key_source: ApiKeySource;
+  /** `[ai] backend`: "api" or "claude-code". */
+  ai_backend?: string;
+  /** Where the `claude` CLI is (claude-code backend). */
+  claude_path?: string | null;
 }
 
 export interface SourceSummary {
@@ -104,13 +108,17 @@ export interface ConfigSummary {
 const arg = (path: string | null) => ({ path: path ?? null });
 
 export const api = {
-  appStatus: (path: string | null) => invoke<AppStatus>("app_status", arg(path)),
-  loadConfig: (path: string | null) => invoke<ConfigSummary>("load_config", arg(path)),
+  appStatus: (path: string | null) =>
+    invoke<AppStatus>("app_status", arg(path)),
+  loadConfig: (path: string | null) =>
+    invoke<ConfigSummary>("load_config", arg(path)),
   builtinPresets: () => invoke<PresetSet>("builtin_presets"),
 };
 
 /// Pick a TOML config with the native dialog; null if cancelled.
-export async function pickConfig(current: string | null): Promise<string | null> {
+export async function pickConfig(
+  current: string | null,
+): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({
     title: t("dialog_open_config"),
@@ -271,7 +279,10 @@ export interface Plan {
   kept?: { source: string; target: string }[];
 }
 
-export type OverrideAction = { kind: "target"; name: string } | { kind: "keep" } | { kind: "series_best" };
+export type OverrideAction =
+  | { kind: "target"; name: string }
+  | { kind: "keep" }
+  | { kind: "series_best" };
 
 /** A review file as the plan saw it: a decision is refused if the file changed since. */
 export interface ReviewMember {
@@ -361,7 +372,11 @@ export interface TargetCheck {
 export interface ExplainDecision {
   kind: "target" | "review" | "excluded" | "kept" | "unmatched";
   target: string | null;
-  via: { kind: "mask" } | { kind: "ai"; reason: string; low?: boolean } | { kind: "manual" } | null;
+  via:
+    | { kind: "mask" }
+    | { kind: "ai"; reason: string; low?: boolean }
+    | { kind: "manual" }
+    | null;
   detail: string | null;
 }
 
@@ -369,7 +384,13 @@ export type ExplainAi =
   | { kind: "no_candidates" }
   | { kind: "not_reached"; candidates: string[] }
   | { kind: "not_asked"; candidates: string[] }
-  | { kind: "cached"; category: string | null; reason: string; low: boolean; meta?: AiMeta };
+  | {
+      kind: "cached";
+      category: string | null;
+      reason: string;
+      low: boolean;
+      meta?: AiMeta;
+    };
 
 export interface StepCheck {
   index: number;
@@ -401,7 +422,14 @@ export interface Explanation {
   other_targets: string[];
   ai: ExplainAi;
   decision: ExplainDecision | null;
-  outcome: "process" | "unchanged" | "trash" | "kept" | "review" | "unmatched" | "not_scanned";
+  outcome:
+    | "process"
+    | "unchanged"
+    | "trash"
+    | "kept"
+    | "review"
+    | "unmatched"
+    | "not_scanned";
   outputs: OutputCheck[];
   verdict: string;
 }
@@ -433,7 +461,9 @@ export interface Estimate {
   targets: TargetEstimate[];
   total: TargetEstimate;
   jobs: number;
-  source: { kind: "history"; samples: number; guessed_files: number } | { kind: "defaults" };
+  source:
+    | { kind: "history"; samples: number; guessed_files: number }
+    | { kind: "defaults" };
   /** "from past runs (N files)" or "rough estimate". */
   source_label: string;
 }
@@ -455,32 +485,68 @@ export interface AiEstimate {
 
 export const planApi = {
   /** Read-only: files an AI scan would send, from the cache, and the price. */
-  estimateAiScan: (path: string | null) => invoke<AiEstimate>("estimate_ai_scan", { path: path ?? null }),
+  estimateAiScan: (path: string | null) =>
+    invoke<AiEstimate>("estimate_ai_scan", { path: path ?? null }),
   /** Read-only: the core's account of what a scan does with the file at `path`. */
   explainFile: (configPath: string | null, path: string) =>
-    invoke<Explanation>("explain_file", { configPath: configPath ?? null, path }),
-  startScan: (path: string | null) => invoke<void>("start_scan", { path: path ?? null }),
+    invoke<Explanation>("explain_file", {
+      configPath: configPath ?? null,
+      path,
+    }),
+  startScan: (path: string | null) =>
+    invoke<void>("start_scan", { path: path ?? null }),
   cancelScan: () => invoke<boolean>("cancel_scan"),
   /** The stored current plan, null before the first build. Never builds. */
-  currentPlan: (path: string | null) => invoke<CurrentView | null>("current_plan", { path: path ?? null }),
+  currentPlan: (path: string | null) =>
+    invoke<CurrentView | null>("current_plan", { path: path ?? null }),
   /** Bring the current plan up to date in the background (no AI); false: another operation holds the slot. */
-  refreshCurrent: (path: string | null) => invoke<boolean>("refresh_current", { path: path ?? null }),
+  refreshCurrent: (path: string | null) =>
+    invoke<boolean>("refresh_current", { path: path ?? null }),
   thumb: (path: string) => invoke<string>("thumb", { path }),
   /** The running scan's request, `null` when none runs. */
   scanStatus: () => invoke<ScanRequest | null>("scan_status"),
   /** Checked against the config at `path`; returns the key the decision is stored under and its stamp. */
-  setOverride: (path: string | null, sourcePath: string, action: OverrideAction) =>
-    invoke<OverrideResult>("set_override", { path: path ?? null, sourcePath, action }),
+  setOverride: (
+    path: string | null,
+    sourcePath: string,
+    action: OverrideAction,
+  ) =>
+    invoke<OverrideResult>("set_override", {
+      path: path ?? null,
+      sourcePath,
+      action,
+    }),
   /** Several decisions in one write; one result per item, in order. */
-  setOverrides: (path: string | null, items: { source_path: string; action: OverrideAction }[]) =>
-    invoke<OverrideResult[]>("set_overrides", { path: path ?? null, items }),
+  setOverrides: (
+    path: string | null,
+    items: { source_path: string; action: OverrideAction }[],
+  ) => invoke<OverrideResult[]>("set_overrides", { path: path ?? null, items }),
   /** Series review: `best` is marked, the other members go to `target`; one result per member. */
-  confirmSeries: (path: string | null, members: ReviewMember[], best: string, target: string) =>
-    invoke<OverrideResult[]>("confirm_series", { path: path ?? null, members, best, target }),
+  confirmSeries: (
+    path: string | null,
+    members: ReviewMember[],
+    best: string,
+    target: string,
+  ) =>
+    invoke<OverrideResult[]>("confirm_series", {
+      path: path ?? null,
+      members,
+      best,
+      target,
+    }),
   /** One decision for every listed file of an event; one result per member. */
-  decideEvent: (path: string | null, members: ReviewMember[], action: OverrideAction) =>
-    invoke<OverrideResult[]>("decide_event", { path: path ?? null, members, action }),
-  removeOverride: (sourcePath: string) => invoke<boolean>("remove_override", { sourcePath }),
+  decideEvent: (
+    path: string | null,
+    members: ReviewMember[],
+    action: OverrideAction,
+  ) =>
+    invoke<OverrideResult[]>("decide_event", {
+      path: path ?? null,
+      members,
+      action,
+    }),
+  removeOverride: (sourcePath: string) =>
+    invoke<boolean>("remove_override", { sourcePath }),
 };
 
 // ---------- run screen ----------
@@ -545,7 +611,8 @@ export interface ResumeOutcome {
 
 export const syncApi = {
   /** `pilot`: files per target when only the pilot slice runs. */
-  check: (planPath: string, pilot?: number) => invoke<SyncCheck>("sync_check", { planPath, pilot: pilot ?? null }),
+  check: (planPath: string, pilot?: number) =>
+    invoke<SyncCheck>("sync_check", { planPath, pilot: pilot ?? null }),
   paused: () => invoke<PauseState | null>("sync_paused"),
   resume: () => invoke<ResumeOutcome>("sync_resume"),
 };
@@ -676,10 +743,13 @@ export const runApi = {
   /** Runs the current plan after a final freshness check (a stale plan is refused and rebuilt). */
   startApplyCurrent: (path: string | null, run: CurrentRun) =>
     invoke<void>("start_apply_current", { path: path ?? null, run }),
-  pilotResult: (reportPath: string) => invoke<PilotResult>("pilot_result", { reportPath }),
-  applyPreview: (planPath: string) => invoke<ApplyPreview>("apply_preview", { planPath }),
+  pilotResult: (reportPath: string) =>
+    invoke<PilotResult>("pilot_result", { reportPath }),
+  applyPreview: (planPath: string) =>
+    invoke<ApplyPreview>("apply_preview", { planPath }),
   /** A plan file (a retry plan from History); the current plan runs with `startApplyCurrent`. */
-  startApply: (request: ApplyRequest) => invoke<void>("start_apply", { request }),
+  startApply: (request: ApplyRequest) =>
+    invoke<void>("start_apply", { request }),
   cancelApply: () => invoke<boolean>("cancel_apply"),
   applyStatus: () => invoke<ApplyState>("apply_status"),
   exportServerPlan: (path: string | null, request: ExportRequest) =>
@@ -688,7 +758,9 @@ export const runApi = {
 };
 
 /// Pick the export folder with the native dialog; null if cancelled.
-export async function pickFolder(current: string | null): Promise<string | null> {
+export async function pickFolder(
+  current: string | null,
+): Promise<string | null> {
   const { open } = await import("@tauri-apps/plugin-dialog");
   const picked = await open({
     title: t("server_pick_title"),
@@ -799,14 +871,19 @@ export interface RetryDone {
 }
 
 export const historyApi = {
-  listReports: (exportDir: string | null) => invoke<ReportEntry[]>("list_reports", { exportDir }),
-  loadReport: (path: string, exportDir: string | null) => invoke<ReportDetail>("load_report", { path, exportDir }),
+  listReports: (exportDir: string | null) =>
+    invoke<ReportEntry[]>("list_reports", { exportDir }),
+  loadReport: (path: string, exportDir: string | null) =>
+    invoke<ReportDetail>("load_report", { path, exportDir }),
   startUndo: (reportPath: string) => invoke<void>("start_undo", { reportPath }),
-  undoFiles: (reportPath: string, sources: string[]) => invoke<void>("undo_files", { reportPath, sources }),
-  undoTarget: (reportPath: string, target: string) => invoke<void>("undo_target", { reportPath, target }),
+  undoFiles: (reportPath: string, sources: string[]) =>
+    invoke<void>("undo_files", { reportPath, sources }),
+  undoTarget: (reportPath: string, target: string) =>
+    invoke<void>("undo_target", { reportPath, target }),
   cancelUndo: () => invoke<boolean>("cancel_undo"),
   undoStatus: () => invoke<UndoStatus | null>("undo_status"),
-  startRetry: (reportPath: string) => invoke<RetryDone>("start_retry", { reportPath }),
+  startRetry: (reportPath: string) =>
+    invoke<RetryDone>("start_retry", { reportPath }),
 };
 
 /** One of the user's corrections the AI sees as an example. */
@@ -833,7 +910,8 @@ export const examplesApi = {
   list: () => invoke<SourceExamples[]>("list_ai_examples"),
   remove: (id: string) => invoke<boolean>("remove_ai_example", { id }),
   /** All examples, or those of one source; how many were deleted. */
-  clear: (sourceId: string | null) => invoke<number>("clear_ai_examples", { sourceId }),
+  clear: (sourceId: string | null) =>
+    invoke<number>("clear_ai_examples", { sourceId }),
 };
 
 /** Tray and notification settings (crates/gallery-gui `settings`). */
@@ -883,5 +961,6 @@ export const trayApi = {
     invoke<TrayView>("set_tray_settings", { settings, autostart }),
   pendingStatus: () => invoke<PendingSnapshot | null>("pending_status"),
   /** Counts now for this config (the background check follows it). */
-  checkPending: (path: string | null) => invoke<PendingSnapshot>("check_pending", { path: path ?? null }),
+  checkPending: (path: string | null) =>
+    invoke<PendingSnapshot>("check_pending", { path: path ?? null }),
 };

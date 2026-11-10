@@ -20,7 +20,7 @@ use crate::tools::Tools;
 use crate::{Error, Result};
 
 /// Enum value the model answers with when no category fits.
-const NONE_CATEGORY: &str = "NONE";
+pub(crate) const NONE_CATEGORY: &str = "NONE";
 /// The previous (Russian) spelling of [`NONE_CATEGORY`]; answers and cache
 /// entries made before the prompt became English still carry it.
 const LEGACY_NONE_CATEGORY: &str = "НИКАКАЯ";
@@ -198,6 +198,9 @@ struct Shared {
     backoff_ms: u64,
     http: reqwest::Client,
     usage: Mutex<Usage>,
+    /// The `claude` executable for the `claude-code` backend (tests set
+    /// it; otherwise it is looked up on PATH).
+    claude: Option<PathBuf>,
 }
 
 /// Requests sharing one system prompt: one category set and the same source
@@ -258,6 +261,7 @@ impl AiClassifier {
                 backoff_ms: DEFAULT_BACKOFF_MS,
                 http,
                 usage: Mutex::new(Usage::default()),
+                claude: None,
             }),
             cache_path,
         })
@@ -275,6 +279,14 @@ impl AiClassifier {
         Arc::get_mut(&mut self.shared)
             .expect("classifier not shared yet")
             .backoff_ms = ms;
+        self
+    }
+
+    /// Use this `claude` executable for the `claude-code` backend.
+    pub fn with_claude(mut self, path: PathBuf) -> Self {
+        Arc::get_mut(&mut self.shared)
+            .expect("classifier not shared yet")
+            .claude = Some(path);
         self
     }
 
@@ -391,15 +403,18 @@ impl Shared {
         image_b64: &str,
         video: bool,
     ) -> Result<Option<Stored>> {
-        let key = self
-            .api_key
-            .as_deref()
-            .ok_or_else(|| Error::Ai(crate::t!("ai.no_key")))?;
         let note = if video {
             "This is a video: three frames from the start, middle and end in one row."
         } else {
             "This is a photo."
         };
+        if self.settings.backend == super::claude_code::BACKEND {
+            return self.request_claude_code(ctx, image_b64, note).await;
+        }
+        let key = self
+            .api_key
+            .as_deref()
+            .ok_or_else(|| Error::Ai(crate::t!("ai.no_key")))?;
         let body = json!({
             "model": self.settings.model,
             "max_tokens": MAX_TOKENS,
@@ -464,6 +479,45 @@ impl Shared {
             return self.parse(&v);
         }
         unreachable!("loop returns on the last attempt")
+    }
+
+    /// [`Shared::request`] through a headless Claude Code run on the user's
+    /// subscription (see [`super::claude_code`]).
+    async fn request_claude_code(
+        &self,
+        ctx: &GroupCtx,
+        image_b64: &str,
+        note: &str,
+    ) -> Result<Option<Stored>> {
+        let claude = self
+            .claude
+            .clone()
+            .or_else(super::claude_code::find)
+            .ok_or_else(|| Error::Ai(crate::t!("ai.no_claude_code")))?;
+        let dir = tempfile::tempdir()?;
+        let (model, effort) = (self.settings.model.clone(), self.settings.effort.clone());
+        let (system, schema) = (ctx.system.clone(), ctx.schema.clone());
+        let (b64, note) = (image_b64.to_string(), note.to_string());
+        let run = tokio::task::spawn_blocking(move || {
+            super::claude_code::classify(
+                &claude,
+                dir.path(),
+                &super::claude_code::Ask {
+                    model: &model,
+                    effort: &effort,
+                    system: &system,
+                    schema: &schema,
+                    image_b64: &b64,
+                    note: &note,
+                },
+            )
+        })
+        .await
+        .map_err(|e| Error::Ai(crate::t!("ai.thumbnail_task", error = e)))??;
+        if let Some(u) = &run.usage {
+            self.add_usage(u);
+        }
+        Ok(run.stored)
     }
 
     fn parse(&self, v: &Value) -> Result<Option<Stored>> {
