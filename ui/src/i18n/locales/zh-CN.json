@@ -423,6 +423,7 @@
   "decide_decided": "已决定",
   "decide_name_error": "无法为目标“{{targets}}”生成名称",
   "decide_ai_suggests": "AI 建议：",
+  "ai_tags_label": "关键词",
   "decide_more_reasons_other": "该系列的文件还有 {{count, number}} 条说明",
   "decide_series_files": "系列中的文件",
   "saving": "正在保存…",

@@ -6,6 +6,7 @@ import { errorText, planApi, type Explanation,
   type ItemCheck, type FilterCheck, type OutputCheck, type StepCheck } from "../api";
 import { Code } from "../components/ConfigGate";
 import { baseName, dirName } from "./model";
+import { AiMetaView } from "./AiMetaView";
 
 const OP: Record<OutputCheck["op"], MessageKey> = {
   write: "explain_op_write",
@@ -188,6 +189,7 @@ export function ExplainView({ ex }: { ex: Explanation }) {
             {ex.ai.low ? `, ${t("explain_unsure")}` : ""}
           </p>
           {ex.ai.reason && <blockquote className="reason">{ex.ai.reason}</blockquote>}
+          <AiMetaView meta={ex.ai.meta} />
         </section>
       )}
 

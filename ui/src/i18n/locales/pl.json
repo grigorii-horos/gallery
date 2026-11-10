@@ -507,6 +507,7 @@
   "decide_decided": "rozstrzygnięto",
   "decide_name_error": "Nie udało się zbudować nazwy dla celu „{{targets}}”",
   "decide_ai_suggests": "AI proponuje:",
+  "ai_tags_label": "Słowa kluczowe",
   "decide_more_reasons_one": "i jeszcze {{count, number}} wyjaśnienie do plików serii",
   "decide_more_reasons_few": "i jeszcze {{count, number}} wyjaśnienia do plików serii",
   "decide_more_reasons_many": "i jeszcze {{count, number}} wyjaśnień do plików serii",

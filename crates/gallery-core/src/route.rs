@@ -140,6 +140,9 @@ pub enum Decision {
         reason: String,
         /// Held because a `series` condition matched: the whole series.
         series: Option<SeriesReview>,
+        /// The AI's keywords and description when its doubtful answer is the
+        /// reason (shown in the review), else `None`.
+        ai_meta: Option<AiMeta>,
     },
     /// Nothing took the file, the AI gave no verdict on it, and an exclude
     /// mask rejected it from a filter (or AI prefilter) that would otherwise
@@ -530,6 +533,7 @@ impl Router<'_> {
                     suggested: target.name.clone(),
                     reason: reason.clone(),
                     series: None,
+                    ai_meta,
                 });
             }
             return Step::Take(Decision::Target {
@@ -585,6 +589,7 @@ impl Router<'_> {
                     .collect(),
                 best: self.files[s.best].path.clone(),
             }),
+            ai_meta: None,
         }
     }
 
@@ -817,6 +822,7 @@ fn walk(
                         suggested: "—".to_string(),
                         reason: answer.reason,
                         series: None,
+                        ai_meta: answer.meta,
                     });
                 } else {
                     w.answer = Some(answer);
@@ -1316,6 +1322,7 @@ mod tests {
                 suggested: "cats".into(),
                 reason: "why".into(),
                 series: None,
+                ai_meta: None,
             }
         );
         assert_eq!(
@@ -1324,6 +1331,7 @@ mod tests {
                 suggested: "—".into(),
                 reason: "why".into(),
                 series: None,
+                ai_meta: None,
             }
         );
     }
@@ -1790,6 +1798,7 @@ ai = "docs"
             suggested: s.into(),
             reason: "why".into(),
             series: None,
+            ai_meta: None,
         };
         assert_eq!(r[0].1, review("4"));
         // Strict order: the jpg target comes before "4" and takes the file,
@@ -2060,6 +2069,7 @@ sources = ["a"]
                 members: files[..3].iter().map(|f| f.path.clone()).collect(),
                 best: files[1].path.clone(),
             }),
+            ai_meta: None,
         };
         let r = route(&c, &files, &ctx, &Panics, false).unwrap();
         for d in &r[..3] {

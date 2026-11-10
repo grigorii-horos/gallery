@@ -8,6 +8,7 @@ import { baseName } from "../plan/model";
 import { thumbQueue as queue } from "../plan/queue";
 import { targetChoices } from "../plan/targets";
 import { Thumb } from "../plan/Thumb";
+import { AiMetaView } from "../plan/AiMetaView";
 import type { TargetChoice } from "../plan/TracePanel";
 import type { PlanState } from "../plan/usePlan";
 import {
@@ -370,6 +371,7 @@ function SeriesBlock(p: SeriesProps) {
   const span = seriesSpan(s);
   const head = s.items[0];
   const reasons = [...new Set(s.items.map((i) => i.reason))];
+  const metas = [...new Map(s.items.filter((i) => i.ai_meta).map((i) => [i.ai_meta?.description ?? "", i.ai_meta])).values()].slice(0, 2);
   const suggestions = [...new Set(s.items.map((i) => i.suggested))];
   const groupBox = useRef<HTMLInputElement>(null);
   useEffect(() => {
@@ -424,6 +426,9 @@ function SeriesBlock(p: SeriesProps) {
               </blockquote>
             ))}
             {reasons.length > 2 && <p className="muted small">{t("decide_more_reasons", { count: reasons.length - 2 })}</p>}
+            {metas.map((m) => (
+              <AiMetaView key={m?.description ?? m?.tags?.join(",")} meta={m} />
+            ))}
           </div>
         )}
         <ul className="series-strip" role="group" aria-label={t("decide_series_files")}>
