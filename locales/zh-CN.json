@@ -256,7 +256,7 @@
   "ai.key_perms": "权限 %{mode} 会让其他人可读，需要 600（chmod 600）",
   "ai.key_replaced": "文件在读取期间被替换",
   "ai.http_client": "http 客户端：%{error}",
-  "ai.no_cache_dir": "没有用户缓存目录",
+  "ai.no_cache_dir": "没有用户数据目录",
   "ai.unknown_category": "模型回答了未知类别“%{name}”",
   "ai.no_key": "没有密钥：请设置 ANTHROPIC_API_KEY 或 CLAUDE_API_KEY，或把密钥放入 ~/.config/gallery/api-key（权限 600）",
   "ai.request_failed": "请求失败：%{error}",

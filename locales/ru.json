@@ -262,7 +262,7 @@
   "ai.key_perms": "права %{mode} открывают его другим, нужны 600 (chmod 600)",
   "ai.key_replaced": "файл был заменён во время чтения",
   "ai.http_client": "http-клиент: %{error}",
-  "ai.no_cache_dir": "нет пользовательского каталога кэша",
+  "ai.no_cache_dir": "нет пользовательского каталога данных",
   "ai.unknown_category": "модель ответила неизвестной категорией «%{name}»",
   "ai.no_key": "нет ключа: задайте ANTHROPIC_API_KEY или CLAUDE_API_KEY либо положите ключ в ~/.config/gallery/api-key (права 600)",
   "ai.request_failed": "запрос не удался: %{error}",

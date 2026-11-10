@@ -66,13 +66,22 @@ pub struct AiAnswer {
 }
 
 /// Keywords and a one-sentence description the AI gave a file, in the
-/// language of its answer (`[ai] language`).
+/// language of its answer (`[ai] language`), and the answer itself (raw
+/// category, `OK`/`LOW`, reason, model) for the outputs' metadata.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AiMeta {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub tags: Vec<String>,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub description: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub category: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub confidence: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub model: String,
 }
 
 pub trait Classifier {
@@ -464,7 +473,7 @@ struct Walk {
 
 /// What one target does with one file.
 enum Step {
-    Take(Decision),
+    Take(Box<Decision>),
     /// An AI filter of the target could take the file: ask first.
     Pause,
     /// The target expands to events and its seeds are not known yet.
@@ -529,23 +538,23 @@ impl Router<'_> {
             if let Via::Ai { reason, low: true } = &via
                 && !self.accept_low
             {
-                return Step::Take(Decision::Review {
+                return Step::Take(Box::new(Decision::Review {
                     suggested: target.name.clone(),
                     reason: reason.clone(),
                     series: None,
                     ai_meta,
-                });
+                }));
             }
-            return Step::Take(Decision::Target {
+            return Step::Take(Box::new(Decision::Target {
                 name: target.name.clone(),
                 via,
                 ai_meta,
-            });
+            }));
         }
         if need_ai {
             Step::Pause
         } else if series {
-            Step::Take(self.series_review(target, i))
+            Step::Take(Box::new(self.series_review(target, i)))
         } else {
             Step::Next
         }
@@ -767,7 +776,7 @@ fn walk(
             while walks[i].cursor < n {
                 match router.step(walks[i].cursor, i, &walks[i]) {
                     Step::Take(d) => {
-                        decisions[i] = Some(d);
+                        decisions[i] = Some(*d);
                         break;
                     }
                     Step::Pause => {
@@ -1152,6 +1161,7 @@ mod tests {
         let meta = AiMeta {
             tags: vec!["cat".into()],
             description: "A cat.".into(),
+            ..Default::default()
         };
         let with_meta = |cat: Option<&str>| AiAnswer {
             meta: Some(meta.clone()),

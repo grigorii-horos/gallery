@@ -2211,6 +2211,7 @@ mod tests {
             ai_meta: Some(AiMeta {
                 tags: vec!["cat".into()],
                 description: "A cat.".into(),
+                ..Default::default()
             }),
             ..old
         };
@@ -2365,6 +2366,7 @@ mod tests {
         let meta = AiMeta {
             tags: vec!["cat".into()],
             description: "A cat.".into(),
+            ..Default::default()
         };
         let ai = |target: &str| Decision::Target {
             name: target.into(),

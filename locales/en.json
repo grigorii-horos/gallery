@@ -258,7 +258,7 @@
   "ai.key_perms": "permissions %{mode} expose it to others, 600 required (chmod 600)",
   "ai.key_replaced": "file was replaced while reading",
   "ai.http_client": "http client: %{error}",
-  "ai.no_cache_dir": "no user cache directory",
+  "ai.no_cache_dir": "no user data directory",
   "ai.unknown_category": "model answered unknown category `%{name}`",
   "ai.no_key": "no key: set ANTHROPIC_API_KEY or CLAUDE_API_KEY or put the key in ~/.config/gallery/api-key (mode 600)",
   "ai.request_failed": "request failed: %{error}",

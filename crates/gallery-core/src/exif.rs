@@ -462,18 +462,34 @@ pub(crate) fn quicktime_to_local(tools: &Tools, rec: &mut serde_json::Value) {
 /// Windows exiftool reads its command line in the ANSI code page, which
 /// would turn Cyrillic or CJK values into `?`.
 pub fn write(tools: &Tools, path: &Path, args: &[String]) -> Result<()> {
-    write_impl(tools, None, path, args)
+    write_impl(tools, None, None, path, args)
+}
+
+/// [`write`] with an exiftool config file (`-config`), e.g. one that
+/// defines a custom XMP namespace.
+pub fn write_with_config(tools: &Tools, config: &Path, path: &Path, args: &[String]) -> Result<()> {
+    write_impl(tools, Some(config), None, path, args)
 }
 
 /// [`write`] with `-TagsFromFile from` ahead of `args`: tags are copied from
 /// `from` as `args` select them.
 pub fn write_from(tools: &Tools, from: &Path, path: &Path, args: &[String]) -> Result<()> {
-    write_impl(tools, Some(from), path, args)
+    write_impl(tools, None, Some(from), path, args)
 }
 
-fn write_impl(tools: &Tools, from: Option<&Path>, path: &Path, args: &[String]) -> Result<()> {
+fn write_impl(
+    tools: &Tools,
+    config: Option<&Path>,
+    from: Option<&Path>,
+    path: &Path,
+    args: &[String],
+) -> Result<()> {
     let mut argfile = tempfile::NamedTempFile::new()?;
     let mut cmd = tools.command(&tools.exiftool);
+    // `-config` only works as the very first argument.
+    if let Some(config) = config {
+        cmd.arg("-config").arg(config);
+    }
     cmd.args(["-overwrite_original", "-m", "-charset", "filename=utf8"]);
     // A path the file cannot hold as one line stays on the command line, as
     // raw bytes; `-TagsFromFile` then goes there too, ahead of the file.

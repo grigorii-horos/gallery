@@ -19,6 +19,7 @@ use chrono_tz::Tz;
 use regex::Regex;
 use serde_json::Value;
 use std::fs::File;
+use std::io::Write;
 use std::path::Path;
 use std::sync::OnceLock;
 use std::time::SystemTime;
@@ -383,9 +384,32 @@ fn remux_creation_time(ctx: &StepCtx, input: &Path, out: &Path, d: NaiveDateTime
     Ok(true)
 }
 
+/// exiftool config defining the `XMP-gallery` namespace that holds the AI's
+/// answer in the outputs. exiftool reads it back without the config too.
+const GALLERY_XMP_CONFIG: &str = r#"%Image::ExifTool::UserDefined = (
+    'Image::ExifTool::XMP::Main' => {
+        gallery => {
+            SubDirectory => { TagTable => 'Image::ExifTool::UserDefined::gallery' },
+        },
+    },
+);
+%Image::ExifTool::UserDefined::gallery = (
+    GROUPS => { 0 => 'XMP', 1 => 'XMP-gallery', 2 => 'Image' },
+    NAMESPACE => { 'gallery' => 'https://github.com/grigorii-horos/gallery/ns/1.0/' },
+    WRITABLE => 'string',
+    AiCategory => { },
+    AiConfidence => { },
+    AiReason => { },
+    AiModel => { },
+);
+1;
+"#;
+
 /// Add the AI's keywords to `path` (`XMP-dc:Subject`, and `IPTC:Keywords`
 /// in a JPEG) and its description (`XMP-dc:Description`) when the file has
-/// none: keywords already there and an existing description stay.
+/// none: keywords already there and an existing description stay. The answer
+/// itself goes into `XMP-gallery:AiCategory`, `AiConfidence`, `AiReason` and
+/// `AiModel`, replacing what is there.
 /// `Error::Unwritable` when exiftool has no writer for the format (WebM, MKV).
 pub(crate) fn write_ai_meta(tools: &Tools, path: &Path, meta: &AiMeta) -> Result<()> {
     let ext = path
@@ -412,10 +436,29 @@ pub(crate) fn write_ai_meta(tools: &Tools, path: &Path, meta: &AiMeta) -> Result
         args.push("-XMP-dc:Description-=".to_string());
         args.push(format!("-XMP-dc:Description={}", meta.description));
     }
+    let answer = [
+        ("AiCategory", &meta.category),
+        ("AiConfidence", &meta.confidence),
+        ("AiReason", &meta.reason),
+        ("AiModel", &meta.model),
+    ];
+    let mut custom = false;
+    for (tag, value) in answer {
+        if !value.is_empty() {
+            args.push(format!("-XMP-gallery:{tag}={value}"));
+            custom = true;
+        }
+    }
     if args.is_empty() {
         return Ok(());
     }
-    exif::write(tools, path, &args)
+    if !custom {
+        return exif::write(tools, path, &args);
+    }
+    let mut config = tempfile::NamedTempFile::new()?;
+    config.write_all(GALLERY_XMP_CONFIG.as_bytes())?;
+    config.flush()?;
+    exif::write_with_config(tools, config.path(), path, &args)
 }
 
 /// `d` as a wall-clock time in the tools' zone (this machine's without one).

@@ -260,7 +260,7 @@
   "ai.key_perms": "les permissions %{mode} l’exposent aux autres, 600 requis (chmod 600)",
   "ai.key_replaced": "le fichier a été remplacé pendant la lecture",
   "ai.http_client": "client http : %{error}",
-  "ai.no_cache_dir": "pas de dossier de cache utilisateur",
+  "ai.no_cache_dir": "pas de dossier de données utilisateur",
   "ai.unknown_category": "le modèle a répondu avec une catégorie inconnue `%{name}`",
   "ai.no_key": "pas de clé : définissez ANTHROPIC_API_KEY ou CLAUDE_API_KEY, ou placez la clé dans ~/.config/gallery/api-key (mode 600)",
   "ai.request_failed": "requête échouée : %{error}",

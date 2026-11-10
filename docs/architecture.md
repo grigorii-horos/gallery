@@ -171,11 +171,11 @@ release builds ignore it).
 | | `plans/<…>.plan.lock` | Per-plan lock (persistent, harmless when left behind). |
 | | `overrides.json` | Your manual decisions per source file. |
 | | `ai-examples.jsonl` | Your corrections, shown to the AI (text only). |
+| | `ai-answers.jsonl` | AI answers (append-only). Kept with the data because they were paid for; an `ai-cache.jsonl` left in `~/.cache/gallery/` by older versions is moved here on first use. Deleting it only costs money to rebuild. |
 | | `sync-paused.json` | Which Syncthing folders Gallery paused (present only while paused). |
 | | `settings.json`, `notify-state.json` | Tray/check settings and notification state. |
 | | `apply.lock` | The machine-wide apply/undo lock. |
-| `~/.cache/gallery/` | `ai-cache.jsonl` | AI answers (append-only). Safe to delete; it only costs money to rebuild. |
-| | `ai-usage.jsonl` | Token usage per AI scan, for cost history. |
+| `~/.cache/gallery/` | `ai-usage.jsonl` | Token usage per AI scan, for cost history. |
 | | `pending-index.json` | Per-file size/mtime/EXIF index for quick pending counts. |
 | | `thumbs/` | Thumbnails shown in the UI. |
 | | `incompressible.json` | Files whose same-format content pipe (never a conversion) could not make them smaller (path, size, mtime, pipe fingerprint): planning keeps them in place instead of encoding them again. Safe to delete; it only costs one more encode per file. |

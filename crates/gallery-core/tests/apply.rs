@@ -730,6 +730,10 @@ fn apply_writes_ai_tags_into_processed_outputs_only() {
     let meta = AiMeta {
         tags: vec!["кот".into(), "диван".into()],
         description: "Рыжий кот спит на диване.".into(),
+        category: "Коты".into(),
+        confidence: "OK".into(),
+        reason: "кот на диване".into(),
+        model: "claude-test".into(),
     };
     let ai = |mut it: PlanItem| {
         it.via = Via::Ai {
@@ -799,6 +803,27 @@ fn apply_writes_ai_tags_into_processed_outputs_only() {
         assert_eq!(t["XMP-dc:Subject"], subject, "{p:?}: {t}");
         assert_eq!(t["XMP-dc:Description"], "Рыжий кот спит на диване.");
     }
+
+    // The answer itself, readable without gallery's exiftool config.
+    let answer =
+        ["AiCategory", "AiConfidence", "AiReason", "AiModel"].map(|t| format!("XMP-gallery:{t}"));
+    let answer: Vec<&str> = answer.iter().map(String::as_str).collect();
+    for p in [
+        out.join("meta.jpg"),
+        out.join("small.avif"),
+        out.join("v.mp4"),
+    ] {
+        let t = tags_of(&p, &answer);
+        assert_eq!(t["XMP-gallery:AiCategory"], "Коты", "{p:?}: {t}");
+        assert_eq!(t["XMP-gallery:AiConfidence"], "OK", "{p:?}: {t}");
+        assert_eq!(t["XMP-gallery:AiReason"], "кот на диване", "{p:?}: {t}");
+        assert_eq!(t["XMP-gallery:AiModel"], "claude-test", "{p:?}: {t}");
+    }
+    assert!(
+        tags_of(&out.join("copy.jpg"), &answer)
+            .get("XMP-gallery:AiCategory")
+            .is_none()
+    );
 }
 
 #[test]
@@ -820,6 +845,7 @@ fn apply_warns_when_the_format_takes_no_ai_tags() {
     it.ai_meta = Some(AiMeta {
         tags: vec!["cat".into()],
         description: "A cat.".into(),
+        ..Default::default()
     });
     let rep = run(&save_plan(d.path(), vec![it]), &opts());
     let r = &rep.items[0];
@@ -858,6 +884,7 @@ fn apply_keeps_an_existing_description_and_merges_tags() {
     it.ai_meta = Some(AiMeta {
         tags: vec!["кот".into(), "семья".into()],
         description: "Рыжий кот спит на диване.".into(),
+        ..Default::default()
     });
     let rep = run(&save_plan(d.path(), vec![it]), &opts());
     let r = &rep.items[0];
