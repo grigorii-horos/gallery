@@ -753,8 +753,9 @@ not part of the cache key.
 
 ### AI keywords and description
 
-The same request that picks a category also asks for 3–10 short lowercase keywords and a
-one-sentence description of the frame, written in the `language` above. They never influence
+The same request that picks a category also asks for 5–20 short lowercase keywords (the concrete
+things in the frame — "pineapple", not "fruit" — plus the kind of place and the activity) and a
+2–4 sentence description of what the frame shows, written in the `language` above. They never influence
 routing; they are only written into the file's metadata:
 
 - **Only for files the AI routed** (the decision is *via AI*, including an unsure answer accepted with

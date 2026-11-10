@@ -28,11 +28,11 @@ const LEGACY_NONE_CATEGORY: &str = "НИКАКАЯ";
 /// same limit (adaptive thinking is on by default on current models).
 const MAX_TOKENS: u32 = 16000;
 /// At most this many keywords of an answer are kept.
-const MAX_TAGS: usize = 10;
+const MAX_TAGS: usize = 20;
 /// A keyword is cut to this many bytes (the IPTC Keywords limit).
 const MAX_TAG_BYTES: usize = 64;
 /// A description is cut to this many characters.
-const MAX_DESCRIPTION_CHARS: usize = 300;
+const MAX_DESCRIPTION_CHARS: usize = 600;
 const MAX_RETRIES: u32 = 6;
 const TIMEOUT: Duration = Duration::from_secs(300);
 pub const DEFAULT_API_BASE: &str = "https://api.anthropic.com";
@@ -144,8 +144,12 @@ fn build_prompt(categories: &[(String, String)], source: &SourcePrompt, full: bo
     // Not part of the cache key: see `cache_prompt`.
     let meta = if full {
         format!(
-            "- tags — 3-10 short keywords for what the frame shows, lowercase, written in {language};\n\
-- description — one sentence describing the frame, written in {language}.\n"
+            "- tags — 5-20 short keywords, lowercase, written in {language}: the concrete things \
+visible in the frame (name each kind of object, food, plant, animal or product specifically, \
+e.g. \"pineapple\", not just \"fruit\"), the kind of place and the activity;\n\
+- description — 2-4 sentences in {language} describing what is in the frame concretely: \
+the main objects by name, readable text or brands, the setting and what is happening. \
+Say what you see, not a guess about the occasion.\n"
         )
     } else {
         String::new()
@@ -781,9 +785,9 @@ mod meta_tests {
     }
 
     #[test]
-    fn description_is_cut_to_300_characters() {
-        let m = to_meta(&stored(&[], &"ё".repeat(400))).unwrap();
-        assert_eq!(m.description.chars().count(), 300);
+    fn description_is_cut_to_600_characters() {
+        let m = to_meta(&stored(&[], &"ё".repeat(800))).unwrap();
+        assert_eq!(m.description.chars().count(), 600);
         assert!(to_meta(&stored(&["\u{0}"], " \u{7} ")).is_none());
     }
 }
