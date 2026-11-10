@@ -344,7 +344,6 @@
   "content.video_failed": "відео %{path}: %{error}",
   "content.no_video_stream": "немає відеопотоку — залишено як є",
   "content.already_av1": "уже AV1 — залишено як є",
-  "content.not_smaller_low": "не менший за джерело навіть на низькій якості",
   "content.duration_vs": "тривалість не збігається: %{a} і %{b}",
   "content.meta_unreadable_input": "метадані не скопійовано: exiftool не зміг прочитати вихідний файл",
   "content.gps_not_copied": "GPS не скопійовано: у результаті немає %{tag}",

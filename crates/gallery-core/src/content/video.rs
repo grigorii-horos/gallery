@@ -51,7 +51,7 @@ impl ContentStep for VideoPreset {
             let _ = std::fs::remove_file(t);
         }
         match res {
-            Ok(true) => {
+            Ok(()) => {
                 let mut warnings = Vec::new();
                 restore_tags(ctx, input, &out, &mut warnings);
                 Ok(StepResult {
@@ -60,10 +60,6 @@ impl ContentStep for VideoPreset {
                     warnings,
                     fell_back: false,
                 })
-            }
-            Ok(false) => {
-                let _ = std::fs::remove_file(&out);
-                fall_back(ctx, input, in_ext, &crate::t!("content.not_smaller_low"))
             }
             Err(e) => {
                 let _ = std::fs::remove_file(&out);
@@ -94,8 +90,9 @@ impl VideoPreset {
         steps
     }
 
-    /// Encode into `out`, stepping down the ladder until the result is
-    /// smaller than the input. Ok(false): even the last level did not help.
+    /// Encode into `out` once, at the preset's own level, and accept the
+    /// result whatever its size: a video that gets here is not AV1 yet, so
+    /// this is a conversion, not a compression (no size check, no ladder).
     fn encode_ladder(
         &self,
         ctx: &StepCtx,
@@ -104,7 +101,7 @@ impl VideoPreset {
         probe: &Probe,
         video: &VideoStream,
         trf: &mut Option<PathBuf>,
-    ) -> Result<bool> {
+    ) -> Result<()> {
         // ffmpeg runs from tmp_dir (see below), so every path must be absolute.
         let input = std::path::absolute(input)?;
         let out = std::path::absolute(out)?;
@@ -152,43 +149,37 @@ impl VideoPreset {
         } else {
             "yuv420p"
         };
-        let in_size = std::fs::metadata(&input)?.len();
-        for (crf, preset) in self.attempts() {
-            let mut cmd = ctx.tools.command(&ctx.tools.ffmpeg);
-            cmd.current_dir(&tmp_dir)
-                .args(["-y", "-v", "error", "-nostdin", "-i"])
-                .arg(&input)
-                .arg("-vf")
-                .arg(&vf)
-                .args(["-c:v", "libsvtav1", "-crf", &crf.to_string()])
-                .args(["-preset", &preset.to_string()])
-                .args(["-g", &self.gop.to_string()])
-                .args(["-svtav1-params", "tune=0", "-pix_fmt", pix_out])
-                .args(["-colorspace", colors.space])
-                .args(["-color_primaries", colors.primaries])
-                .args(["-color_trc", colors.transfer, "-color_range", "tv"]);
-            if probe.has_audio {
-                cmd.args(["-c:a", "libopus", "-b:a"])
-                    .arg(format!("{}k", self.audio_kbps))
-                    .args(["-ar", "48000"]);
-            } else {
-                cmd.arg("-an");
-            }
-            cmd.args(["-map_metadata", "0"])
-                .args(["-movflags", "use_metadata_tags+faststart"])
-                .args(["-max_muxing_queue_size", "1024"])
-                .arg(&out);
-            run(cmd, "ffmpeg")?;
-            let out_size = std::fs::metadata(&out)?.len();
-            if out_size == 0 {
-                return Err(Error::Tool(crate::t!("content.empty_encoder")));
-            }
-            if out_size < in_size {
-                check_duration(ctx, probe.duration, &out)?;
-                return Ok(true);
-            }
+        let (crf, preset) = self.attempts()[0];
+        let mut cmd = ctx.tools.command(&ctx.tools.ffmpeg);
+        cmd.current_dir(&tmp_dir)
+            .args(["-y", "-v", "error", "-nostdin", "-i"])
+            .arg(&input)
+            .arg("-vf")
+            .arg(&vf)
+            .args(["-c:v", "libsvtav1", "-crf", &crf.to_string()])
+            .args(["-preset", &preset.to_string()])
+            .args(["-g", &self.gop.to_string()])
+            .args(["-svtav1-params", "tune=0", "-pix_fmt", pix_out])
+            .args(["-colorspace", colors.space])
+            .args(["-color_primaries", colors.primaries])
+            .args(["-color_trc", colors.transfer, "-color_range", "tv"]);
+        if probe.has_audio {
+            cmd.args(["-c:a", "libopus", "-b:a"])
+                .arg(format!("{}k", self.audio_kbps))
+                .args(["-ar", "48000"]);
+        } else {
+            cmd.arg("-an");
         }
-        Ok(false)
+        cmd.args(["-map_metadata", "0"])
+            .args(["-movflags", "use_metadata_tags+faststart"])
+            .args(["-max_muxing_queue_size", "1024"])
+            .arg(&out);
+        run(cmd, "ffmpeg")?;
+        let out_size = std::fs::metadata(&out)?.len();
+        if out_size == 0 {
+            return Err(Error::Tool(crate::t!("content.empty_encoder")));
+        }
+        check_duration(ctx, probe.duration, &out)
     }
 
     /// Lanczos scale to tv range, downscaled by the SHORT side so the frame

@@ -338,7 +338,6 @@
   "content.video_failed": "视频 %{path}：%{error}",
   "content.no_video_stream": "没有视频流——保持原样",
   "content.already_av1": "已经是 AV1——保持原样",
-  "content.not_smaller_low": "即使在低档位也没有比来源更小",
   "content.duration_vs": "时长不一致：%{a} 对 %{b}",
   "content.meta_unreadable_input": "元数据未复制：exiftool 无法读取输入",
   "content.gps_not_copied": "GPS 未复制：结果中缺少 %{tag}",
