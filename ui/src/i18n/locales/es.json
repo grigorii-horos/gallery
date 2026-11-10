@@ -47,7 +47,7 @@
   "files_one": "{{count, number}} archivo",
   "files_many": "{{count, number}} de archivos",
   "files_other": "{{count, number}} archivos",
-  "fate_trash": "a la papelera",
+  "fate_trash": "copiados, original a la papelera",
   "fate_renamed": "renombrados en el sitio",
   "fate_kept": "se quedan donde están",
   "fate_to_trash": "a la papelera (destinos de papelera)",

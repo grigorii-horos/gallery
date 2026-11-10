@@ -43,7 +43,7 @@
   "unit_mb": "{{n}} MB",
   "unit_gb": "{{n}} GB",
   "files_other": "{{count, number}} 个文件",
-  "fate_trash": "移入回收站",
+  "fate_trash": "已复制，原件移入回收站",
   "fate_renamed": "原地重命名",
   "fate_kept": "保留在原处",
   "fate_to_trash": "移入回收站（回收站目标）",

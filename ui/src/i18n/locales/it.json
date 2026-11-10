@@ -47,7 +47,7 @@
   "files_one": "{{count, number}} file",
   "files_many": "{{count, number}} di file",
   "files_other": "{{count, number}} file",
-  "fate_trash": "nel cestino",
+  "fate_trash": "copiati, originale nel cestino",
   "fate_renamed": "rinominati sul posto",
   "fate_kept": "lasciati dove sono",
   "fate_to_trash": "nel cestino (destinazioni cestino)",

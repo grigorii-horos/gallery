@@ -45,7 +45,7 @@
   "unit_gb": "{{n}} GB",
   "files_one": "{{count, number}} file",
   "files_other": "{{count, number}} files",
-  "fate_trash": "to the trash",
+  "fate_trash": "copied, original to the trash",
   "fate_renamed": "renamed in place",
   "fate_kept": "left where they are",
   "fate_to_trash": "to trash (trash targets)",
