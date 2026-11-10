@@ -184,9 +184,17 @@ Safety-relevant behaviour of outputs (details in [architecture](architecture.md#
   content pipe is empty, the source is not copied or trashed: it is *renamed or moved* there
   (a file that already has the right name is left out of the plan as "unchanged"). This is how the
   "Screenshots" example in `examples/gallery.toml` sorts files into `year/month` folders without duplicating them.
-- **Already as small as it gets:** when an output in the source's own folder runs content steps but
-  the encoder result is not smaller, the source keeps its bytes: it is left where it is (or only
-  renamed in its folder), never copied over itself and trashed. Gallery remembers such a file
+- **Conversions always convert; only same-format compression can give up.** A content preset that
+  changes the format (JPEG, HEIC, PNG or WebP to AVIF, any video to AV1, audio to another codec) is
+  a conversion, not a compression: it always writes the target file, even when that file is larger
+  than the source, and the source goes to the trash as usual (with the in-place target the result
+  is `<name>.avif` or `<name>.av1.mp4` next to it). Such a preset tries one quality level (no
+  `ladder`, no `min_saving_pct`) and never falls back to the source bytes.
+- **Already as small as it gets:** a preset that keeps the format (a photo preset on a file that is
+  already AVIF or WebP in its own format) is a compression. When an output in the source's own
+  folder runs such a step but the encoder result is not smaller, the source keeps its bytes: it is
+  left where it is (or only renamed in its folder), never copied over itself and trashed. Gallery
+  remembers such a file
   (`incompressible.json` in its cache folder, per file size and mtime, preset settings and encoder
   versions), so the next scan lists it as unchanged instead of encoding it again. Editing the file,
   changing the presets or upgrading an encoder tries again. Server plans (`server_dir`) cannot use
@@ -590,11 +598,15 @@ presets to `@audio` (minus files already in the output format), `png-*` presets 
 
 Behaviour worth knowing:
 
-- Photo presets try the preset's quality, then, with `ladder` on (the default), lower quality levels
-  (AVIF 82/72/65/55, WebP 93/87/80/70) until the result is **smaller than the input**. If nothing
-  gets smaller, the original bytes are kept and a warning is recorded.
-- Video presets output `.av1.mp4` (SVT-AV1 + Opus). Their default short side is capped at 1080,
-  audio 160 kbps, GOP 240, and the ladder works like the photo one.
+- A preset that changes the format is a conversion and always produces the target format, at the
+  preset's own quality, whatever the size of the result (no size check, no lower-quality retries).
+- A photo preset that keeps the format (AVIF to AVIF, WebP to WebP) is a compression: it tries the
+  preset's quality, then, with `ladder` on (the default), lower quality levels (AVIF 82/72/65/55,
+  WebP 93/87/80/70) until the result is **smaller than the input** (and saves `min_saving_pct`). If
+  nothing gets smaller, the original bytes are kept and a warning is recorded.
+- Video presets output `.av1.mp4` (SVT-AV1 + Opus), always a conversion (a video that is already
+  AV1 is left alone). Their default short side is capped at 1080, audio 160 kbps, GOP 240. `ladder`
+  has no effect on them.
 - Metadata and encoding steps record what they changed; the result is verified against the source
   (see [safety](architecture.md#safety-guarantees)).
 
@@ -633,8 +645,8 @@ format = "avif"          # "avif" (default) or "webp"
 quality = 60             # 0..100
 speed = 6                # AVIF 0..10, WebP method 0..6
 max_short_side = 2160    # optional downscale, 1..65535
-ladder = true            # try lower quality until smaller
-min_saving_pct = 10      # 0..99: result must save at least this much
+ladder = true            # same-format only: try lower quality until smaller
+min_saving_pct = 10      # 0..99: same-format only: result must save at least this much
 mask = "@photo-original"
 
 [content_presets.clips]

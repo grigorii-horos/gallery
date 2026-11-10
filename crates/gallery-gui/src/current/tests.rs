@@ -162,6 +162,29 @@ fn the_fingerprint_changes_with_config_decisions_files_and_cache_and_not_otherwi
     std::fs::create_dir_all(fx.cache().parent().unwrap()).unwrap();
     std::fs::write(fx.cache(), "{}\n").unwrap();
     assert_ne!(fp(&fx, &p).ai_cache, before);
+
+    // A run recorded files their pipe cannot shrink: no source file changed,
+    // yet the plan must be built again so those files drop out of it.
+    let before = fp(&fx, &p).incompressible;
+    let store = gallery_core::paths::cache_dir()
+        .unwrap()
+        .join("incompressible.json");
+    std::fs::create_dir_all(store.parent().unwrap()).unwrap();
+    let old = std::fs::read(&store).ok();
+    std::fs::write(
+        &store,
+        format!(
+            "{{\"version\":1,\"files\":{{}},\"pad\":\"{}\"}}",
+            "x".repeat(before.len() + 7)
+        ),
+    )
+    .unwrap();
+    let after = fp(&fx, &p).incompressible;
+    match old {
+        Some(b) => std::fs::write(&store, b).unwrap(),
+        None => std::fs::remove_file(&store).unwrap(),
+    }
+    assert_ne!(after, before);
 }
 
 #[test]

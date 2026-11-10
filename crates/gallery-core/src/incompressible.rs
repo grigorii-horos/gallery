@@ -1,8 +1,9 @@
 //! Files a content pipe could not make any smaller.
 //!
-//! When an in-place output's pipe fell back to the source bytes (the encoder
-//! result was not smaller), apply leaves the source as it is and records it
-//! here; planning then keeps such a file where it is instead of encoding it
+//! When an in-place output's pipe fell back to the source bytes (a same-format
+//! recompression, such as avif to avif, that came out no smaller; a pipe that
+//! changes the format always produces its target and never lands here), apply
+//! leaves the source as it is and records it here; planning then keeps such a file where it is instead of encoding it
 //! again on every scan. An entry holds only for the exact file (size and
 //! mtime) and the exact pipe (preset names and their settings): a changed
 //! file or a changed preset chain is encoded again.
@@ -22,6 +23,12 @@ use crate::tools::Tools;
 
 const FILE: &str = "incompressible.json";
 const VERSION: u32 = 1;
+
+/// Version of the rule that decides which pipes can be remembered. Part of
+/// every fingerprint: 2 is "a conversion always converts" (only same-format
+/// recompression can be kept for not shrinking), so entries recorded under
+/// the older rule for pipes that change the format no longer match.
+const POLICY: u32 = 2;
 
 /// Read-modify-write of the store within this process.
 static LOCK: Mutex<()> = Mutex::new(());
@@ -54,7 +61,7 @@ pub fn fingerprint<'a>(
     for s in steps {
         chain.push((s.as_str(), preset(s)?));
     }
-    let json = serde_json::to_vec(&(chain, versions)).ok()?;
+    let json = serde_json::to_vec(&(POLICY, chain, versions)).ok()?;
     Some(blake3::hash(&json).to_hex().to_string())
 }
 
@@ -245,6 +252,18 @@ mod tests {
             fingerprint(&x, |_| Some(&a), &v),
             fingerprint(&x, |_| Some(&a), &newer)
         );
+    }
+
+    /// An entry recorded under the earlier rule (before conversions always
+    /// converted) was fingerprinted without the policy: it never matches now.
+    #[test]
+    fn fingerprint_of_the_old_policy_does_not_match() {
+        let a = ContentPreset::Photo(PhotoPreset::avif_high());
+        let v = BTreeMap::new();
+        let steps = vec!["X".to_string()];
+        let old = serde_json::to_vec(&(vec![("X", &a)], &v)).unwrap();
+        let old = blake3::hash(&old).to_hex().to_string();
+        assert_ne!(Some(old), fingerprint(&steps, |_| Some(&a), &v));
     }
 
     #[test]

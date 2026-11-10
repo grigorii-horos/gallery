@@ -52,7 +52,8 @@ What the plan can do for each target, per output folder:
 
 - **Content pipe:** metadata fixes (capture date, Google Camera tags, time-zone offset, video GPS),
   AVIF / WebP photo encoders, SVT-AV1 + Opus video, Opus / MP3 / AAC / FLAC audio, lossless
-  `optipng`, with a quality ladder that keeps the original bytes when a re-encode would not be smaller.
+  `optipng`. Conversions (to AVIF, AV1, another audio codec) always convert; a same-format
+  re-encode keeps the original bytes when it would not be smaller.
 - **Rename pipe:** capture-date names (`20260412_103314.avif`), `year/month` folders, your own
   templates.
 - **Ordered targets** instead of fixed stages: one list, the first matching target takes a file.

@@ -158,7 +158,7 @@ fn photo_resize_short_side() {
 }
 
 #[test]
-fn photo_ladder_falls_back_to_original() {
+fn photo_conversion_is_kept_even_when_larger() {
     require_tool!("magick");
     require_tool!("exiftool");
     require_tool!("avifenc");
@@ -173,8 +173,41 @@ fn photo_ladder_falls_back_to_original() {
     assert!(made.status.success());
     let tools = Tools::discover().unwrap();
     let r = encode(&tools, &src, tmp.path(), fast(PhotoPreset::avif_high())).unwrap();
+    // jpg to avif is a conversion: no size check, no ladder, no warning.
+    assert!(!r.fell_back, "{:?}", r.warnings);
+    assert_eq!(r.ext, "avif");
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(size(&r.path) >= size(&src), "the fixture must not shrink");
+    assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
+}
+
+/// Same-format recompression keeps the source when it cannot shrink it.
+#[test]
+fn photo_same_format_falls_back_to_original() {
+    require_tool!("magick");
+    require_tool!("exiftool");
+    require_tool!("avifenc");
+    let dir = tempfile::tempdir().unwrap();
+    let tmp = tempfile::tempdir().unwrap();
+    let png = dir.path().join("tiny.png");
+    let src = dir.path().join("tiny.avif");
+    let made = Command::new("magick")
+        .args(["-size", "8x8", "xc:white"])
+        .arg(&png)
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let made = Command::new("avifenc")
+        .args(["-q", "30", "-s", "10"])
+        .arg(&png)
+        .arg(&src)
+        .output()
+        .unwrap();
+    assert!(made.status.success());
+    let tools = Tools::discover().unwrap();
+    let r = encode(&tools, &src, tmp.path(), fast(PhotoPreset::avif_high())).unwrap();
     assert!(r.fell_back);
-    assert_eq!(r.ext, "jpg");
+    assert_eq!(r.ext, "avif");
     assert_ne!(r.path, src);
     assert!(r.path.starts_with(tmp.path()));
     assert_eq!(
