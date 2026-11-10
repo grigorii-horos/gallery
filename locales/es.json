@@ -342,7 +342,6 @@
   "content.video_failed": "vídeo %{path}: %{error}",
   "content.no_video_stream": "sin flujo de vídeo — se deja como está",
   "content.already_av1": "ya es AV1 — se deja como está",
-  "content.not_smaller_low": "no es más pequeño que el origen ni con el nivel bajo",
   "content.duration_vs": "la duración no coincide: %{a} frente a %{b}",
   "content.meta_unreadable_input": "metadatos no copiados: exiftool no pudo leer la entrada",
   "content.gps_not_copied": "GPS no copiado: falta %{tag} en el resultado",

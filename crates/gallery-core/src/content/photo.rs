@@ -75,8 +75,11 @@ impl PhotoPreset {
         qs
     }
 
-    /// Encode into `out`, stepping down the ladder until the result is
-    /// smaller than the input. Ok(false): even the last level did not help.
+    /// Encode into `out`. A conversion (the output format differs from the
+    /// input's) is encoded once at the preset's quality and accepted whatever
+    /// its size. A same-format recompression steps down the ladder until the
+    /// result is smaller than the input. Ok(false): even the last level did
+    /// not help.
     fn encode_ladder(
         &self,
         ctx: &StepCtx,
@@ -87,11 +90,19 @@ impl PhotoPreset {
         warnings: &mut Vec<String>,
     ) -> Result<bool> {
         let in_size = std::fs::metadata(input)?.len();
+        let converts = !in_ext.eq_ignore_ascii_case(self.output_ext());
         for q in self.qualities() {
             let needs_tags = self.encode_once(ctx, input, in_ext, out, q, png)?;
             let out_size = std::fs::metadata(out)?.len();
             if out_size == 0 {
                 return Err(Error::Tool(crate::t!("content.empty_encoder")));
+            }
+            if converts {
+                self.verify(ctx, out)?;
+                if needs_tags {
+                    copy_tags(ctx, input, out, warnings);
+                }
+                return Ok(true);
             }
             let saved = in_size.saturating_sub(out_size);
             if out_size < in_size && saved * 100 >= in_size * u64::from(self.min_saving_pct) {

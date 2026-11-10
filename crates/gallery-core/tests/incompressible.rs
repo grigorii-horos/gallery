@@ -1,6 +1,8 @@
-//! A file the content pipe cannot make smaller: in place it is left as it is
-//! (never copied over itself and trashed), and later scans do not encode it
-//! again until the file or the pipe changes.
+//! A same-format recompression (here AVIF to AVIF) that cannot make the file
+//! smaller: in place the file is left as it is (never copied over itself and
+//! trashed), and later scans do not encode it again until the file or the
+//! pipe changes. A conversion (PNG to AVIF) is not subject to this: it always
+//! produces its target, whatever its size.
 
 mod support;
 
@@ -30,7 +32,7 @@ macro_rules! require_tools {
     };
 }
 
-/// A tiny flat PNG: no AVIF of it comes out smaller.
+/// A tiny flat PNG: its AVIF is no smaller.
 fn tiny_png(dir: &Path, name: &str) -> PathBuf {
     std::fs::create_dir_all(dir).unwrap();
     let path = dir.join(name);
@@ -44,6 +46,26 @@ fn tiny_png(dir: &Path, name: &str) -> PathBuf {
         "{}",
         String::from_utf8_lossy(&out.stderr)
     );
+    path
+}
+
+/// A tiny flat AVIF: re-encoded as AVIF it comes out no smaller.
+fn tiny_avif(dir: &Path, name: &str) -> PathBuf {
+    std::fs::create_dir_all(dir).unwrap();
+    let png = tiny_png(dir, "seed.png");
+    let path = dir.join(name);
+    let out = Command::new("avifenc")
+        .args(["-q", "30", "-s", "10"])
+        .arg(&png)
+        .arg(&path)
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    std::fs::remove_file(png).unwrap();
     path
 }
 
@@ -66,10 +88,10 @@ fn names(dir: &Path) -> Vec<String> {
     v
 }
 
-/// The PNG-to-AVIF preset of the tests, at AVIF `quality`.
+/// The AVIF-to-AVIF preset of the tests, at AVIF `quality`.
 fn shot_preset(quality: u8) -> ContentPreset {
     ContentPreset::Photo(PhotoPreset {
-        mask: PhotoPreset::png_avif().mask,
+        mask: Some(gallery_core::mask::MaskExpr::parse("*.avif").unwrap()),
         quality,
         ..PhotoPreset::avif_fast()
     })
@@ -85,7 +107,7 @@ fn config(d: &Path, dir: Option<&Path>, extra: &str, quality: u8) -> Config {
     let toml = format!(
         "[[sources]]\nid = \"s\"\npath = \"{r}/src\"\n\
          [[targets.after_ai]]\nname = \"t\"\n[[targets.after_ai.filters]]\n\
-         sources = [\"s\"]\nmatch = \"*.png\"\n\
+         sources = [\"s\"]\nmatch = \"*.avif\"\n\
          [[targets.after_ai.outputs]]\ndir = \"{dir}\"\ncontent = [\"shot\"]\n{extra}"
     );
     let mut c = Config::from_str_at(&toml, d, Path::new("t.toml")).unwrap();
@@ -147,13 +169,13 @@ fn in_place_result_not_smaller_leaves_the_source_and_is_not_planned_again() {
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
-    let src = tiny_png(&root, "shot.png");
+    let src = tiny_avif(&root, "shot.avif");
     let (orig, orig_mtime) = (hash(&src), mtime_ns(&src));
     let c = config(d, None, "", 72);
 
     let plan = scan_plan(&c, d, &src);
     assert_eq!(plan.items.len(), 1, "{plan:?}");
-    assert_eq!(plan.items[0].outputs[0].dest, root.join("shot.avif"));
+    assert_eq!(plan.items[0].outputs[0].dest, src);
     let (plan_path, rep) = run_plan(d, &plan);
     let r = &rep.items[0];
     untouched(r);
@@ -165,7 +187,7 @@ fn in_place_result_not_smaller_leaves_the_source_and_is_not_planned_again() {
     // Not written over itself, not in the trash: the very same file.
     assert_eq!(hash(&src), orig);
     assert_eq!(mtime_ns(&src), orig_mtime);
-    assert_eq!(names(&root), ["shot.png"]);
+    assert_eq!(names(&root), ["shot.avif"]);
 
     // Undo has nothing to do and leaves the file.
     let u = gallery_core::undo::undo(&report_path(&plan_path)).unwrap();
@@ -199,7 +221,7 @@ fn in_place_not_smaller_with_a_backup_writes_the_backup_and_keeps_the_source() {
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
-    let src = tiny_png(&root, "shot.png");
+    let src = tiny_avif(&root, "shot.avif");
     let orig = hash(&src);
     let backup = d.join("backup");
     let extra = format!(
@@ -218,17 +240,17 @@ fn in_place_not_smaller_with_a_backup_writes_the_backup_and_keeps_the_source() {
     assert!(r.outputs[0].warnings.contains(&smallest()));
     assert_eq!(
         r.outputs[1].actual.as_deref(),
-        Some(backup.join("shot.png").as_path())
+        Some(backup.join("shot.avif").as_path())
     );
-    assert_eq!(hash(&backup.join("shot.png")), orig);
+    assert_eq!(hash(&backup.join("shot.avif")), orig);
     assert_eq!(hash(&src), orig);
-    assert_eq!(names(&root), ["shot.png"]);
+    assert_eq!(names(&root), ["shot.avif"]);
 
     // Next scan: kept in place, and the backup already holds these bytes.
     let again = scan_plan(&c, d, &src);
     assert!(again.items.is_empty(), "{again:?}");
     assert_eq!(again.unchanged, std::slice::from_ref(&src));
-    assert_eq!(names(&backup), ["shot.png"]);
+    assert_eq!(names(&backup), ["shot.avif"]);
 }
 
 /// A hand-made plan of one item with outputs `(dest, steps)`.
@@ -277,7 +299,7 @@ fn not_smaller_elsewhere_is_still_copied_and_the_source_trashed() {
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
-    let src = tiny_png(&root, "shot.png");
+    let src = tiny_avif(&root, "shot.avif");
     let orig = hash(&src);
     let out = d.join("out");
     let (_, rep) = run_plan(
@@ -296,9 +318,9 @@ fn not_smaller_elsewhere_is_still_copied_and_the_source_trashed() {
     assert!(!r.outputs[0].warnings.contains(&smallest()));
     assert_eq!(
         r.outputs[0].actual.as_deref(),
-        Some(out.join("shot.png").as_path())
+        Some(out.join("shot.avif").as_path())
     );
-    assert_eq!(hash(&out.join("shot.png")), orig);
+    assert_eq!(hash(&out.join("shot.avif")), orig);
     assert!(!src.exists());
 }
 
@@ -308,9 +330,9 @@ fn not_smaller_under_a_new_name_in_its_folder_renames_the_source() {
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
-    let src = tiny_png(&root, "shot.png");
+    let src = tiny_avif(&root, "shot.avif");
     let (orig, orig_mtime) = (hash(&src), mtime_ns(&src));
-    let renamed = root.join("20260412_103314.png");
+    let renamed = root.join("20260412_103314.avif");
     let (plan_path, rep) = run_plan(
         d,
         &plan_of(
@@ -326,13 +348,13 @@ fn not_smaller_under_a_new_name_in_its_folder_renames_the_source() {
     assert!(o.warnings.contains(&smallest()), "{o:?}");
     assert_eq!(o.renamed_from.as_deref(), Some(src.as_path()));
     assert_eq!(o.actual.as_deref(), Some(renamed.as_path()));
-    assert_eq!(names(&root), ["20260412_103314.png"]);
+    assert_eq!(names(&root), ["20260412_103314.avif"]);
     assert_eq!((hash(&renamed), mtime_ns(&renamed)), (orig, orig_mtime));
 
     // Undo gives the old name back.
     let u = gallery_core::undo::undo(&report_path(&plan_path)).unwrap();
     assert!(u.problems.is_empty(), "{u:?}");
-    assert_eq!(names(&root), ["shot.png"]);
+    assert_eq!(names(&root), ["shot.avif"]);
     assert_eq!(hash(&src), orig);
 }
 
@@ -345,7 +367,7 @@ fn every_file_of_a_parallel_run_is_remembered() {
     let d = d.path();
     let root = d.join("src");
     let srcs: Vec<PathBuf> = (0..6)
-        .map(|i| tiny_png(&root, &format!("shot{i}.png")))
+        .map(|i| tiny_avif(&root, &format!("shot{i}.avif")))
         .collect();
     let c = config(d, None, "", 72);
     let routed = |srcs: &[PathBuf]| -> Vec<(FileEntry, Decision)> {
@@ -385,7 +407,7 @@ fn a_metadata_step_after_the_fallback_stops_after_one_run() {
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
-    let src = tiny_png(&root, "shot.png");
+    let src = tiny_avif(&root, "shot.avif");
     let orig = hash(&src);
     let mut c = config(d, None, "", 72);
     c.targets[0].outputs[0]
@@ -413,28 +435,34 @@ fn a_metadata_step_after_the_fallback_stops_after_one_run() {
     assert_eq!(again.unchanged, std::slice::from_ref(&src));
 }
 
-/// `<stem>.avif` is taken, so the plan reserved `<stem>_1.avif`; the
-/// fallback would be `<stem>_1.png`. That number is no name worth a
-/// rename: the source stays as it is.
+/// A conversion always converts: the AVIF of a tiny PNG is larger than the
+/// PNG, and it is still written, with no fallback and no warning; the source
+/// goes to the trash as for any conversion.
 #[test]
-fn a_collision_numbered_fallback_name_keeps_the_source() {
+fn a_larger_conversion_is_still_produced() {
     require_tools!();
     let d = tempfile::tempdir().unwrap();
     let d = d.path();
     let root = d.join("src");
     let src = tiny_png(&root, "shot.png");
-    std::fs::write(root.join("shot.avif"), b"another file").unwrap();
     let orig = hash(&src);
-    let c = config(d, None, "", 72);
-    let plan = scan_plan(&c, d, &src);
-    assert_eq!(plan.items[0].outputs[0].dest, root.join("shot_1.avif"));
-    let (_, rep) = run_plan(d, &plan);
+    let dest = root.join("shot.avif");
+    let (_, rep) = run_plan(d, &plan_of(&src, &root, vec![(dest.clone(), vec!["shot"])]));
     let r = &rep.items[0];
-    untouched(r);
-    assert!(r.outputs[0].renamed_from.is_none(), "{r:?}");
-    assert_eq!(r.outputs[0].actual.as_deref(), Some(src.as_path()));
-    assert_eq!(names(&root), ["shot.avif", "shot.png"]);
-    assert_eq!(hash(&src), orig);
-    let again = scan_plan(&c, d, &src);
-    assert!(again.items.is_empty(), "{again:?}");
+    let ItemStatus::Done {
+        trashed: Some(TrashRef::Folder { path }),
+    } = &r.status
+    else {
+        panic!("expected the source in the trash: {r:?}");
+    };
+    assert_eq!(hash(path), orig);
+    let o = &r.outputs[0];
+    assert!(!o.fell_back && o.error.is_none(), "{o:?}");
+    assert!(o.warnings.is_empty(), "{o:?}");
+    assert_eq!(o.actual.as_deref(), Some(dest.as_path()));
+    assert!(
+        std::fs::metadata(&dest).unwrap().len() >= std::fs::metadata(path).unwrap().len(),
+        "the fixture must be one AVIF cannot shrink"
+    );
+    assert!(!src.exists());
 }

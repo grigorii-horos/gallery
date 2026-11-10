@@ -342,7 +342,6 @@
   "content.video_failed": "video %{path}: %{error}",
   "content.no_video_stream": "fără flux video — lăsat ca atare",
   "content.already_av1": "deja AV1 — lăsat ca atare",
-  "content.not_smaller_low": "nu este mai mic decât sursa nici la calitate joasă",
   "content.duration_vs": "durată diferită: %{a} față de %{b}",
   "content.meta_unreadable_input": "metadatele nu au fost copiate: exiftool nu a putut citi intrarea",
   "content.gps_not_copied": "GPS nu a fost copiat: %{tag} lipsește din rezultat",

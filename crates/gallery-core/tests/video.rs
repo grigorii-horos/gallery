@@ -185,7 +185,7 @@ fn video_keeps_gps() {
 }
 
 #[test]
-fn video_not_smaller_falls_back() {
+fn video_conversion_is_kept_even_when_not_smaller() {
     require_tool!("ffmpeg");
     require_tool!("ffprobe");
     require_tool!("exiftool");
@@ -214,15 +214,18 @@ fn video_not_smaller_falls_back() {
     assert!(out.status.success());
     let tools = Tools::discover().unwrap();
     let r = encode(&tools, &src, tmp.path(), fast(Some(1080))).unwrap();
-    assert!(r.fell_back);
-    assert_eq!(r.ext, "mp4");
-    assert!(!r.warnings.is_empty());
-    assert_ne!(r.path, src);
-    assert_eq!(
-        std::fs::read(&r.path).unwrap(),
-        std::fs::read(&src).unwrap()
+    // A conversion to AV1 always converts: no fallback, no warning, however
+    // large the result is.
+    assert!(!r.fell_back, "{:?}", r.warnings);
+    assert_eq!(r.ext, "av1.mp4");
+    assert!(r.warnings.is_empty(), "{:?}", r.warnings);
+    assert!(
+        std::fs::metadata(&r.path).unwrap().len() >= std::fs::metadata(&src).unwrap().len(),
+        "the fixture must be one AV1 cannot shrink"
     );
-    // Only the fallback copy is left behind.
+    let probe = support::ffprobe(&r.path);
+    assert_eq!(stream(&probe, "video").unwrap()["codec_name"], "av1");
+    // Only the result is left behind.
     assert_eq!(std::fs::read_dir(tmp.path()).unwrap().count(), 1);
 }
 
