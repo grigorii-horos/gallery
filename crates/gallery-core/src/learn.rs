@@ -521,6 +521,7 @@ mod tests {
             source_root: None,
             name_error: false,
             series: None,
+            ai_meta: None,
         }
     }
 

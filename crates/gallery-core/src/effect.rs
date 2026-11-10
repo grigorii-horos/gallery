@@ -762,6 +762,7 @@ mod tests {
                 crate::ai::cache::Stored {
                     tags: Vec::new(),
                     description: String::new(),
+                    meta: crate::ai::cache::META_VERSION,
                     category: "pics".into(),
                     reason: "r".into(),
                     confidence: "OK".into(),

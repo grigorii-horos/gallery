@@ -479,6 +479,7 @@
   "decide_decided": "tranché",
   "decide_name_error": "Le nom n’a pas pu être construit pour la cible « {{targets}} »",
   "decide_ai_suggests": "L’IA propose :",
+  "ai_tags_label": "Mots-clés",
   "decide_more_reasons_one": "et {{count, number}} autre explication sur des fichiers de la série",
   "decide_more_reasons_many": "et {{count, number}} autres explications sur des fichiers de la série",
   "decide_more_reasons_other": "et {{count, number}} autres explications sur des fichiers de la série",

@@ -146,6 +146,11 @@ pub struct ReviewItem {
     /// suggested best shot, for a side-by-side review.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub series: Option<SeriesReview>,
+    /// The AI's keywords and description when its doubtful answer is the
+    /// reason: display data for the review (apply never reads it, so it
+    /// does not make the plan version 2).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub ai_meta: Option<AiMeta>,
 }
 
 fn is_false(b: &bool) -> bool {
@@ -448,6 +453,7 @@ pub fn build_plan_with(
                 suggested,
                 reason,
                 series,
+                ai_meta,
             } => {
                 review.push(ReviewItem {
                     source,
@@ -459,6 +465,7 @@ pub fn build_plan_with(
                     source_root: Some(source_root),
                     name_error: false,
                     series,
+                    ai_meta,
                 });
                 continue;
             }
@@ -549,6 +556,7 @@ pub fn build_plan_with(
                         source_root: Some(source_root),
                         name_error: true,
                         series: None,
+                        ai_meta: None,
                     });
                     continue 'files;
                 }
@@ -888,6 +896,7 @@ pub fn guard_last_copies(plan: &mut Plan, groups: &Groups, files: &[FileEntry]) 
             source_root: Some(it.source_root),
             name_error: false,
             series: None,
+            ai_meta: None,
         });
     }
     plan.version = plan.needed_version();
@@ -2159,6 +2168,7 @@ mod tests {
             suggested: "t".into(),
             reason: why.into(),
             series: None,
+            ai_meta: None,
         };
         let p = local(
             &c,
@@ -2190,10 +2200,23 @@ mod tests {
             "suggested": "t", "reason": "r"
         }))
         .unwrap();
-        assert_eq!((old.captured, old.source_root), (None, None));
+        assert_eq!((&old.captured, &old.source_root), (&None, &None));
         assert!(!old.name_error);
         let v = serde_json::to_value(&p.review[1]).unwrap();
         assert!(v.get("captured").is_none(), "{v}");
+        // Display data only: absent when empty, and an old plan has none.
+        assert!(old.ai_meta.is_none());
+        assert!(v.get("ai_meta").is_none(), "{v}");
+        let with = ReviewItem {
+            ai_meta: Some(AiMeta {
+                tags: vec!["cat".into()],
+                description: "A cat.".into(),
+            }),
+            ..old
+        };
+        let back: ReviewItem =
+            serde_json::from_value(serde_json::to_value(&with).unwrap()).unwrap();
+        assert_eq!(back, with);
     }
 
     #[test]
@@ -2246,6 +2269,7 @@ mod tests {
                         suggested: "t".into(),
                         reason: "why".into(),
                         series: None,
+                        ai_meta: None,
                     },
                 ),
             ],
@@ -2405,6 +2429,7 @@ mod tests {
                         suggested: "t".into(),
                         reason: "why".into(),
                         series: None,
+                        ai_meta: None,
                     },
                 ),
                 (entry(tmp.path(), "cam", "u.txt"), Decision::Unmatched),
@@ -2616,6 +2641,7 @@ mod tests {
                 source_root: None,
                 name_error: false,
                 series: None,
+                ai_meta: None,
             }],
             unmatched: vec![tmp.path().join("u.txt")],
             warnings: vec![Warning::MissingServerPath { what: "x".into() }],

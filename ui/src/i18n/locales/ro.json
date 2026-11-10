@@ -479,6 +479,7 @@
   "decide_decided": "hotărât",
   "decide_name_error": "Numele nu a putut fi construit pentru ținta „{{targets}}”",
   "decide_ai_suggests": "IA sugerează:",
+  "ai_tags_label": "Cuvinte cheie",
   "decide_more_reasons_one": "și încă {{count, number}} explicație la fișierele seriei",
   "decide_more_reasons_few": "și încă {{count, number}} explicații la fișierele seriei",
   "decide_more_reasons_other": "și încă {{count, number}} de explicații la fișierele seriei",

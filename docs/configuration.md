@@ -766,6 +766,12 @@ routing; they are only written into the file's metadata:
   `XMP-dc:Description`; videos in MP4/MOV get the same XMP tags. Keywords the file already has are
   kept (and not repeated); an existing description is never replaced. exiftool cannot write
   WebM/MKV: such an output is placed without them, with a warning.
+- **Older answers are asked again once.** Answers cached before keywords and a description were
+  required carry neither, so the next scan sends those files to the model again (a paid request) and
+  stores the new answer in place of the old one. The cost estimate (`--estimate`, and the one in the
+  GUI) counts them as files to send, so it shows how many there are. The cache key is unchanged.
+  The review screens (Decide and the explain panel) show the description and keywords next to the
+  reason.
 - They are written before the output is verified against its source, so verification sees the
   final file; capture dates, GPS, dimensions and duration are untouched.
 

@@ -451,6 +451,7 @@
   "decide_decided": "entschieden",
   "decide_name_error": "Der Name konnte für das Ziel „{{targets}}“ nicht erstellt werden",
   "decide_ai_suggests": "KI schlägt vor:",
+  "ai_tags_label": "Schlagwörter",
   "decide_more_reasons_one": "und {{count, number}} weitere Erklärung zu Dateien der Serie",
   "decide_more_reasons_other": "und {{count, number}} weitere Erklärungen zu Dateien der Serie",
   "decide_series_files": "Dateien der Serie",
