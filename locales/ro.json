@@ -736,5 +736,8 @@
   "undo.no_such_file": "nu este un fișier al acestei rulări: %{path}",
   "history.no_files_selected": "Alege cel puțin un fișier de anulat.",
   "cli.undo.files": "Anulează doar acest fișier sursă al rulării (repetabil)",
-  "cli.undo.targets": "Anulează doar fișierele acestei ținte (repetabil)"
+  "cli.undo.targets": "Anulează doar fișierele acestei ținte (repetabil)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "backendul AI claude-code are nevoie de CLI-ul Claude Code (`claude`) în PATH, conectat la abonamentul Claude",
+  "config.ai_backend": "[ai] backend necunoscut „%{name}”: folosiți \"api\" sau \"claude-code\""
 }

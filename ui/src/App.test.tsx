@@ -11,7 +11,14 @@ const status: AppStatus = {
   config_warnings: [],
   tools: {
     ok: true,
-    items: [{ name: "ffmpeg", required: true, path: "/usr/bin/ffmpeg", version: "ffmpeg 8" }],
+    items: [
+      {
+        name: "ffmpeg",
+        required: true,
+        path: "/usr/bin/ffmpeg",
+        version: "ffmpeg 8",
+      },
+    ],
     capabilities: { svtav1: true, opus: true, vidstab: false },
   },
   api_key_source: "none",
@@ -38,8 +45,23 @@ const summary: ConfigSummary = {
       name: "Screenshots",
       kind: "folders",
       ai: false,
-      filters: [{ sources: ["camera"], match: "Screenshot_*", exclude: null, ai: null, conditions: [] }],
-      outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
+      filters: [
+        {
+          sources: ["camera"],
+          match: "Screenshot_*",
+          exclude: null,
+          ai: null,
+          conditions: [],
+        },
+      ],
+      outputs: [
+        {
+          dir: "~/Shots",
+          server_dir: null,
+          content: [],
+          rename: [{ preset: "capture-date", mask: null }],
+        },
+      ],
     },
   ],
   presets: { name: [], content: [], masks: [] },
@@ -47,9 +69,25 @@ const summary: ConfigSummary = {
 };
 
 const builtins: PresetSet = {
-  name: [{ name: "capture-date", kind: "name", description: "by capture date", mask: "*", mask_expanded: "*", params: {} }],
+  name: [
+    {
+      name: "capture-date",
+      kind: "name",
+      description: "by capture date",
+      mask: "*",
+      mask_expanded: "*",
+      params: {},
+    },
+  ],
   content: [
-    { name: "avif-high", kind: "photo", description: "AVIF", mask: "@photo-original", mask_expanded: "*.jpg", params: {} },
+    {
+      name: "avif-high",
+      kind: "photo",
+      description: "AVIF",
+      mask: "@photo-original",
+      mask_expanded: "*.jpg",
+      params: {},
+    },
   ],
   masks: [{ name: "photo", source: "*.jpg", expanded: "*.jpg" }],
 };
@@ -79,15 +117,31 @@ const outcome: EditOutcome = {
       {
         name: "Screenshots",
         kind: "folders",
-        filters: [{ sources: ["camera"], match: ["Screenshot_*"], exclude: [], ai: null, expand: null, conditions: {} }],
-        outputs: [{ dir: "~/Shots", server_dir: null, content: [], rename: [{ preset: "capture-date", mask: null }] }],
+        filters: [
+          {
+            sources: ["camera"],
+            match: ["Screenshot_*"],
+            exclude: [],
+            ai: null,
+            expand: null,
+            conditions: {},
+          },
+        ],
+        outputs: [
+          {
+            dir: "~/Shots",
+            server_dir: null,
+            content: [],
+            rename: [{ preset: "capture-date", mask: null }],
+          },
+        ],
       },
     ],
     masks: [],
   },
 };
 
-const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (cmd) => {
+const handler = async (cmd: string): Promise<unknown> => {
   switch (cmd) {
     case "current_plan":
       return null;
@@ -113,9 +167,13 @@ const invoke = vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(async (c
     default:
       throw new Error(`unexpected ${cmd}`);
   }
-});
+};
+const invoke =
+  vi.fn<(cmd: string, args?: unknown) => Promise<unknown>>(handler);
 
-vi.mock("@tauri-apps/api/core", () => ({ invoke: (cmd: string, args?: unknown) => invoke(cmd, args) }));
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (cmd: string, args?: unknown) => invoke(cmd, args),
+}));
 vi.mock("@tauri-apps/api/event", () => ({ listen: async () => () => {} }));
 
 const { default: App } = await import("./App");
@@ -129,8 +187,17 @@ describe("app shell", () => {
   it("lists the screens in the nav, the main flow first", () => {
     render(<App />);
     const nav = screen.getByRole("navigation", { name: "Sections" });
-    const items = within(nav).getAllByRole("button").map((b) => b.textContent);
-    expect(items).toEqual(["Sort", "Sources", "Targets", "Presets", "History", "Settings"]);
+    const items = within(nav)
+      .getAllByRole("button")
+      .map((b) => b.textContent);
+    expect(items).toEqual([
+      "Sort",
+      "Sources",
+      "Targets",
+      "Presets",
+      "History",
+      "Settings",
+    ]);
   });
 
   it("opens the sorting flow by default and switches screens", async () => {
@@ -141,10 +208,16 @@ describe("app shell", () => {
 
     const nav = screen.getByRole("navigation", { name: "Sections" });
     await user.click(within(nav).getByRole("button", { name: "Sources" }));
-    expect(await screen.findByRole("button", { name: "camera" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("button", { name: "camera" }),
+    ).toBeInTheDocument();
     await user.click(within(nav).getByRole("button", { name: "Targets" }));
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Targets");
-    expect(within(nav).getByRole("button", { name: "Targets" })).toHaveAttribute("aria-current", "page");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Targets",
+    );
+    expect(
+      within(nav).getByRole("button", { name: "Targets" }),
+    ).toHaveAttribute("aria-current", "page");
     await user.click(screen.getByRole("button", { name: /Screenshots/ }));
     expect(screen.getByText("capture-date")).toBeInTheDocument();
 
@@ -162,6 +235,27 @@ describe("app shell", () => {
     expect(screen.getByText("No AI key")).toBeInTheDocument();
     expect(screen.getByText("Config OK")).toBeInTheDocument();
   });
+
+  it("shows the Claude Code backend instead of the key when it is selected", async () => {
+    invoke.mockImplementation(async (cmd) =>
+      cmd === "app_status"
+        ? {
+            ...status,
+            ai_backend: "claude-code",
+            claude_path: "/usr/bin/claude",
+          }
+        : handler(cmd),
+    );
+    try {
+      render(<App />);
+      expect(
+        await screen.findByText("AI: Claude Code (subscription)"),
+      ).toBeInTheDocument();
+      expect(screen.queryByText("No AI key")).not.toBeInTheDocument();
+    } finally {
+      invoke.mockImplementation(handler);
+    }
+  });
 });
 
 describe("screen in the URL hash", () => {
@@ -169,7 +263,9 @@ describe("screen in the URL hash", () => {
     const user = userEvent.setup();
     history.replaceState(null, "", "#presets");
     render(<App />);
-    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Presets");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent(
+      "Presets",
+    );
     await user.click(screen.getByRole("button", { name: "Sort" }));
     expect(location.hash).toBe("#flow");
     history.replaceState(null, "", "#");

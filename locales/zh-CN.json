@@ -722,5 +722,8 @@
   "undo.no_such_file": "不是此次运行的文件：%{path}",
   "history.no_files_selected": "请至少选择一个要撤销的文件。",
   "cli.undo.files": "只撤销运行中的这个源文件（可重复）",
-  "cli.undo.targets": "只撤销此目标的文件（可重复）"
+  "cli.undo.targets": "只撤销此目标的文件（可重复）",
+  "ai.claude_code_failed": "Claude Code：%{error}",
+  "ai.no_claude_code": "claude-code AI 后端需要 PATH 中的 Claude Code CLI（`claude`），并已登录您的 Claude 订阅",
+  "config.ai_backend": "未知的 [ai] backend “%{name}”：请使用 \"api\" 或 \"claude-code\""
 }

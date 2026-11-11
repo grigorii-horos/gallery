@@ -743,5 +743,8 @@
   "undo.no_such_file": "це не файл цього запуску: %{path}",
   "history.no_files_selected": "Виберіть принаймні один файл для скасування.",
   "cli.undo.files": "Скасувати лише цей вихідний файл запуску (можна повторювати)",
-  "cli.undo.targets": "Скасувати лише файли цієї цілі (можна повторювати)"
+  "cli.undo.targets": "Скасувати лише файли цієї цілі (можна повторювати)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "для AI-бекенда claude-code потрібен Claude Code CLI (`claude`) у PATH із входом у вашу підписку Claude",
+  "config.ai_backend": "невідомий [ai] backend «%{name}»: вкажіть \"api\" або \"claude-code\""
 }

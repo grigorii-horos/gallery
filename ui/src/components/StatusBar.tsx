@@ -10,13 +10,21 @@ const KEY_TEXT: Record<AppStatus["api_key_source"], MessageKey> = {
 };
 
 /// Bottom bar: config health, tools, AI key, config path.
-export function StatusBar({ status, loading }: { status: AppStatus | null; loading: boolean }) {
+export function StatusBar({
+  status,
+  loading,
+}: {
+  status: AppStatus | null;
+  loading: boolean;
+}) {
   const { t } = useTranslation();
   const [toolsOpen, setToolsOpen] = useState(false);
   if (!status) {
     return (
       <footer className="statusbar">
-        <span className="st muted">{loading ? t("status_checking") : t("status_unavailable")}</span>
+        <span className="st muted">
+          {loading ? t("status_checking") : t("status_unavailable")}
+        </span>
       </footer>
     );
   }
@@ -49,13 +57,21 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
           {t("status_tools", { found, total: required.length })}
         </button>
         {toolsOpen && (
-          <div className="popover" role="dialog" aria-label={t("status_tools_aria")}>
+          <div
+            className="popover"
+            role="dialog"
+            aria-label={t("status_tools_aria")}
+          >
             <table className="grid compact">
               <tbody>
                 {status.tools.items.map((tool) => (
                   <tr key={tool.name}>
                     <th scope="row">{tool.name}</th>
-                    <td className={tool.path ? "" : tool.required ? "bad-text" : "muted"}>
+                    <td
+                      className={
+                        tool.path ? "" : tool.required ? "bad-text" : "muted"
+                      }
+                    >
                       {tool.path
                         ? (tool.version ?? tool.path)
                         : tool.required
@@ -76,10 +92,26 @@ export function StatusBar({ status, loading }: { status: AppStatus | null; loadi
           </div>
         )}
       </span>
-      <span className={`st ${status.api_key_source === "none" ? "warn" : "ok"}`}>
-        <i className="dot" />
-        {t(KEY_TEXT[status.api_key_source])}
-      </span>
+      {status.ai_backend === "claude-code" ? (
+        <span
+          className={`st ${status.claude_path ? "ok" : "warn"}`}
+          title={status.claude_path ?? undefined}
+        >
+          <i className="dot" />
+          {t(
+            status.claude_path
+              ? "status_ai_claude_code"
+              : "status_ai_no_claude",
+          )}
+        </span>
+      ) : (
+        <span
+          className={`st ${status.api_key_source === "none" ? "warn" : "ok"}`}
+        >
+          <i className="dot" />
+          {t(KEY_TEXT[status.api_key_source])}
+        </span>
+      )}
       <span className="st path grow" title={status.config_path}>
         <bdi>{status.config_path}</bdi>
       </span>

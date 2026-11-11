@@ -926,6 +926,9 @@ impl Default for PngPreset {
 #[serde(default)]
 #[serde(deny_unknown_fields)]
 pub struct AiSettings {
+    /// `api` (the Messages API with an API key) or `claude-code` (headless
+    /// runs of the Claude Code CLI on the user's own Claude subscription).
+    pub backend: String,
     pub model: String,
     pub effort: String,
     pub jobs: usize,
@@ -940,6 +943,7 @@ pub struct AiSettings {
 impl Default for AiSettings {
     fn default() -> Self {
         Self {
+            backend: "api".into(),
             model: "claude-sonnet-5-5".into(),
             effort: "low".into(),
             jobs: 8,
@@ -1394,6 +1398,12 @@ impl Config {
     /// non-empty AI descriptions, no `expand` with `ai`, no outputs on
     /// `trash`/`keep` targets; and safe name templates.
     pub fn validate(&self) -> Result<()> {
+        if !["api", crate::ai::claude_code::BACKEND].contains(&self.ai.backend.as_str()) {
+            return Err(Error::Config(crate::t!(
+                "config.ai_backend",
+                name = self.ai.backend
+            )));
+        }
         self.check_builtin_clash().map_err(Error::Config)?;
         self.check_name_templates().map_err(Error::Config)?;
         self.check_masks().map_err(Error::Config)?;
@@ -2174,6 +2184,15 @@ dir = "/o"
         let mut c = example();
         c.targets[3].filters[0].sources = vec!["nope2".into()];
         assert!(err(&c).contains("nope2"));
+    }
+
+    #[test]
+    fn validate_checks_the_ai_backend() {
+        let mut c = example();
+        c.ai.backend = "claude-code".into();
+        assert!(c.validate().is_ok());
+        c.ai.backend = "openai".into();
+        assert!(err(&c).contains("openai"));
     }
 
     #[test]

@@ -22,6 +22,8 @@
   "status_key_env": "AI key from the environment",
   "status_key_file": "AI key from a file",
   "status_key_none": "No AI key",
+  "status_ai_claude_code": "AI: Claude Code (subscription)",
+  "status_ai_no_claude": "AI: Claude Code CLI not found",
   "status_checking": "Checking config and tools…",
   "status_unavailable": "Status unavailable",
   "status_config_warnings_one": "Config OK, {{count, number}} warning",

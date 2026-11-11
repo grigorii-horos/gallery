@@ -22,6 +22,8 @@
   "status_key_env": "Chave de IA do ambiente",
   "status_key_file": "Chave de IA de um arquivo",
   "status_key_none": "Sem chave de IA",
+  "status_ai_claude_code": "IA: Claude Code (assinatura)",
+  "status_ai_no_claude": "IA: CLI do Claude Code não encontrada",
   "status_checking": "Verificando a configuração e as ferramentas…",
   "status_unavailable": "Status indisponível",
   "status_config_warnings_one": "Configuração OK, {{count, number}} aviso",

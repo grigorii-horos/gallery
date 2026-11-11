@@ -743,5 +743,8 @@
   "undo.no_such_file": "to nie jest plik tego uruchomienia: %{path}",
   "history.no_files_selected": "Wybierz co najmniej jeden plik do cofnięcia.",
   "cli.undo.files": "Cofnij tylko ten plik źródłowy uruchomienia (można powtarzać)",
-  "cli.undo.targets": "Cofnij tylko pliki tego celu (można powtarzać)"
+  "cli.undo.targets": "Cofnij tylko pliki tego celu (można powtarzać)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "backend AI claude-code wymaga Claude Code CLI (`claude`) w PATH, zalogowanego do subskrypcji Claude",
+  "config.ai_backend": "nieznany [ai] backend „%{name}”: użyj \"api\" lub \"claude-code\""
 }

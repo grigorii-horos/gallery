@@ -22,6 +22,8 @@
   "status_key_env": "Ключ ШІ із середовища",
   "status_key_file": "Ключ ШІ з файлу",
   "status_key_none": "Немає ключа ШІ",
+  "status_ai_claude_code": "ШІ: Claude Code (підписка)",
+  "status_ai_no_claude": "ШІ: не знайдено Claude Code CLI",
   "status_checking": "Перевірка конфігурації та інструментів…",
   "status_unavailable": "Стан недоступний",
   "status_config_warnings_one": "Конфігурація в порядку, {{count, number}} попередження",

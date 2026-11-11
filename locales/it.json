@@ -736,5 +736,8 @@
   "undo.no_such_file": "non è un file di questa esecuzione: %{path}",
   "history.no_files_selected": "Scegli almeno un file da annullare.",
   "cli.undo.files": "Annulla solo questo file sorgente dell'esecuzione (ripetibile)",
-  "cli.undo.targets": "Annulla solo i file di questa destinazione (ripetibile)"
+  "cli.undo.targets": "Annulla solo i file di questa destinazione (ripetibile)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "il backend IA claude-code richiede la CLI di Claude Code (`claude`) nel PATH, con accesso al proprio abbonamento Claude",
+  "config.ai_backend": "[ai] backend sconosciuto «%{name}»: usare \"api\" o \"claude-code\""
 }

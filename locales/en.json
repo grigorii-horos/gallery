@@ -729,5 +729,8 @@
   "undo.no_such_file": "not a file of this run: %{path}",
   "history.no_files_selected": "Select at least one file to undo.",
   "cli.undo.files": "Undo only this source file of the run (repeatable)",
-  "cli.undo.targets": "Undo only the files of this target (repeatable)"
+  "cli.undo.targets": "Undo only the files of this target (repeatable)",
+  "ai.claude_code_failed": "Claude Code: %{error}",
+  "ai.no_claude_code": "the claude-code AI backend needs the Claude Code CLI (`claude`) on PATH, signed in with your Claude subscription",
+  "config.ai_backend": "unknown [ai] backend \"%{name}\": use \"api\" or \"claude-code\""
 }
